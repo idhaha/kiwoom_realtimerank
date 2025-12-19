@@ -11,10 +11,10 @@ const secretKey = process.env.KIWOOM_SECRETKEY;
 async function getAccessToken(appKey, secretKey) {
     try {
         const response = await axios.post(
-            "https://api.kiwoom.com/oauth/token",
+            "https://api.kiwoom.com/oauth2/token",
             {
                 appkey: appKey,
-                appsecret: secretKey,
+                secretkey: secretKey,
                 grant_type: "client_credentials",
             },
             {
@@ -24,10 +24,12 @@ async function getAccessToken(appKey, secretKey) {
             }
         );
 
-        if (response.data && response.data.access_token) {
-            return response.data.access_token;
+
+        const token = response.data.token || response.data.access_token;
+        if (token) {
+            return token;
         } else {
-            throw new Error("토큰 발급 실패: access_token이 없습니다");
+            throw new Error("토큰 발급 실패: 응답에 token 필드가 없습니다");
         }
     } catch (error) {
         console.error("토큰 발급 에러:", error.response?.data || error.message);
