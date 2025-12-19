@@ -32,8 +32,10 @@ async function getAccessToken(appKey, secretKey) {
             throw new Error("토큰 발급 실패: 응답에 token 필드가 없습니다");
         }
     } catch (error) {
-        console.error("토큰 발급 에러:", error.response?.data || error.message);
-        throw new Error(`토큰 발급 실패: ${error.message}`);
+        const errorData = error.response?.data;
+        console.error("토큰 발급 에러:", errorData || error.message);
+        const detailedMessage = errorData ? JSON.stringify(errorData) : error.message;
+        throw new Error(`토큰 발급 실패: ${detailedMessage}`);
     }
 }
 
@@ -105,13 +107,15 @@ module.exports = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("API 호출 에러:", error.response?.data || error.message);
+        const errorData = error.response?.data;
+        console.error("API 호출 에러:", errorData || error.message);
 
         res.status(500).json({
             success: false,
             error: error.message,
-            details: error.response?.data || null,
+            details: errorData || null,
             timestamp: new Date().toISOString(),
+            phase: accessToken ? "data_fetching" : "token_issuance"
         });
     }
 };

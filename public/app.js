@@ -128,7 +128,19 @@ async function loadData() {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            let errorMessageText = `HTTP ${response.status}: ${response.statusText}`;
+            try {
+                const errorJson = await response.json();
+                if (errorJson.error) {
+                    errorMessageText += ` (${errorJson.error})`;
+                    if (errorJson.details) {
+                        errorMessageText += ` - Details: ${JSON.stringify(errorJson.details)}`;
+                    }
+                }
+            } catch (e) {
+                // JSON 파싱 실패하면 기본 에러 메시지 유지
+            }
+            throw new Error(errorMessageText);
         }
 
         const result = await response.json();
