@@ -66,9 +66,21 @@ module.exports = async (req, res) => {
         }
 
         // 1. Access Token 발급
-        console.log("키움 API 토큰 발급 중...");
-        const accessToken = await getAccessToken(appKey, secretKey);
-        console.log("토큰 발급 완료");
+        let accessToken = null;
+        try {
+            console.log("키움 API 토큰 발급 중...");
+            accessToken = await getAccessToken(appKey, secretKey);
+            console.log("토큰 발급 완료");
+        } catch (tokenError) {
+            console.error("토큰 발급 실패:", tokenError.message);
+            res.status(500).json({
+                success: false,
+                error: tokenError.message,
+                phase: "token_issuance",
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
 
         // 2. 실시간종목조회순위 API 호출 (POST 방식 및 필수 파라미터 적용)
         console.log("실시간종목조회순위 데이터 조회 중...");
@@ -108,14 +120,14 @@ module.exports = async (req, res) => {
 
     } catch (error) {
         const errorData = error.response?.data;
-        console.error("API 호출 에러:", errorData || error.message);
+        console.error("데이터 조회 에러:", errorData || error.message);
 
         res.status(500).json({
             success: false,
             error: error.message,
             details: errorData || null,
-            timestamp: new Date().toISOString(),
-            phase: accessToken ? "data_fetching" : "token_issuance"
+            phase: "data_fetching",
+            timestamp: new Date().toISOString()
         });
     }
 };
