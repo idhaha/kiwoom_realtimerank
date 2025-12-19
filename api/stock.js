@@ -1,9 +1,8 @@
 const axios = require('axios');
 
 // 환경변수에서 API 키 가져오기
-// Vercel 프로젝트 설정에서 Environment Variables로 등록해야 함
-const appKey = process.env.KIWOOM_APPKEY;
-const secretKey = process.env.KIWOOM_SECRETKEY;
+const appKey = (process.env.KIWOOM_APPKEY || "").trim();
+const secretKey = (process.env.KIWOOM_SECRETKEY || "").trim();
 
 /**
  * 키움 API Access Token 발급
@@ -20,7 +19,9 @@ async function getAccessToken(appKey, secretKey) {
             {
                 headers: {
                     "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 },
+                timeout: 5000
             }
         );
 
@@ -29,7 +30,9 @@ async function getAccessToken(appKey, secretKey) {
         if (token) {
             return token;
         } else {
-            throw new Error("토큰 발급 실패: 응답에 token 필드가 없습니다");
+            const bodyKeys = Object.keys(response.data || {}).join(', ');
+            const bodyStr = JSON.stringify(response.data);
+            throw new Error(`토큰 발급 실패: 응답에 token 필드가 없습니다. Keys: [${bodyKeys}], Body: ${bodyStr}`);
         }
     } catch (error) {
         const errorData = error.response?.data;
