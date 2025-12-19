@@ -86,20 +86,26 @@ function renderTable(data) {
         return;
     }
 
-    tableBody.innerHTML = stocks.map((stock, index) => `
-        <tr class="fade-in">
-            <td>${index + 1}</td>
-            <td>${stock.code || stock.stock_code || '-'}</td>
-            <td style="font-weight: 600; color: var(--text-primary);">
-                ${stock.name || stock.stock_name || '-'}
-            </td>
-            <td>${stock.price ? formatNumber(stock.price) : '-'}</td>
-            <td class="${getPriceClass(stock.change_rate || stock.rate)}">
-                ${formatChangeRate(stock.change_rate || stock.rate || 0)}
-            </td>
-            <td>${stock.volume ? formatNumber(stock.volume) : '-'}</td>
-        </tr>
-    `).join('');
+    tableBody.innerHTML = stocks.map((stock, index) => {
+        // 가격과 등락률에서 기호(+/-) 제거 및 숫자 추출
+        const price = stock.past_curr_prc ? stock.past_curr_prc.replace(/[+,-]/g, '') : '-';
+        const changeRate = stock.base_comp_chgr || '0';
+
+        return `
+            <tr class="fade-in">
+                <td>${stock.bigd_rank || (index + 1)}</td>
+                <td>${stock.stk_cd || stock.code || '-'}</td>
+                <td style="font-weight: 600; color: var(--text-primary);">
+                    ${stock.stk_nm || '-'}
+                </td>
+                <td>${price ? formatNumber(price) : '-'}</td>
+                <td class="${getPriceClass(changeRate)}">
+                    ${formatChangeRate(changeRate)}
+                </td>
+                <td>${stock.trde_qty ? formatNumber(stock.trde_qty) : '-'}</td>
+            </tr>
+        `;
+    }).join('');
 }
 
 /**

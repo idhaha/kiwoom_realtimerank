@@ -68,30 +68,39 @@ module.exports = async (req, res) => {
         const accessToken = await getAccessToken(appKey, secretKey);
         console.log("토큰 발급 완료");
 
-        // 2. 실시간종목조회순위 API 호출
+        // 2. 실시간종목조회순위 API 호출 (POST 방식 및 필수 파라미터 적용)
         console.log("실시간종목조회순위 데이터 조회 중...");
 
-        // 쿼리 파라미터 전달
-        const queryParams = req.query;
-
-        const apiResponse = await axios.get(
+        const apiResponse = await axios.post(
             "https://api.kiwoom.com/api/dostk/stkinfo",
+            {
+                "qry_tp": "1",         // 조회구분 (1: 실시간조회순위)
+                "mrkt_tp": "000",      // 시장구분 (000: 전체, 001: 코스피, 101: 코스닥)
+                "sort_tp": "1",        // 정렬구분 (1: 순회수정 등)
+                "trde_qty_tp": "0000", // 거래량구분
+                "stk_cnd": "0",        // 종목조건
+                "crd_cnd": "0",        // 신용조건
+                "stex_tp": "1"         // 거래소구분
+            },
             {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${accessToken}`,
-                    "api_id": "ka00198",
-                },
-                params: queryParams,
+                    "api-id": "ka00198",
+                }
             }
         );
 
         console.log("데이터 조회 완료");
 
+        // 3. 응답 데이터 가공 (item_inq_rank 추출)
+        const rawData = apiResponse.data;
+        const stocks = rawData.item_inq_rank || [];
+
         // 3. 응답 반환
         res.status(200).json({
             success: true,
-            data: apiResponse.data,
+            data: stocks,
             timestamp: new Date().toISOString(),
         });
 

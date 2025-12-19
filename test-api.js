@@ -38,13 +38,23 @@ async function testKiwoomAPI() {
         console.log(`추출된 Access Token: ${accessToken.substring(0, 10)}...`);
 
         console.log("\n2. 실시간 종목 순위 조회 시도...");
-        const dataResponse = await axios.get(
+        // ka00198 API 필수 파라미터 보강 (qry_tp 추가)
+        const dataResponse = await axios.post(
             "https://api.kiwoom.com/api/dostk/stkinfo",
+            {
+                "qry_tp": "1",         // 조회구분 (1: 실시간조회순위)
+                "mrkt_tp": "000",      // 시장구분 (000: 전체, 001: 코스피, 101: 코스닥)
+                "sort_tp": "1",        // 정렬구분 (1: 순회수정 등)
+                "trde_qty_tp": "0000", // 거래량구분
+                "stk_cnd": "0",        // 종목조건
+                "crd_cnd": "0",        // 신용조건
+                "stex_tp": "1"         // 거래소구분
+            },
             {
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${accessToken}`,
-                    "api_id": "ka00198",
+                    "api-id": "ka00198",
                 }
             }
         );
