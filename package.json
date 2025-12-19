@@ -1,0 +1,25 @@
+{
+    "name": "kiwoom-realtimerank",
+    "version": "1.0.0",
+    "description": "키움증권 실시간종목조회순위 웹서비스",
+    "main": "api/stock.js",
+    "scripts": {
+        "dev": "vercel dev",
+        "build": "echo 'No build step required'",
+        "start": "vercel dev"
+    },
+    "keywords": [
+        "kiwoom",
+        "stock",
+        "realtime",
+        "vercel"
+    ],
+    "author": "idhaha",
+    "license": "MIT",
+    "dependencies": {
+        "axios": "^1.6.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}

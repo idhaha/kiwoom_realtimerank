@@ -1,6 +1,6 @@
 # 키움증권 실시간종목조회순위 웹서비스
 
-Firebase를 활용한 키움증권 실시간종목조회순위 데이터 표시 웹 애플리케이션입니다.
+Vercel을 활용한 키움증권 실시간종목조회순위 데이터 표시 웹 애플리케이션입니다.
 
 ## 📋 기능
 
@@ -8,100 +8,90 @@ Firebase를 활용한 키움증권 실시간종목조회순위 데이터 표시 
 - ✅ 자동 새로고침 (30초 간격)
 - ✅ 현대적이고 아름다운 다크모드 UI
 - ✅ 반응형 디자인 (모바일/태블릿/데스크톱)
-- ✅ Firebase Functions로 안전한 API 키 관리
-- ✅ Firebase Hosting으로 빠른 배포
+- ✅ Vercel Serverless Functions로 안전한 API 키 관리
+- ✅ Vercel로 빠른 배포 및 자동 HTTPS
 
 ## 🏗️ 프로젝트 구조
 
 ```
 d:\Program\Kiwoom\
-├── functions/              # Firebase Functions (백엔드)
-│   ├── index.js           # 키움 API 호출 로직
-│   └── package.json       # 백엔드 의존성
-├── public/                # Firebase Hosting (프론트엔드)
+├── api/                    # Vercel Serverless Functions
+│   └── stock.js           # 키움 API 호출 로직
+├── public/                # 정적 파일 (프론트엔드)
 │   ├── index.html         # 메인 HTML
 │   ├── style.css          # 스타일시트
 │   └── app.js             # 클라이언트 JavaScript
-├── firebase.json          # Firebase 설정
-└── .firebaserc            # Firebase 프로젝트 ID
+├── package.json           # 프로젝트 의존성
+├── vercel.json            # Vercel 설정
+└── .gitignore             # Git 제외 파일
 ```
 
-## 🚀 시작하기
+## 🚀 Vercel 배포 가이드
 
-### 1. 사전 준비
+### 1. GitHub Repository 준비
 
-- Node.js 18 이상 설치
-- Firebase CLI 설치
-  ```bash
-  npm install -g firebase-tools
-  ```
+이미 완료! ✅
+- Repository: https://github.com/idhaha/kiwoom_realtimerank
 
-### 2. Firebase 프로젝트 생성
+### 2. Vercel에 프로젝트 Import
 
-1. [Firebase Console](https://console.firebase.google.com/)에서 새 프로젝트 생성
-2. 프로젝트 ID를 복사
+1. **Vercel 로그인**
+   - https://vercel.com 접속
+   - GitHub 계정으로 로그인
 
-### 3. 프로젝트 설정
+2. **새 프로젝트 생성**
+   - Dashboard에서 "Add New..." → "Project" 클릭
+   - GitHub repository 연동 (처음이라면 Vercel에 GitHub 접근 권한 부여)
 
-1. `.firebaserc` 파일 수정
-   ```json
-   {
-     "projects": {
-       "default": "여기에_실제_프로젝트_ID_입력"
-     }
-   }
-   ```
+3. **Repository 선택**
+   - `idhaha/kiwoom_realtimerank` 선택
+   - "Import" 클릭
 
-2. `public/app.js` 파일에서 API URL 수정
-   ```javascript
-   // YOUR_PROJECT_ID를 실제 프로젝트 ID로 변경
-   const API_URL = 'https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/getStockRanking';
-   ```
+4. **프로젝트 설정**
+   - **Project Name**: `kiwoom-realtimerank` (또는 원하는 이름)
+   - **Framework Preset**: Other (자동 감지됨)
+   - **Root Directory**: `./` (기본값)
+   - **Build Command**: 비워두기 (필요 없음)
+   - **Output Directory**: `public` (자동 설정됨)
 
-### 4. Firebase 로그인
+### 3. 환경변수 설정 ⚠️ 중요!
+
+배포 전에 반드시 환경변수를 설정해야 합니다:
+
+1. **Environment Variables 섹션으로 이동**
+2. **다음 환경변수 추가**:
+
+   | Name | Value |
+   |------|-------|
+   | `KIWOOM_APPKEY` | 발급받은 APP KEY |
+   | `KIWOOM_SECRETKEY` | 발급받은 SECRET KEY |
+
+3. **Environment**: `Production`, `Preview`, `Development` 모두 선택
+
+### 4. 배포
+
+1. **Deploy 버튼 클릭**
+2. 배포 진행 상황 확인 (약 1-2분 소요)
+3. 배포 완료 후 URL 확인 (예: `https://kiwoom-realtimerank.vercel.app`)
+
+### 5. 배포 확인
+
+1. 제공된 URL 접속
+2. 실시간종목조회순위 데이터가 표시되는지 확인
+3. 새로고침 버튼 작동 확인
+4. 자동 새로고침 기능 확인 (30초 대기)
+
+## 🔄 업데이트 배포
+
+코드를 수정한 후:
 
 ```bash
-firebase login
+git add .
+git commit -m "업데이트 내용"
+git push
 ```
 
-### 5. 의존성 설치
-
-```bash
-cd functions
-npm install
-cd ..
-```
-
-### 6. 환경변수 설정
-
-키움 API 키를 Firebase Functions 환경변수로 설정:
-
-```bash
-firebase functions:config:set kiwoom.appkey="발급받은_APP_KEY" kiwoom.secretkey="발급받은_SECRET_KEY"
-```
-
-### 7. 로컬 테스트 (선택사항)
-
-Firebase 에뮬레이터로 로컬 테스트:
-
-```bash
-firebase emulators:start
-```
-
-브라우저에서 `http://localhost:5000` 접속
-
-> **주의**: 로컬 테스트 시 환경변수가 작동하지 않을 수 있습니다. 실제 배포 후 테스트를 권장합니다.
-
-### 8. 배포
-
-```bash
-firebase deploy
-```
-
-배포가 완료되면 Hosting URL이 표시됩니다:
-```
-Hosting URL: https://YOUR_PROJECT_ID.web.app
-```
+→ Vercel이 자동으로 감지하고 재배포합니다! 🎉
 
 ## 🔑 키움 API 정보
 
@@ -124,13 +114,15 @@ Hosting URL: https://YOUR_PROJECT_ID.web.app
 - 부드러운 애니메이션 및 호버 효과
 - 반응형 레이아웃
 
-## 📊 Firebase 무료 플랜 한도
+## 📊 Vercel 무료 플랜 한도
 
-이 프로젝트는 Firebase 무료 플랜(Spark Plan)으로 충분히 운영 가능합니다:
+이 프로젝트는 Vercel 무료 플랜(Hobby Plan)으로 충분히 운영 가능합니다:
 
-- **Functions 호출**: 월 2,000,000회 (충분함!)
-- **Hosting 전송량**: 월 10GB
-- **Functions 실행 시간**: 월 400,000 GB-초
+- **Serverless Functions 실행 시간**: 월 100 GB-시간
+- **대역폭**: 월 100GB
+- **빌드 시간**: 월 100시간
+- **자동 HTTPS**: 무료
+- **커스텀 도메인**: 무료
 
 ## 🔧 문제 해결
 
@@ -138,13 +130,39 @@ Hosting URL: https://YOUR_PROJECT_ID.web.app
 ```
 API 키가 설정되지 않았습니다
 ```
-→ `firebase functions:config:set` 명령으로 환경변수를 설정했는지 확인하세요.
+→ Vercel Dashboard → 프로젝트 → Settings → Environment Variables에서 `KIWOOM_APPKEY`와 `KIWOOM_SECRETKEY`를 설정했는지 확인하세요.
 
-### CORS 오류
-→ Firebase Functions에 CORS가 설정되어 있습니다. 문제가 지속되면 Firebase Console에서 Functions 로그를 확인하세요.
+### 배포 실패
+→ Vercel Dashboard → Deployments에서 로그를 확인하세요.
 
 ### 데이터가 표시되지 않음
 → 브라우저 개발자 도구(F12)의 Console 탭에서 에러 메시지를 확인하세요.
+
+### CORS 오류
+→ `api/stock.js`에 CORS 헤더가 설정되어 있습니다. 문제가 지속되면 Vercel 로그를 확인하세요.
+
+## 🛠️ 로컬 개발
+
+로컬에서 테스트하려면:
+
+```bash
+# 의존성 설치
+npm install
+
+# Vercel CLI 설치 (전역)
+npm install -g vercel
+
+# 로컬 개발 서버 시작
+vercel dev
+```
+
+브라우저에서 `http://localhost:3000` 접속
+
+> **주의**: 로컬 개발 시 환경변수를 `.env` 파일에 설정해야 합니다:
+> ```
+> KIWOOM_APPKEY=your_app_key
+> KIWOOM_SECRETKEY=your_secret_key
+> ```
 
 ## 📝 라이선스
 
@@ -152,9 +170,10 @@ API 키가 설정되지 않았습니다
 
 ## 🙋 도움말
 
-- [Firebase 문서](https://firebase.google.com/docs)
+- [Vercel 문서](https://vercel.com/docs)
 - [키움증권 API 문서](https://apiportal.kiwoom.com/)
+- [GitHub Repository](https://github.com/idhaha/kiwoom_realtimerank)
 
 ---
 
-**Made with ❤️ using Firebase**
+**Made with ❤️ using Vercel**
