@@ -1,0 +1,235 @@
+@import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600&display=swap');
+
+:root {
+    --primary-color: #0078d4;
+    --secondary-color: #00c2ff;
+    --bg-color: #0f172a;
+    /* 완전히 불투명하게 변경 */
+    --glass-color: rgba(255, 255, 255, 0.1);
+    --text-color: #e2e8f0;
+    --border-color: rgba(255, 255, 255, 0.1);
+    --error-color: #ef4444;
+    --success-color: #22c55e;
+}
+
+* {
+    box-sizing: border-box;
+    /* 모든 요소의 크기 계산을 테두리 기준으로 고정 */
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Pretendard', sans-serif;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f172a;
+    /* 투명도 제거하여 가독성 확보 */
+    color: var(--text-color);
+    overflow: hidden;
+}
+
+.glass-container {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-color);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    user-select: none;
+}
+
+.title-bar {
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    -webkit-app-region: drag;
+}
+
+.title {
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: var(--secondary-color);
+}
+
+.window-controls button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    margin-left: 10px;
+    -webkit-app-region: no-drag;
+    transition: opacity 0.2s;
+}
+
+.window-controls button:hover {
+    opacity: 0.6;
+}
+
+.content {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    overflow: hidden;
+    /* 자식 요소가 창 밖으로 못 나가게 차단 */
+}
+
+.input-group {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 20px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+input {
+    background: var(--glass-color);
+    border: 1px solid var(--border-color);
+    padding: 12px;
+    border-radius: 6px;
+    color: white;
+    outline: none;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+input:focus {
+    border-color: var(--secondary-color);
+}
+
+.button-group {
+    display: flex;
+    gap: 15px;
+}
+
+.btn {
+    flex: 1;
+    padding: 15px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 15px;
+}
+
+.btn.primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+    box-shadow: 0 4px 15px rgba(0, 120, 212, 0.3);
+}
+
+.btn.secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid var(--border-color);
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.2);
+}
+
+.btn.active {
+    background: var(--error-color) !important;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+}
+
+.console-wrapper {
+    flex: 1;
+    background: #000;
+    border-radius: 8px;
+    border: 2px solid var(--secondary-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+    /* 중요: 이 설정이 있어야 내용물에 따라 창이 안 늘어남 */
+}
+
+.console {
+    padding: 15px 35px 15px 15px;
+    /* 여백을 충분히 주어 스크롤바 가시성 확보 */
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #a7f3d0;
+    flex: 1;
+    min-height: 0;
+    /* 중요: 이 설정이 있어야 내용물에 따라 창이 안 늘어남 */
+    overflow-y: scroll !important;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: transparent;
+    user-select: text;
+}
+
+/* 스크롤바 스타일링 */
+.console::-webkit-scrollbar {
+    width: 14px !important;
+    display: block !important;
+}
+
+.console::-webkit-scrollbar-track {
+    background: #000 !important;
+    border-radius: 7px;
+}
+
+.console::-webkit-scrollbar-thumb {
+    background: #00ffcc !important;
+    /* 형광색 */
+    border-radius: 7px;
+    border: 3px solid #000;
+    min-height: 40px;
+    /* 로그가 많아져도 막대가 너무 작아지지 않게 함 */
+}
+
+.console::-webkit-scrollbar-thumb:hover {
+    background: #fff !important;
+}
+
+.status-bar {
+    padding: 10px 20px;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: #94a3b8;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    background: #475569;
+}
+
+.status-dot.online {
+    background: var(--success-color);
+    box-shadow: 0 0 8px var(--success-color);
+}

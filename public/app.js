@@ -20,9 +20,12 @@ let autoRefreshInterval = null;
 /**
  * 상태 업데이트
  */
-function updateStatus(status, message) {
+function updateStatus(status, message, data = {}) {
     statusBadge.className = `status-badge ${status}`;
     statusText.textContent = message;
+    if (data.start_time) {
+        statusText.textContent += ` (Srv Start: ${data.start_time})`;
+    }
 }
 
 /**
@@ -71,9 +74,8 @@ function getPriceClass(rate) {
  * 테이블 렌더링
  */
 function renderTable(data) {
-    // API 응답 구조에 따라 데이터 경로 조정 필요
-    // 현재는 가상의 데이터 구조를 가정
-    const stocks = data.output || data.data || [];
+    // 서버에서 보낸 data 자체가 배열이거나, data.data 혹은 data.output 인지 확인
+    const stocks = Array.isArray(data) ? data : (data.data || data.output || []);
 
     if (!Array.isArray(stocks) || stocks.length === 0) {
         tableBody.innerHTML = `
@@ -86,23 +88,31 @@ function renderTable(data) {
         return;
     }
 
+    console.log("📊 렌더링할 종목 데이터 예시:", stocks[0]);
+
     tableBody.innerHTML = stocks.map((stock, index) => {
-        // 가격과 등락률에서 기호(+/-) 제거 및 숫자 추출
-        const price = stock.past_curr_prc ? stock.past_curr_prc.replace(/[+,-]/g, '') : '-';
         const changeRate = stock.base_comp_chgr || '0';
+        // 거래대금 (api에서 백만원 단위로 오므로 100으로 나눠 '억' 단위로 표시)
+        let trdeAmtRaw = stock.trde_amt ? String(stock.trde_amt).replace(/[+,-]/g, '') : '0';
+        let trdeAmtNum = parseInt(trdeAmtRaw) || 0;
+        const trdeAmtIn100M = (trdeAmtNum / 100).toFixed(0);
+
+        // 시장 구분 표시 (K: 코스피, Q: 코스닥)
+        const cleanCd = (stock.stk_cd || "").replace(/[^0-9a-zA-Z]/g, '');
+        // 시장 구분 표시 (K: 코스피, Q: 코스닥)
+        const marketLabel = stock.mkt_type || '-';
 
         return `
             <tr class="fade-in">
                 <td>${stock.bigd_rank || (index + 1)}</td>
-                <td>${stock.stk_cd || stock.code || '-'}</td>
+                <td class="market-type">${marketLabel}</td>
                 <td style="font-weight: 600; color: var(--text-primary);">
                     ${stock.stk_nm || '-'}
                 </td>
-                <td>${price ? formatNumber(price) : '-'}</td>
                 <td class="${getPriceClass(changeRate)}">
                     ${formatChangeRate(changeRate)}
                 </td>
-                <td>${stock.trde_qty ? formatNumber(stock.trde_qty) : '-'}</td>
+                <td style="font-weight: 500;">${formatNumber(trdeAmtIn100M)}</td>
             </tr>
         `;
     }).join('');
@@ -112,6 +122,7 @@ function renderTable(data) {
  * 데이터 로딩
  */
 async function loadData() {
+    console.log(`Fetching data from: ${API_URL}`);
     try {
         // UI 상태 업데이트
         loadingIndicator.style.display = 'block';
