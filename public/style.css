@@ -35,30 +35,90 @@ body {
 }
 
 .container {
-    max-width: 800px;
-    /* 창 크기를 HTS처럼 컴팩트하게 제한 */
+    max-width: 1400px;
+    /* 2단 레이아웃을 위해 너비 확장 */
     margin: 0 auto;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+@media (max-width: 900px) {
+    .grid-container {
+        grid-template-columns: 1fr;
+    }
+}
+
+.panel {
+    background: var(--bg-card);
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.panel-header h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.panel-controls {
+    display: flex;
+    gap: 0.5rem;
 }
 
 /* Header */
 header {
-    text-align: center;
-    margin-bottom: 1rem;
-    /* 여백 대폭 감소 */
+    margin-bottom: 0.5rem;
+}
+
+.header-single-line {
     display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
 }
 
 h1 {
-    font-size: 1.4rem;
-    /* 제목 크기 축소 */
+    font-size: 1.2rem;
+    font-weight: 400;
+    margin: 0;
+}
+
+h1 strong {
     font-weight: 700;
+}
+
+.status-info {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.status-separator {
+    color: var(--text-muted);
+    opacity: 0.5;
 }
 
 .subtitle {
     font-size: 0.9rem;
-    /* 부제목 크기 축소 */
     color: var(--text-secondary);
 }
 
@@ -66,14 +126,23 @@ h1 {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    justify-content: center;
 }
 
 /* Refresh Control */
-.refresh-control {
-    padding: 0.4rem 0.8rem;
-    border-radius: 6px;
+.interval-select {
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    font-family: inherit;
     font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.interval-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
 }
 
 .toggle-switch {
@@ -101,16 +170,79 @@ input:checked+.slider:before {
     border-radius: 8px;
 }
 
+/* Table Alignment */
+.align-right {
+    text-align: right;
+}
+
+.align-center {
+    text-align: center;
+}
+
 thead th {
     padding: 0.6rem 0.5rem;
-    /* 테이블 여백 축소 */
     font-size: 0.8rem;
     background: var(--bg-secondary);
+    font-weight: 400;
+    /* Header not bold */
+}
+
+/* Specific Column Widths */
+thead th:nth-child(1),
+tbody td:nth-child(1) {
+    width: 50px;
+}
+
+/* 순위 */
+thead th:nth-child(2),
+tbody td:nth-child(2) {
+    width: 40px;
+}
+
+/* 시장 */
+thead th:nth-child(3),
+tbody td:nth-child(3) {
+    width: auto;
+}
+
+/* 종목명 */
+thead th:nth-child(4),
+tbody td:nth-child(4) {
+    width: 80px;
+}
+
+/* 등락률 */
+thead th:nth-child(5),
+tbody td:nth-child(5) {
+    width: 100px;
+}
+
+/* 거래대금 */
+
+/* Table Body Scrolling */
+tbody {
+    display: block;
+    max-height: 560px;
+    /* Approx 20 items * 29px */
+    overflow-y: auto;
+    width: 100%;
+}
+
+/* Ensure header and body cells align */
+thead,
+tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+thead {
+    width: calc(100% - 17px);
+    /* Compensate for scrollbar width */
 }
 
 tbody td {
-    padding: 0.5rem;
-    /* 셀 여백 축소 */
+    padding: 0.15rem 0.5rem;
     font-size: 0.85rem;
 }
 
@@ -122,12 +254,10 @@ footer {
 
 .price-up {
     color: var(--up-color);
-    font-weight: 600;
 }
 
 .price-down {
     color: var(--down-color);
-    font-weight: 600;
 }
 
 .price-neutral {
@@ -149,7 +279,6 @@ footer {
 
 .market-type {
     text-align: center;
-    font-weight: bold;
     color: var(--text-muted);
 }
 

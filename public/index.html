@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="키움증권 실시간 종목 조회 순위 - 실시간으로 업데이트되는 주식 데이터">
-    <title>Realtime Rank</title>
+    <title>Rank</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -15,37 +15,29 @@
 <body>
     <div class="container">
         <header>
-            <h1>
-                <span class="gradient-text">키움증권</span>
-                <span class="subtitle">실시간종목조회순위</span>
-            </h1>
-            <div class="header-controls">
-                <div class="refresh-control">
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="autoRefresh" checked>
-                        <span class="slider"></span>
-                    </label>
-                    <span class="toggle-label">자동 새로고침 (30초)</span>
+            <div class="header-single-line">
+                <h1><strong>Rank</strong></h1>
+                <div class="header-controls">
+                    <div class="refresh-control">
+                        <select id="refreshInterval" class="interval-select">
+                            <option value="5" data-interval="30000" selected>30초 간격</option>
+                            <option value="1" data-interval="60000">1분 간격</option>
+                            <option value="2" data-interval="600000">10분 간격</option>
+                            <option value="3" data-interval="3600000">1시간 간격</option>
+                            <option value="4" data-interval="30000">당일누적</option>
+                        </select>
+                    </div>
+                    <button id="manualRefresh" class="btn-refresh" aria-label="조회">
+                        조회
+                    </button>
                 </div>
-                <button id="manualRefresh" class="btn-refresh" aria-label="수동 새로고침">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                    </svg>
-                    새로고침
-                </button>
+            </div>
+            <div class="status-info">
+                <span id="lastUpdate">-</span>
+                <span class="status-separator">|</span>
+                <span id="statusText">대기 중...</span>
             </div>
         </header>
-
-        <div id="statusBadge" class="status-badge">
-            <span class="status-dot"></span>
-            <span id="statusText">대기 중...</span>
-        </div>
-
-        <div id="loadingIndicator" class="loading-container">
-            <div class="loading-spinner"></div>
-            <p>데이터를 불러오는 중...</p>
-        </div>
 
         <div id="errorMessage" class="error-message" style="display: none;">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
@@ -60,27 +52,70 @@
             </div>
         </div>
 
-        <div id="dataContainer" style="display: none;">
-            <div class="table-wrapper">
-                <table id="stockTable">
-                    <thead>
-                        <tr>
-                            <th>순위</th>
-                            <th>시장</th>
-                            <th>종목명</th>
-                            <th>등락률</th>
-                            <th>거래대금(억)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tableBody">
-                        <!-- 데이터가 동적으로 삽입됩니다 -->
-                    </tbody>
-                </table>
+        <div class="grid-container">
+            <!-- Left Column: Transaction Money Rank -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Transaction Money Rank</h2>
+                    <div class="panel-controls">
+                        <select id="mrktTp" class="interval-select">
+                            <option value="000" selected>전체</option>
+                            <option value="001">코스피</option>
+                            <option value="101">코스닥</option>
+                        </select>
+                        <select id="stexTp" class="interval-select">
+                            <option value="1">KRX</option>
+                            <option value="2">NXT</option>
+                            <option value="3" selected>통합</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table id="transactionTable">
+                        <thead>
+                            <tr>
+                                <th>순위</th>
+                                <th>시장</th>
+                                <th>종목명</th>
+                                <th>등락률</th>
+                                <th class="align-right">거래대금(백만)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionBody">
+                            <!-- Data injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right Column: Realtime Rank -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Realtime Query Rank</h2>
+                </div>
+                <div id="dataContainer" style="display: none;">
+                    <div class="table-wrapper">
+                        <table id="stockTable">
+                            <thead>
+                                <tr>
+                                    <th>순위</th>
+                                    <th>시장</th>
+                                    <th>종목명</th>
+                                    <th>등락률</th>
+                                    <th class="align-right">거래대금(백만)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <!-- 데이터가 동적으로 삽입됩니다 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
 
         <footer>
-            <p>마지막 업데이트: <span id="lastUpdate">-</span></p>
+            <!-- Status moved to header -->
         </footer>
     </div>
 

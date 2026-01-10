@@ -22,7 +22,7 @@ function createWindow() {
 
     mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-    // mainWindow.webContents.openDevTools(); // 디버깅 시 사용
+    mainWindow.webContents.openDevTools(); // 디버깅 시 사용
 
     // 우측 마우스 클릭 시 복사 메뉴 (기본 기능 활성화)
     const { Menu, MenuItem } = require('electron');
