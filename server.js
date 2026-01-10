@@ -12,14 +12,9 @@ const marketCache = {};
 const LOG_FILE = path.join(__dirname, 'server_debug.log');
 
 function fileLog(message) {
-    const timestamp = new Date().toLocaleTimeString();
-    const logMsg = `[${timestamp}] ${message}\n`;
-    try {
-        fs.appendFileSync(LOG_FILE, logMsg);
-    } catch (e) {
-        // ignore
-    }
-    console.log(message); // 콘솔에도 출력
+    // 이제 모든 콘솔 출력은 런처(메인 프로세스)에서 가로채서 'launcher_debug.log'에 통합 저장합니다.
+    // 서버 자체에서의 중복 파일 쓰기는 제거합니다.
+    console.log(message);
 }
 
 const app = express();

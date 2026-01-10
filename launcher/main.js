@@ -9,10 +9,11 @@ let ngrokProcess = null;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 900,
-        height: 700,
-        frame: false, // 커스텀 타이틀바 사용 예정
-        transparent: true,
+        width: 1000,
+        height: 750,
+        frame: false,
+        transparent: false, // 투명도를 제거하여 창 크기 조절 및 최대화 안정성 확보
+        backgroundColor: '#0f172a',
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -22,7 +23,7 @@ function createWindow() {
 
     mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-    mainWindow.webContents.openDevTools(); // 디버깅 시 사용
+    // mainWindow.webContents.openDevTools(); // 디버깅 시 사용
 
     // 우측 마우스 클릭 시 복사 메뉴 (기본 기능 활성화)
     const { Menu, MenuItem } = require('electron');
@@ -68,26 +69,47 @@ function stopAllProcesses() {
     }
 }
 
+let isLoggingEnabled = false;
+const LAUNCHER_LOG_FILE = path.join(__dirname, '..', 'launcher_debug.log');
+
+function writeLogToFile(msg) {
+    if (!isLoggingEnabled) return;
+    const timestamp = new Date().toLocaleString();
+    try {
+        fs.appendFileSync(LAUNCHER_LOG_FILE, `[${timestamp}] ${msg}\n`);
+    } catch (e) {
+        console.error('Failed to write to log file:', e);
+    }
+}
+
 // IPC 핸들러: 서버 시작
-ipcMain.on('start-server', (event, port) => {
+ipcMain.on('start-server', (event, { port, saveLog }) => {
     if (serverProcess) return;
+
+    isLoggingEnabled = saveLog;
+    writeLogToFile('--- SERVER START ATTEMPT ---');
 
     const serverPath = path.join(__dirname, '..', 'server.js');
     serverProcess = spawn('node', [serverPath], {
-        env: { ...process.env, PORT: port },
+        env: { ...process.env, PORT: port, SAVE_LOG: 'false' }, // 서버 자체 로깅은 끔 (메인에서 통합 관리)
         cwd: path.join(__dirname, '..')
     });
 
     serverProcess.stdout.on('data', (data) => {
-        event.reply('server-log', data.toString());
+        const str = data.toString();
+        event.reply('server-log', str);
+        writeLogToFile(`[SERVER] ${str.trim()}`);
     });
 
     serverProcess.stderr.on('data', (data) => {
-        event.reply('server-log', `ERROR: ${data.toString()}`);
+        const str = data.toString();
+        event.reply('server-log', `ERROR: ${str}`);
+        writeLogToFile(`[SERVER-ERROR] ${str.trim()}`);
     });
 
     serverProcess.on('close', (code) => {
         event.reply('server-stopped', code);
+        writeLogToFile(`--- SERVER STOPPED (Code: ${code}) ---`);
         serverProcess = null;
     });
 });
@@ -103,23 +125,41 @@ ipcMain.on('stop-server', () => {
 ipcMain.on('start-ngrok', (event, { url, port }) => {
     if (ngrokProcess) return;
 
+    writeLogToFile('--- NGROK START ATTEMPT ---');
+
     const ngrokPath = path.join(__dirname, '..', 'ngrok.exe');
     ngrokProcess = spawn(ngrokPath, ['http', '--url=' + url, port], {
         cwd: path.join(__dirname, '..')
     });
 
     ngrokProcess.stdout.on('data', (data) => {
-        event.reply('ngrok-log', data.toString());
+        const str = data.toString();
+        event.reply('ngrok-log', str);
+        writeLogToFile(`[NGROK] ${str.trim()}`);
     });
 
     ngrokProcess.stderr.on('data', (data) => {
-        event.reply('ngrok-log', `ERROR: ${data.toString()}`);
+        const str = data.toString();
+        event.reply('ngrok-log', `ERROR: ${str}`);
+        writeLogToFile(`[NGROK-ERROR] ${str.trim()}`);
     });
 
     ngrokProcess.on('close', (code) => {
         event.reply('ngrok-stopped', code);
+        writeLogToFile(`--- NGROK STOPPED (Code: ${code}) ---`);
         ngrokProcess = null;
     });
+});
+
+// 시스템 로그 저장을 위한 추가 IPC
+ipcMain.on('save-system-log', (event, msg) => {
+    writeLogToFile(`[LAUNCHER] ${msg}`);
+});
+
+// 로그 저장 설정을 실시간으로 반영하기 위한 IPC
+ipcMain.on('set-logging', (event, enabled) => {
+    isLoggingEnabled = enabled;
+    writeLogToFile(`--- LOGGING ${enabled ? 'ENABLED' : 'DISABLED'} BY USER ---`);
 });
 
 // IPC 핸들러: ngrok 중지
@@ -136,4 +176,21 @@ ipcMain.on('close-app', () => {
 
 ipcMain.on('minimize-app', () => {
     mainWindow.minimize();
+});
+
+ipcMain.on('maximize-app', () => {
+    if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+    } else {
+        mainWindow.maximize();
+    }
+});
+
+// 창 상태 변경 감지하여 UI 업데이트
+app.on('browser-window-maximize', (e, window) => {
+    window.webContents.send('window-maximized', true);
+});
+
+app.on('browser-window-unmaximize', (e, window) => {
+    window.webContents.send('window-maximized', false);
 });
