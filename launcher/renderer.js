@@ -17,6 +17,7 @@ let isNgrokRunning = false;
 
 // 초기 안내 로그 추가
 window.addEventListener('DOMContentLoaded', () => {
+    log('[System] 런처가 준비되었습니다. 설정을 입력하고 시작 버튼을 눌러주세요.');
     log('시스템 초기화 중...', 'info');
     log('키움 주식 데이터 서버 준비 완료.', 'success');
     log('ngrok 터널링 엔진 대기 중.', 'info');

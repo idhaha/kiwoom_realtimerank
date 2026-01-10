@@ -3,6 +3,11 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
+const isPackaged = app.isPackaged;
+const baseDir = isPackaged
+    ? path.join(process.resourcesPath, 'app')
+    : path.join(__dirname, '..');
+
 let mainWindow;
 let serverProcess = null;
 let ngrokProcess = null;
@@ -70,7 +75,7 @@ function stopAllProcesses() {
 }
 
 let isLoggingEnabled = false;
-const LAUNCHER_LOG_FILE = path.join(__dirname, '..', 'launcher_debug.log');
+const LAUNCHER_LOG_FILE = path.join(baseDir, 'launcher_debug.log');
 
 function writeLogToFile(msg) {
     if (!isLoggingEnabled) return;
@@ -89,10 +94,10 @@ ipcMain.on('start-server', (event, { port, saveLog }) => {
     isLoggingEnabled = saveLog;
     writeLogToFile('--- SERVER START ATTEMPT ---');
 
-    const serverPath = path.join(__dirname, '..', 'server.js');
+    const serverPath = path.join(baseDir, 'server.js');
     serverProcess = spawn('node', [serverPath], {
         env: { ...process.env, PORT: port, SAVE_LOG: 'false' }, // 서버 자체 로깅은 끔 (메인에서 통합 관리)
-        cwd: path.join(__dirname, '..')
+        cwd: baseDir
     });
 
     serverProcess.stdout.on('data', (data) => {
@@ -127,9 +132,9 @@ ipcMain.on('start-ngrok', (event, { url, port }) => {
 
     writeLogToFile('--- NGROK START ATTEMPT ---');
 
-    const ngrokPath = path.join(__dirname, '..', 'ngrok.exe');
+    const ngrokPath = path.join(baseDir, 'ngrok.exe');
     ngrokProcess = spawn(ngrokPath, ['http', '--url=' + url, port], {
-        cwd: path.join(__dirname, '..')
+        cwd: baseDir
     });
 
     ngrokProcess.stdout.on('data', (data) => {
