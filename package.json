@@ -1,6 +1,6 @@
 {
     "name": "kiwoom-realtimerank",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "키움증권 실시간종목조회순위 웹서비스",
     "main": "api/stock.js",
     "scripts": {

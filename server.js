@@ -340,6 +340,7 @@ app.get('/api/transaction_rank', async (req, res) => {
 
                     return {
                         ...item,
+                        mkt_type: marketType,
                         fluc_rt: item.flu_rt,
                         trde_amt: item.trde_prica,
                     };
