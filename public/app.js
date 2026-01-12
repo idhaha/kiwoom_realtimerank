@@ -114,10 +114,10 @@ function renderTable(data) {
                 <td>
                     ${stock.stk_nm || '-'}
                 </td>
-                <td class="align-right ${getPriceClass(changeRate)}">
+                <td class="align-right num-cell ${getPriceClass(changeRate)}">
                     ${formatChangeRate(changeRate)}
                 </td>
-                <td class="align-right">${formatNumber(trdeAmtMillion)}</td>
+                <td class="align-right num-cell">${formatNumber(trdeAmtMillion)}</td>
             </tr>
         `;
     }).join('');
@@ -163,10 +163,10 @@ async function loadTransactionRank() {
                         <td class="align-right">${stock.rank || (index + 1)}</td>
                         <td class="market-type">${marketLabel}</td>
                         <td>${stock.stk_nm || stock.isu_nm || '-'}</td>
-                        <td class="align-right ${getPriceClass(changeRate)}">
+                        <td class="align-right num-cell ${getPriceClass(changeRate)}">
                             ${formatChangeRate(changeRate)}
                         </td>
-                        <td class="align-right">${formatNumber(trdeAmtMillion)}</td>
+                        <td class="align-right num-cell">${formatNumber(trdeAmtMillion)}</td>
                     </tr>
                 `;
             }).join('');

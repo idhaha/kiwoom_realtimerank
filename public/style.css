@@ -25,7 +25,7 @@
 }
 
 body {
-    font-family: 'Pretendard', -apple-system, sans-serif;
+    font-family: 'Inter', 'Pretendard', -apple-system, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
@@ -190,34 +190,33 @@ thead th {
 /* Specific Column Widths */
 thead th:nth-child(1),
 tbody td:nth-child(1) {
-    width: 50px;
+    width: 45px;
+    /* 순위 */
 }
 
-/* 순위 */
 thead th:nth-child(2),
 tbody td:nth-child(2) {
-    width: 40px;
+    width: 45px;
+    /* 시장 */
 }
 
-/* 시장 */
 thead th:nth-child(3),
 tbody td:nth-child(3) {
     width: auto;
+    /* 종목명 (Flexible) */
 }
 
-/* 종목명 */
 thead th:nth-child(4),
 tbody td:nth-child(4) {
     width: 80px;
+    /* 등락률 */
 }
 
-/* 등락률 */
 thead th:nth-child(5),
 tbody td:nth-child(5) {
-    width: 100px;
+    width: 110px;
+    /* 거래대금 */
 }
-
-/* 거래대금 */
 
 /* Table Body Scrolling */
 tbody {
@@ -237,8 +236,11 @@ tbody tr {
 }
 
 thead {
-    width: calc(100% - 17px);
-    /* Compensate for scrollbar width */
+    width: calc(100% - 10px);
+    /* 17px에서 10px로 조정 (표준 스크롤바 너비 대응) */
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 tbody td {
@@ -280,6 +282,13 @@ footer {
 .market-type {
     text-align: center;
     color: var(--text-muted);
+}
+
+.num-cell {
+    font-size: 0.85rem;
+    font-weight: 300 !important;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
 }
 
 .fade-in {

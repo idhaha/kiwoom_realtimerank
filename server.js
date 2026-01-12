@@ -70,6 +70,12 @@ app.get('/api/stock', async (req, res) => {
             });
         }
 
+        // 1.1 토큰 유효성 체크 추가 (디버그용)
+        if (!accessToken) {
+            console.error("❌ 에러: 발급된 토큰이 null입니다.");
+            return res.status(500).json({ success: false, error: "Token issuance returned null" });
+        }
+
         // 2. 실시간종목조회순위 API 호출 (전체 순위를 먼저 가져옴)
         console.log("Step 2: 전체 종목 순위(Global Rank) 조회 중...");
 
@@ -97,7 +103,18 @@ app.get('/api/stock', async (req, res) => {
                 timeout: 5000
             }
         );
+
+        // 상세 로그 추가: 응답 본문 전체 확인
+        console.log("DEBUG: ka00198 Full Response Data:", JSON.stringify(totalResp.data, null, 2));
+
         const stocks = totalResp.data.item_inq_rank || [];
+
+        // 토큰 에러 발생 시 캐시 초기화
+        if (totalResp.data.return_code === 3 || (totalResp.data.return_msg && totalResp.data.return_msg.includes("Token이 유효하지 않습니다"))) {
+            console.warn("⚠️ 토큰 만료/유효하지 않음 감지. 캐시를 초기화합니다.");
+            cachedToken = null;
+            tokenExpiryTime = 0;
+        }
 
         // 3. (삭제됨) 코스닥 상위 리스트 확보 로직 제거
         // 사용자가 marketName 기반 판별을 원함. 아래 loop 내부에서 ka10100 결과를 사용.
@@ -111,16 +128,15 @@ app.get('/api/stock', async (req, res) => {
         console.log("Step 4: 종목별 상세 거래대금(ka10007) 조회 및 시장별 보정 시작...");
         const enrichedStocks = [];
 
-        const chunkSize = 3; // 속도 향상을 위해 2 -> 5로 상향
+        const chunkSize = 1; // 429 에러 방지를 위해 1로 하향 (사용자 확인 완료)
         for (let i = 0; i < stocks.length; i += chunkSize) {
             const chunk = stocks.slice(i, i + chunkSize);
-            console.log(`Processing chunk ${i / chunkSize + 1} / ${Math.ceil(stocks.length / chunkSize)}...`);
+            // console.log(`Processing chunk ${i / chunkSize + 1} / ${Math.ceil(stocks.length / chunkSize)}...`);
 
             const chunkPromises = chunk.map(async (stock) => {
                 const cleanCd = (stock.stk_cd || "").replace(/[^0-9a-zA-Z]/g, '');
                 let marketType = 'Q'; // 기본값 코스닥(Q) - ka10100 실패 시 안전망
                 let trdeAmtMillion = 0;
-                let marketName = "Unknown";
 
                 try {
                     // 0. 이름 기반 필터링 (최우선 및 비용 없음)
@@ -208,15 +224,10 @@ app.get('/api/stock', async (req, res) => {
 
             const processed = await Promise.all(chunkPromises);
             // null(필터링된 항목) 제외하고 추가
-            processed.filter(p => p !== null).forEach(p => {
-                enrichedStocks.push(p);
-            });
+            enrichedStocks.push(...processed.filter(p => p !== null));
 
-            // ... delay ...
-
-
-            // API 부하 조절을 위한 대기 시간 단축 (500ms -> 200ms)
-            await new Promise(resolve => setTimeout(resolve, 400));
+            // API 부하 조절을 위한 대기 시간 (100ms 지연)
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         console.log("Step 5: 데이터 보정 및 병합 완료");
@@ -277,13 +288,23 @@ app.get('/api/transaction_rank', async (req, res) => {
             }
         );
 
+        // 상세 로그 추가: 응답 본문 전체 확인
+        console.log("DEBUG: ka10032 Full Response Data:", JSON.stringify(response.data, null, 2));
+
         // ka10032 returns data in 'trde_prica_upper'
         const rawItems = response.data.trde_prica_upper || response.data.output || [];
+
+        // 토큰 에러 발생 시 캐시 초기화
+        if (response.data.return_code === 3 || (response.data.return_msg && response.data.return_msg.includes("Token이 유효하지 않습니다"))) {
+            console.warn("⚠️ 토큰 만료/유효하지 않음 감지. 캐시를 초기화합니다.");
+            cachedToken = null;
+            tokenExpiryTime = 0;
+        }
 
         // Market Enrichment
         console.log(`Step 3: 거래대금상위 시장구분(ka10100) 보정 시작 (${rawItems.length}개)...`);
         const enrichedItems = [];
-        const chunkSize = 5; // 2 -> 5로 상향
+        const chunkSize = 1; // 429 에러 방지를 위해 1로 하향
 
         for (let i = 0; i < rawItems.length; i += chunkSize) {
             const chunk = rawItems.slice(i, i + chunkSize);
@@ -351,9 +372,9 @@ app.get('/api/transaction_rank', async (req, res) => {
 
             const processed = await Promise.all(chunkPromises);
             enrichedItems.push(...processed.filter(p => p !== null));
-            if (mrkt_tp === "000" && i + chunkSize < rawItems.length) {
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
+
+            // 모든 요청 사이에 미세 지연 추가
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         res.json({
@@ -414,6 +435,8 @@ async function getAccessToken(appKey, secretKey) {
     if (!token) {
         throw new Error(`토큰 필드가 없습니다. 응답: ${JSON.stringify(response.data)}`);
     }
+
+    console.log(`DEBUG: New token issued. Length: ${token.length}, First 10 chars: ${token.substring(0, 10)}...`);
 
     // 2. 토큰 및 만료 시간 캐싱 (기본 만료시간이 없을 경우 24시간으로 설정)
     const expiresIn = response.data.expires_in || 86400; // 초 단위

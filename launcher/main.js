@@ -93,30 +93,45 @@ ipcMain.on('start-server', (event, { port, saveLog }) => {
 
     isLoggingEnabled = saveLog;
     writeLogToFile('--- SERVER START ATTEMPT ---');
+    event.reply('server-log', `Base Directory: ${baseDir}`);
 
     const serverPath = path.join(baseDir, 'server.js');
-    serverProcess = spawn('node', [serverPath], {
-        env: { ...process.env, PORT: port, SAVE_LOG: 'false' }, // 서버 자체 로깅은 끔 (메인에서 통합 관리)
-        cwd: baseDir
-    });
+    writeLogToFile(`Server Path: ${serverPath}`);
 
-    serverProcess.stdout.on('data', (data) => {
-        const str = data.toString();
-        event.reply('server-log', str);
-        writeLogToFile(`[SERVER] ${str.trim()}`);
-    });
+    try {
+        serverProcess = spawn('node', [serverPath], {
+            env: { ...process.env, PORT: port, SAVE_LOG: 'false' },
+            cwd: baseDir
+        });
 
-    serverProcess.stderr.on('data', (data) => {
-        const str = data.toString();
-        event.reply('server-log', `ERROR: ${str}`);
-        writeLogToFile(`[SERVER-ERROR] ${str.trim()}`);
-    });
+        serverProcess.on('error', (err) => {
+            const errorMsg = `Failed to start server process: ${err.message}`;
+            event.reply('server-log', `ERROR: ${errorMsg}`);
+            writeLogToFile(`[LAUNCHER-ERROR] ${errorMsg}`);
+            serverProcess = null;
+        });
 
-    serverProcess.on('close', (code) => {
-        event.reply('server-stopped', code);
-        writeLogToFile(`--- SERVER STOPPED (Code: ${code}) ---`);
-        serverProcess = null;
-    });
+        serverProcess.stdout.on('data', (data) => {
+            const str = data.toString();
+            event.reply('server-log', str);
+            writeLogToFile(`[SERVER] ${str.trim()}`);
+        });
+
+        serverProcess.stderr.on('data', (data) => {
+            const str = data.toString();
+            event.reply('server-log', `ERROR: ${str}`);
+            writeLogToFile(`[SERVER-ERROR] ${str.trim()}`);
+        });
+
+        serverProcess.on('close', (code) => {
+            event.reply('server-stopped', code);
+            writeLogToFile(`--- SERVER STOPPED (Code: ${code}) ---`);
+            serverProcess = null;
+        });
+    } catch (err) {
+        event.reply('server-log', `EXCEPTION: ${err.message}`);
+        writeLogToFile(`[LAUNCHER-EXCEPTION] ${err.message}`);
+    }
 });
 
 // IPC 핸들러: 서버 중지
