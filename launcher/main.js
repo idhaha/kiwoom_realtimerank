@@ -99,8 +99,8 @@ ipcMain.on('start-server', (event, { port, saveLog }) => {
     writeLogToFile(`Server Path: ${serverPath}`);
 
     try {
-        serverProcess = spawn('node', [serverPath], {
-            env: { ...process.env, PORT: port, SAVE_LOG: 'false' },
+        serverProcess = spawn(process.execPath, [serverPath], {
+            env: { ...process.env, PORT: port, SAVE_LOG: 'false', ELECTRON_RUN_AS_NODE: '1' },
             cwd: baseDir
         });
 
