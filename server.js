@@ -393,10 +393,29 @@ app.get('/api/transaction_rank', async (req, res) => {
     }
 });
 
+/**
+ * ADR 데이터 프록시 API (CORS 방지용)
+ */
+app.get('/api/adr', async (req, res) => {
+    console.log("🚀 [API START] /api/adr 요청 발생");
+    try {
+        const response = await axios.get('http://adrinfo.kr/chart', {
+            timeout: 8000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        console.log("✅ ADR 데이터 획득 성공 (길이:", response.data.length, ")");
+        res.send(response.data);
+    } catch (error) {
+        console.error("❌ ADR 프록시 에러:", error.message);
+        res.status(500).json({ error: "ADR 데이터를 가져오는데 실패했습니다.", details: error.message });
+    }
+});
+
 // 2. 그 다음 정적 파일 서빙
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 3. 마지막으로 SPA 루트 서빙
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

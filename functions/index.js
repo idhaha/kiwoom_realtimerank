@@ -1,3 +1,31 @@
+// Antigravity 계정 선택  node index.js account2
+/* 
+require('dotenv').config();
+const fetch = require('node-fetch');
+
+// 계정별 키 불러오기
+const keys = {
+  account1: process.env.ANTIGRAVITY_KEY_idhaha,
+  account2: process.env.ANTIGRAVITY_KEY_anzikanbal
+};
+
+// 실행 옵션으로 계정 선택
+const selectedAccount = process.argv[2] || "account1";
+// 예: node index.js account2 → account2 키 사용
+
+const activeKey = keys[selectedAccount];
+
+async function callAntigravity() {
+  const url = `https://antigravity.googleapis.com/v1/data?key=${activeKey}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  console.log(`현재 계정: ${selectedAccount}`, data);
+}
+
+callAntigravity(); */
+
+
+
 const functions = require("firebase-functions");
 const axios = require("axios");
 const cors = require("cors")({ origin: true });

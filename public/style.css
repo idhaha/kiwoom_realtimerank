@@ -163,6 +163,12 @@ input:checked+.slider:before {
     padding: 0.4rem 1rem;
     border-radius: 6px;
     font-size: 0.8rem;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.btn-refresh:hover {
+    opacity: 0.8;
 }
 
 /* Table */
@@ -293,4 +299,362 @@ footer {
 
 .fade-in {
     animation: fadeIn 0.4s ease-out;
+}
+
+/* ==========================================================
+   Tabbed Interface Styles
+   ========================================================== */
+
+.tab-container {
+    display: flex;
+    background: var(--bg-secondary);
+    padding: 0 10px;
+    border-bottom: 2px solid var(--border-color);
+    align-items: center;
+    overflow-x: auto;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.tab-btn {
+    padding: 10px 20px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.add-tab-btn {
+    padding: 0 15px;
+    font-size: 1.2rem;
+    background: transparent;
+    border: none;
+    color: var(--success-color);
+    cursor: pointer;
+    line-height: 40px;
+}
+
+.right-controls {
+    margin-left: auto;
+    display: flex;
+    gap: 10px;
+}
+
+.capture-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+}
+
+.capture-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.tab-contents {
+    padding: 15px;
+    min-height: calc(100vh - 45px);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* --- Context Menu --- */
+.context-menu {
+    position: absolute;
+    background: #2a2d3e;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    border-radius: 4px;
+    padding: 5px 0;
+}
+
+.context-menu ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.context-menu li {
+    padding: 8px 20px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.context-menu li:hover {
+    background: var(--accent-primary);
+}
+
+/* ==========================================================
+   Chart Grid & Box Styles
+   ========================================================== */
+
+.chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 15px;
+    width: 100%;
+}
+
+.chart-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 480px;
+}
+
+.chart-header {
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.chart-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.chart-input {
+    flex: 1;
+    background: #0a0e27;
+    border: 1px solid var(--border-color);
+    color: #fff;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    border-radius: 4px;
+    min-width: 60px;
+}
+
+.chart-go-btn {
+    background: var(--accent-primary);
+    border: none;
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.chart-control-icon {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.chart-control-icon:hover {
+    opacity: 1;
+}
+
+.chart-title-input {
+    background: transparent;
+    border: none;
+    color: var(--accent-primary);
+    font-weight: bold;
+    font-size: 0.85rem;
+    width: 80px;
+    cursor: default;
+}
+
+.chart-title-input:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+iframe {
+    width: 100%;
+    flex: 1;
+    border: none;
+}
+
+/* --- ADR Specific --- */
+.adr-chart-container {
+    display: flex;
+    flex-direction: row;
+    gap: 30px;
+    padding: 20px;
+    width: 100%;
+}
+
+.adr-chart-wrapper {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex: 1;
+    /* Equal proportional width */
+    min-width: 0;
+    /* Prevent overflow in flex items */
+}
+
+.adr-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 15px 20px;
+    background: #495057;
+    color: white;
+    border-radius: 4px;
+}
+
+.adr-chart-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.adr-update-btn {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.adr-update-btn:hover {
+    background: #5a6268;
+}
+
+.adr-period-selector {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 15px;
+    padding: 0 10px;
+}
+
+.period-btn {
+    background: transparent;
+    border: none;
+    color: #495057;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.period-btn:hover {
+    background: #e9ecef;
+}
+
+.period-btn.active {
+    background: #495057;
+    color: white;
+}
+
+.adr-canvas-new {
+    display: block;
+    width: 100% !important;
+    height: auto !important;
+    background: white;
+    border-radius: 4px;
+}
+
+.adr-canvas {
+    background: #fff;
+    border-radius: 4px;
+    margin: 10px;
+    cursor: crosshair;
+}
+
+.adr-last {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-left: auto;
+}
+
+.tab-rename-input {
+    background: #fff;
+    color: #000;
+    border: none;
+    padding: 2px 5px;
+    width: 100px;
+    font-size: 0.85rem;
+}
+
+@media (max-width: 1200px) {
+    .chart-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 800px) {
+    .chart-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(10, 14, 39, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    gap: 1rem;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(99, 102, 241, 0.2);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
