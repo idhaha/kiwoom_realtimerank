@@ -36,6 +36,7 @@ const contextMenu = document.getElementById("contextMenu");
 
 let autoRefreshInterval = null;
 let adrAutoRefreshInterval = null;
+let lastSavedSettings = { rankInterval: '5', adrInterval: '5' };
 
 /**
  * 상태 업데이트
@@ -255,10 +256,11 @@ function startAutoRefresh() {
     const selectedOption = refreshIntervalSelect.options[refreshIntervalSelect.selectedIndex];
     const intervalMs = parseInt(selectedOption.dataset.interval) || 30000;
 
-    console.log(`자동 새로고침 시작 (간격: ${intervalMs}ms, qry_tp: ${selectedOption.value})`);
+    console.log(`[Rank] 🔄 자동 새로고침 시작 (간격: ${intervalMs}ms, qry_tp: ${selectedOption.value})`);
 
     autoRefreshInterval = setInterval(() => {
-        console.log('자동 새로고침 실행...');
+        const now = new Date().toLocaleTimeString();
+        console.log(`[Rank] ⚡ 자동 새로고침 실행 (${now})`);
         loadData();
         loadTransactionRank();
     }, intervalMs);
@@ -272,19 +274,21 @@ function stopAutoRefresh() {
 }
 
 function startAdrAutoRefresh() {
-    if (adrAutoRefreshInterval) clearInterval(adrAutoRefreshInterval);
+    if (adrAutoRefreshInterval) {
+        clearInterval(adrAutoRefreshInterval);
+    }
 
-    // Find the select element inside the active tab/ADR tab
     const select = document.getElementById('adrRefreshInterval');
-    if (!select) return; // Might not be rendered yet
+    if (!select) return;
 
     const selectedOption = select.options[select.selectedIndex];
     const intervalMs = parseInt(selectedOption.dataset.interval) || 30000;
 
-    console.log(`[ADR] 자동 새로고침 시작 (간격: ${intervalMs}ms)`);
+    console.log(`[ADR] 🔄 자동 새로고침 시작 (간격: ${intervalMs}ms)`);
 
     adrAutoRefreshInterval = setInterval(() => {
-        console.log('[ADR] 자동 새로고침 실행...');
+        const now = new Date().toLocaleTimeString();
+        console.log(`[ADR] ⚡ 자동 새로고침 실행 (${now})`);
         updateAdrFromSource();
     }, intervalMs);
 }
@@ -297,9 +301,11 @@ function stopAdrAutoRefresh() {
 }
 
 refreshIntervalSelect.addEventListener('change', (e) => {
-    console.log('새로고침 설정 변경');
+    console.log('[Rank] 새로고침 설정 변경');
+    lastSavedSettings.rankInterval = e.target.value;
     loadData();
     startAutoRefresh();
+    saveAppData();
 });
 
 manualRefreshBtn.addEventListener('click', () => {
@@ -368,7 +374,9 @@ function saveAppData() {
     const storageData = {
         activeTabId: activeTabId,
         tabs: tabs,
-        contents: tabData
+        contents: tabData,
+        rankInterval: refreshIntervalSelect.value,
+        adrInterval: document.getElementById('adrRefreshInterval')?.value
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
@@ -430,6 +438,14 @@ function applyData(data) {
         createTabContentElement(t.id);
     });
 
+    if (data.rankInterval) {
+        lastSavedSettings.rankInterval = data.rankInterval;
+        refreshIntervalSelect.value = data.rankInterval;
+    }
+    if (data.adrInterval) {
+        lastSavedSettings.adrInterval = data.adrInterval;
+    }
+
     const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
     activateTab(targetId);
 }
@@ -466,6 +482,11 @@ function activateTab(tabId) {
 
     if (tabId === ADR_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
+        // Restore ADR interval setting
+        const adrSelect = document.getElementById('adrRefreshInterval');
+        if (adrSelect && lastSavedSettings.adrInterval) {
+            adrSelect.value = lastSavedSettings.adrInterval;
+        }
         setTimeout(() => {
             updateAdrFromSource();
             startAdrAutoRefresh(); // Start auto refresh
@@ -473,6 +494,10 @@ function activateTab(tabId) {
     }
     else if (tabId === ADR_TAB_ID) {
         // If already rendered, ensure refresh starts
+        const adrSelect = document.getElementById('adrRefreshInterval');
+        if (adrSelect && lastSavedSettings.adrInterval) {
+            adrSelect.value = lastSavedSettings.adrInterval;
+        }
         startAdrAutoRefresh();
     }
     else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && !content.innerHTML.trim()) {
@@ -577,7 +602,7 @@ function createChartGrid(tabId) {
                 <div class="adr-chart-container" style="flex: 1; overflow: auto;">
                     <div class="adr-chart-wrapper">
                         <div class="adr-chart-header">
-                            <h3>KOSPI</h3>
+                            <h3>K</h3>
                         </div>
                         <div class="adr-period-selector">
                             <button class="period-btn" data-period="6m">6m</button>
@@ -590,7 +615,7 @@ function createChartGrid(tabId) {
                     </div>
                     <div class="adr-chart-wrapper">
                         <div class="adr-chart-header">
-                            <h3>KOSDAQ</h3>
+                            <h3>Q</h3>
                         </div>
                         <div class="adr-period-selector">
                             <button class="period-btn" data-period="6m">6m</button>
@@ -852,7 +877,7 @@ function renderAdr(kospi, kosdaq) {
         c2.chartState.scrollOffset = state.scrollOffset;
         c2.chartState.hoveredIndex = state.hoveredIndex;
         // Use requestAnimationFrame with the wrapper but we don't need to pass the calc, it's on the canvas now
-        requestAnimationFrame(() => drawLineChart(c2, kosdaq, 'KOSDAQ ADR', state.visibleCount));
+        requestAnimationFrame(() => drawLineChart(c2, kosdaq, 'Q ADR', state.visibleCount));
     };
 
     const syncToKospi = (state) => {
@@ -860,18 +885,18 @@ function renderAdr(kospi, kosdaq) {
         c1.chartState.visibleCount = state.visibleCount;
         c1.chartState.scrollOffset = state.scrollOffset;
         c1.chartState.hoveredIndex = state.hoveredIndex;
-        requestAnimationFrame(() => drawLineChart(c1, kospi, 'KOSPI ADR', state.visibleCount));
+        requestAnimationFrame(() => drawLineChart(c1, kospi, 'K ADR', state.visibleCount));
     };
 
     if (c1) {
         c1.rangeCalculator = getCombinedRange;
         c1.syncCallback = syncToKosdaq; // Explicitly set helper
-        drawLineChart(c1, kospi, 'KOSPI ADR', 240, syncToKosdaq);
+        drawLineChart(c1, kospi, 'K ADR', 240, syncToKosdaq);
     }
     if (c2) {
         c2.rangeCalculator = getCombinedRange;
         c2.syncCallback = syncToKospi;
-        drawLineChart(c2, kosdaq, 'KOSDAQ ADR', 240, syncToKospi);
+        drawLineChart(c2, kosdaq, 'Q ADR', 240, syncToKospi);
     }
 }
 
@@ -1165,7 +1190,8 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
     }
 
     // --- Current Value / Header ---
-    const latestItem = data[data.length - 1]; // Absolute latest
+    const latestItem = visibleSeries[visibleSeries.length - 1] || data[data.length - 1];
+
     // Or just show Latest always in the corner, and Tooltip shows hovered?
     // User requested "mouse overlap data". Tooltip covers this.
 
@@ -1355,11 +1381,11 @@ document.body.addEventListener('click', function (e) {
 
         if (c1 && fullData && fullData.kospi) {
             c1.chartState.scrollOffset = Math.max(0, fullData.kospi.length - days);
-            drawLineChart(c1, fullData.kospi, 'KOSPI ADR', days);
+            drawLineChart(c1, fullData.kospi, 'K ADR', days);
         }
         if (c2 && fullData && fullData.kosdaq) {
             c2.chartState.scrollOffset = Math.max(0, fullData.kosdaq.length - days);
-            drawLineChart(c2, fullData.kosdaq, 'KOSDAQ ADR', days);
+            drawLineChart(c2, fullData.kosdaq, 'Q ADR', days);
         }
         return;
     }
@@ -1426,8 +1452,10 @@ document.body.addEventListener('click', function (e) {
 document.body.addEventListener('change', function (e) {
     if (e.target.id === 'adrRefreshInterval') {
         console.log('[ADR] 새로고침 간격 변경');
+        lastSavedSettings.adrInterval = e.target.value;
         updateAdrFromSource();
         startAdrAutoRefresh();
+        saveAppData();
     }
 });
 
