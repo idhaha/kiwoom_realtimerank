@@ -727,7 +727,7 @@ function loadChartFromInput(inputElement) {
 // --- ADR Data & Drawing ---
 
 async function updateAdrFromSource() {
-    const url = '/api/adr';
+    const url = `/api/adr?t=${Date.now()}`;
     console.log("🔄 [ADR] Step 1: Fetching from backend proxy:", url);
     if (loadingIndicator) loadingIndicator.style.display = 'flex';
 
@@ -745,7 +745,17 @@ async function updateAdrFromSource() {
         if (!text || text.length < 100) throw new Error('응답 데이터가 너무 짧거나 비어있습니다.');
 
         const parsed = parseAdrHtml(text);
-        console.log(`✅ [ADR] Step 4: Parsed data: KOSPI=${parsed.kospi.length}, KOSDAQ=${parsed.kosdaq.length}`);
+
+        const kLen = parsed.kospi.length;
+        const qLen = parsed.kosdaq.length;
+        const kLastDate = kLen > 0 ? new Date(parsed.kospi[kLen - 1].date).toLocaleDateString() : 'N/A';
+        const qLastDate = qLen > 0 ? new Date(parsed.kosdaq[qLen - 1].date).toLocaleDateString() : 'N/A';
+
+        console.log(`✅ [ADR] Step 4: Parsed Data - KOSPI: ${kLen} (${kLastDate}), KOSDAQ: ${qLen} (${qLastDate})`);
+
+        if (kLen !== qLen) {
+            console.warn(`⚠️ [ADR] Data length mismatch! K:${kLen} vs Q:${qLen}`);
+        }
 
         tabData[ADR_TAB_ID] = tabData[ADR_TAB_ID] || {};
         tabData[ADR_TAB_ID].adr = { kospi: parsed.kospi, kosdaq: parsed.kosdaq, updated: Date.now() };
@@ -774,86 +784,63 @@ async function updateAdrFromSource() {
 
 function parseAdrHtml(html) {
     const out = { kospi: [], kosdaq: [] };
-
-    // 1. Try parsing global variables (Current structure as of 2026)
     try {
-        // Helper to extract array from string: const marker = [...];
-        const extractArray = (marker) => {
-            const startIdx = html.indexOf(marker);
-            if (startIdx === -1) return [];
-            let contentStart = startIdx + marker.length;
-            // Find closing bracket ]; or something similar
-            let endIdx = html.indexOf('];', contentStart);
-            if (endIdx === -1) endIdx = html.indexOf(']', contentStart);
-            if (endIdx === -1) return [];
-
-            let contentStr = html.substring(contentStart, endIdx + 1).trim();
-            if (contentStr.endsWith(';')) contentStr = contentStr.slice(0, -1).trim();
-
-            try {
-                // Remove potential trailing comma inside array: [...,] -> [...]
-                return JSON.parse(contentStr.replace(/,\s*\]$/, ']'));
-            } catch (e) {
-                console.error(`[Parser] JSON parse failed for ${marker}:`, e);
-                return [];
-            }
-        };
-
-        const rawKospi = extractArray("const kospi_adr=");
-        const rawKosdaq = extractArray("const kosdaq_adr=");
+        const rawKospi = extractArrayFromHtml(html, "kospi_adr");
+        const rawKosdaq = extractArrayFromHtml(html, "kosdaq_adr");
 
         out.kospi = rawKospi.filter(i => i && i[1] !== null).map(i => ({ date: i[0], value: i[1] }));
         out.kosdaq = rawKosdaq.filter(i => i && i[1] !== null).map(i => ({ date: i[0], value: i[1] }));
 
+        if (out.kospi.length > 0) out.kospi.sort((a, b) => a.date - b.date);
+        if (out.kosdaq.length > 0) out.kosdaq.sort((a, b) => a.date - b.date);
 
-        if (out.kospi.length > 0 || out.kosdaq.length > 0) {
-            console.log(`📊 [Parser] Successfully extracted via Const Vars: KOSPI ${out.kospi.length}, KOSDAQ ${out.kosdaq.length}`);
-            out.kospi.sort((a, b) => a.date - b.date);
-            out.kosdaq.sort((a, b) => a.date - b.date);
-            return out; // Return immediately if successful
-        }
+        console.log(`📊 [Parser] Extracted: KOSPI=${out.kospi.length}, KOSDAQ=${out.kosdaq.length}`);
     } catch (e) {
-        console.warn("⚠️ [Parser] Failed to parse via Const Vars, trying fallback...", e);
+        console.error('❌ [Parser] Failed:', e);
     }
-
-    // 2. Fallback: Old Series Regex (Legacy)
-    try {
-        const seriesMatches = html.match(/series:\s*(\[[\s\S]*?\])\s*}/g);
-        if (seriesMatches && seriesMatches.length >= 2) {
-            // Logic for extracting from Highcharts series: [...]
-            // This is less reliable now but kept as backup
-            // ... extract logic omitted to keep it clean, relying on primary method ...
-        }
-    } catch (e) {
-        console.error("❌ [Parser] Legacy fallback also failed", e);
-    }
-
     return out;
 }
 
-function extractSeriesData(seriesStr) {
-    // Look for patterns like [1234567890000, 80.5]
-    const regex = /\[\s*(\d+)\s*,\s*([-]?\d*\.?\d+)\s*\]/g;
-    const items = [];
-    let m;
-    while ((m = regex.exec(seriesStr)) !== null) {
-        items.push({
-            date: parseInt(m[1]), // Timestamp
-            value: parseFloat(m[2]) // Value
-        });
+function extractArrayFromHtml(html, name) {
+    let startIdx = html.indexOf(`${name}=`);
+    if (startIdx === -1) startIdx = html.indexOf(`${name} =`);
+    if (startIdx === -1) return [];
+
+    const contentStart = html.indexOf('[', startIdx);
+    if (contentStart === -1) return [];
+
+    let balance = 0;
+    let endIdx = -1;
+    for (let i = contentStart; i < html.length; i++) {
+        if (html[i] === '[') balance++;
+        else if (html[i] === ']') balance--;
+        if (balance === 0) {
+            endIdx = i;
+            break;
+        }
     }
-    return items;
+    if (endIdx === -1) return [];
+
+    const contentStr = html.substring(contentStart, endIdx + 1).trim();
+    try {
+        return JSON.parse(contentStr.replace(/,\s*\]$/, ']'));
+    } catch (e) {
+        console.warn(`[Parser] JSON.parse failed for ${name}, trying simple regex...`);
+        // Fallback for extremely messy strings
+        const items = [];
+        const itemRegex = /\[\s*(\d+)\s*,\s*([-]?\d*\.?\d+)\s*\]/g;
+        let m;
+        while ((m = itemRegex.exec(contentStr)) !== null) {
+            items.push([parseInt(m[1]), parseFloat(m[2])]);
+        }
+        return items;
+    }
 }
 
 function renderAdr(kospi, kosdaq) {
     const c1 = document.getElementById('adr_kospi');
     const c2 = document.getElementById('adr_kosdaq');
-    console.log("Rendering ADR charts. Canvases found:", !!c1, !!c2, "Data lengths:", kospi.length, kosdaq.length);
-
-
-    // Sort by date just in case
-    kospi.sort((a, b) => a.date - b.date);
-    kosdaq.sort((a, b) => a.date - b.date);
+    if (!c1 || !c2) return;
 
     // Common Range Calculator
     const getCombinedRange = (offset, count) => {
@@ -870,36 +857,32 @@ function renderAdr(kospi, kosdaq) {
         return { min: Math.min(...all), max: Math.max(...all) };
     };
 
-    // Synchronizers
     const syncToKosdaq = (state) => {
-        if (!c2 || !c2.chartState) return;
+        if (!c2.chartState) return;
         c2.chartState.visibleCount = state.visibleCount;
         c2.chartState.scrollOffset = state.scrollOffset;
         c2.chartState.hoveredIndex = state.hoveredIndex;
-        // Use requestAnimationFrame with the wrapper but we don't need to pass the calc, it's on the canvas now
         requestAnimationFrame(() => drawLineChart(c2, kosdaq, 'Q ADR', state.visibleCount));
     };
 
     const syncToKospi = (state) => {
-        if (!c1 || !c1.chartState) return;
+        if (!c1.chartState) return;
         c1.chartState.visibleCount = state.visibleCount;
         c1.chartState.scrollOffset = state.scrollOffset;
         c1.chartState.hoveredIndex = state.hoveredIndex;
         requestAnimationFrame(() => drawLineChart(c1, kospi, 'K ADR', state.visibleCount));
     };
 
-    if (c1) {
-        c1.rangeCalculator = getCombinedRange;
-        c1.syncCallback = syncToKosdaq; // Explicitly set helper
-        drawLineChart(c1, kospi, 'K ADR', 240, syncToKosdaq);
-    }
-    if (c2) {
-        c2.rangeCalculator = getCombinedRange;
-        c2.syncCallback = syncToKospi;
-        drawLineChart(c2, kosdaq, 'Q ADR', 240, syncToKospi);
-    }
-}
+    c1.rangeCalculator = getCombinedRange;
+    c1.syncCallback = syncToKosdaq;
+    c2.rangeCalculator = getCombinedRange;
+    c2.syncCallback = syncToKospi;
 
+    // Use current visibleCount if already set, else default to 2y (~500 days)
+    const currentCount = c1.chartState ? c1.chartState.visibleCount : 500;
+    drawLineChart(c1, kospi, 'K ADR', currentCount);
+    drawLineChart(c2, kosdaq, 'Q ADR', currentCount);
+}
 // function drawLineChart(canvas, data, label, visibleCount = 60) {
 function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = null) {
     if (!canvas) return;
@@ -953,21 +936,38 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
         canvas.chartState.visibleCount = visibleCount;
     }
     const state = canvas.chartState;
+    // prevMaxOffset: The end position of the PREVIOUS data set
+    const prevMaxOffset = Math.max(0, (canvas.lastDataLength || data.length) - visibleCount);
+    // isAtEnd: Were we at the end of the previous data set?
+    // Added !canvas.lastDataLength check to ensure we start at the end for fresh loads
+    const isAtEnd = !canvas.lastDataLength || state.scrollOffset >= prevMaxOffset - 1.0;
+
+    console.log(`📊 [Chart:${label}] Len: ${data.length}, Prev: ${canvas.lastDataLength}, Offset: ${state.scrollOffset.toFixed(2)}, isAtEnd: ${isAtEnd}`);
 
     // Adjust offset if visibleCount changes (e.g. period change)
-    // Try to keep the 'end' date fixed if shrinking/expanding? 
-    // Usually we want to show the LATEST data when period changes.
     if (canvas.lastVisibleCount !== visibleCount) {
-        state.scrollOffset = Math.max(0, data.length - visibleCount); // Reset to latest
+        state.scrollOffset = Math.max(0, data.length - visibleCount);
         canvas.lastVisibleCount = visibleCount;
+    } else if (isAtEnd) {
+        // Always follow to the end if we were at the end, 
+        // especially if data length increased or if it's the first real data load
+        const newMaxOffset = Math.max(0, data.length - visibleCount);
+        if (state.scrollOffset !== newMaxOffset) {
+            state.scrollOffset = newMaxOffset;
+            console.log(`🚀 [Chart:${label}] Followed to end: ${state.scrollOffset}`);
+        }
     }
+
+    canvas.lastDataLength = data.length;
 
     // Ensure offset is valid
     state.scrollOffset = Math.max(0, Math.min(state.scrollOffset, data.length - visibleCount));
 
     const startIdx = Math.floor(state.scrollOffset);
-    const endIdx = Math.min(startIdx + visibleCount, data.length);
-    const visibleSeries = data.slice(startIdx, endIdx);
+    const endIdx = data.length; // Always slice to end, let visibleCount control the actual start if needed
+    // But original logic used startIdx + visibleCount. Let's keep it consistent:
+    const actualEndIdx = Math.min(startIdx + visibleCount, data.length);
+    const visibleSeries = data.slice(startIdx, actualEndIdx);
 
     // Padding
     const padding = { top: 60, right: 100, bottom: 80, left: 60 };
@@ -1190,7 +1190,30 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
     }
 
     // --- Current Value / Header ---
-    const latestItem = visibleSeries[visibleSeries.length - 1] || data[data.length - 1];
+    // Determine the item to display in header
+    // If we are essentially at the end, we want the absolute LATEST.
+    const currentMaxOffset = Math.max(0, data.length - visibleCount);
+    const isCurrentlyAtEnd = state.scrollOffset >= currentMaxOffset - 1.0;
+
+    let latestItem;
+    // If hovered, show hovered item in header too
+    if (state.hoveredIndex !== null && visibleSeries[state.hoveredIndex]) {
+        latestItem = visibleSeries[state.hoveredIndex];
+    } else if (isCurrentlyAtEnd || visibleSeries.length === 0) {
+        latestItem = data[data.length - 1];
+    } else {
+        latestItem = visibleSeries[visibleSeries.length - 1];
+    }
+
+    if (latestItem) {
+        const lastDateStr = new Date(latestItem.date).toLocaleDateString();
+        const absLatestDateStr = new Date(data[data.length - 1].date).toLocaleDateString();
+        // Use a hidden log or low-priority log to avoid spamming too much during drag
+        // Only log if it's a "snap" change or every few updates?
+        if (state.scrollOffset % 10 === 0) {
+            console.log(`🏷️ [Header:${label}] Showing: ${lastDateStr}, AbsLatest: ${absLatestDateStr}, isAtEnd: ${isCurrentlyAtEnd}`);
+        }
+    }
 
     // Or just show Latest always in the corner, and Tooltip shows hovered?
     // User requested "mouse overlap data". Tooltip covers this.

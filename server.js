@@ -169,7 +169,7 @@ app.get('/api/stock', async (req, res) => {
                             );
                             const basicInfo = basicInfoResponse.data;
                             const mktCode = String(basicInfo.marketCode || "");
-                            marketName = basicInfo.marketName || "";
+                            const marketName = basicInfo.marketName || "";
 
                             // marketCode 필터링 (0:KOSPI, 10:KOSDAQ)
                             if (!['0', '10'].includes(mktCode)) {
@@ -397,9 +397,10 @@ app.get('/api/transaction_rank', async (req, res) => {
  * ADR 데이터 프록시 API (CORS 방지용)
  */
 app.get('/api/adr', async (req, res) => {
-    console.log("🚀 [API START] /api/adr 요청 발생");
+    console.log("🚀 [API START] /api/adr 요청 발생 (Cache-Busting 적용)");
     try {
-        const response = await axios.get('http://adrinfo.kr/chart', {
+        const timestamp = Date.now();
+        const response = await axios.get(`http://adrinfo.kr/chart?t=${timestamp}`, {
             timeout: 8000,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
