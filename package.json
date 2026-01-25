@@ -27,6 +27,7 @@
         "node": ">=18.0.0"
     },
     "devDependencies": {
+        "cross-env": "^10.1.0",
         "electron": "^39.2.7",
         "electron-builder": "^24.13.3"
     },

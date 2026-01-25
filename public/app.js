@@ -9,6 +9,8 @@ const API_URL = '/api/stock';
 const STORAGE_KEY = 'MultiChart_State_v1';
 const PERM_TAB_ID = 'tab_rank';
 const ADR_TAB_ID = 'tab_adr';
+const EARNINGS_TAB_ID = 'tab_earnings';
+const OVERSEAS_TAB_ID = 'tab_overseas';
 let tabData = {};
 let targetTabBtn = null;
 
@@ -36,7 +38,8 @@ const contextMenu = document.getElementById("contextMenu");
 
 let autoRefreshInterval = null;
 let adrAutoRefreshInterval = null;
-let lastSavedSettings = { rankInterval: '5', adrInterval: '5' };
+// Default to '2' (10 minutes) as requested
+let lastSavedSettings = { rankInterval: '2', adrInterval: '2' };
 
 /**
  * 상태 업데이트
@@ -195,7 +198,11 @@ async function loadData() {
     if (loadingIndicator && loadingIndicator.style.display === 'flex') return;
 
     try {
-        if (loadingIndicator) loadingIndicator.style.display = 'flex';
+        const activeTab = document.querySelector('.tab-content.active');
+        const isRankActive = activeTab && activeTab.id === PERM_TAB_ID;
+
+        // Only show loader if Rank tab is active
+        if (isRankActive && loadingIndicator) loadingIndicator.style.display = 'flex';
 
         if (errorMessage) errorMessage.style.display = 'none';
         updateStatus('loading', '데이터 로딩 중...');
@@ -240,9 +247,16 @@ async function loadData() {
     } catch (error) {
         console.error('데이터 로딩 실패:', error);
 
-        if (errorMessage) errorMessage.style.display = 'flex';
-        if (errorText) errorText.textContent = error.message;
-        updateStatus('error', '데이터 로딩 실패');
+        const activeTab = document.querySelector('.tab-content.active');
+        const isRankActive = activeTab && activeTab.id === PERM_TAB_ID;
+
+        if (isRankActive) {
+            if (errorMessage) errorMessage.style.display = 'flex';
+            if (errorText) errorText.textContent = error.message;
+            updateStatus('error', '데이터 로딩 실패');
+        } else {
+            console.warn('[Rank] 백그라운드 갱신 실패 (UI 억제됨):', error.message);
+        }
     } finally {
         if (loadingIndicator) loadingIndicator.style.display = 'none';
     }
@@ -356,11 +370,47 @@ function ensurePermanentTabs() {
 
         createTabContentElement(ADR_TAB_ID);
     }
+
+    // 3. Earnings Tab (EARNINGS_TAB_ID)
+    if (!document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`)) {
+        const btn = document.createElement('button');
+        btn.className = 'tab-btn perm-tab';
+        btn.dataset.tab = EARNINGS_TAB_ID;
+        btn.textContent = '실적';
+        btn.draggable = false;
+        btn.dataset.perm = 'true';
+        btn.title = '고정 탭 (실적 발표 캘린더)';
+
+        const adrBtn = document.querySelector(`.tab-btn[data-tab="${ADR_TAB_ID}"]`);
+        if (adrBtn && adrBtn.nextSibling) tabContainer.insertBefore(btn, adrBtn.nextSibling);
+        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
+        else tabContainer.appendChild(btn);
+
+        createTabContentElement(EARNINGS_TAB_ID);
+    }
+
+    // 4. Overseas Tab (OVERSEAS_TAB_ID)
+    if (!document.querySelector(`.tab-btn[data-tab="${OVERSEAS_TAB_ID}"]`)) {
+        const btn = document.createElement('button');
+        btn.className = 'tab-btn perm-tab';
+        btn.dataset.tab = OVERSEAS_TAB_ID;
+        btn.textContent = '해외동향';
+        btn.draggable = false;
+        btn.dataset.perm = 'true';
+        btn.title = '고정 탭 (해외 동향 차트)';
+
+        const earningsBtn = document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`);
+        if (earningsBtn && earningsBtn.nextSibling) tabContainer.insertBefore(btn, earningsBtn.nextSibling);
+        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
+        else tabContainer.appendChild(btn);
+
+        createTabContentElement(OVERSEAS_TAB_ID);
+    }
 }
 
 function saveAppData() {
     const activeContent = document.querySelector('.tab-content.active');
-    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID) {
+    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID && activeContent.id !== OVERSEAS_TAB_ID) {
         saveTabState(activeContent.id);
     }
 
@@ -385,7 +435,7 @@ function saveAppData() {
 
 function saveTabState(tabId) {
     const content = document.getElementById(tabId);
-    if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID) return;
+    if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID || tabId === EARNINGS_TAB_ID || tabId === OVERSEAS_TAB_ID) return;
 
     const boxes = content.querySelectorAll('.chart-box');
     const state = [];
@@ -429,7 +479,7 @@ function applyData(data) {
     ensurePermanentTabs();
 
     data.tabs.forEach(t => {
-        if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID) {
+        if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID || t.id === OVERSEAS_TAB_ID) {
             const btn = document.querySelector(`.tab-btn[data-tab="${t.id}"]`);
             if (btn) btn.textContent = t.name;
             return;
@@ -441,9 +491,15 @@ function applyData(data) {
     if (data.rankInterval) {
         lastSavedSettings.rankInterval = data.rankInterval;
         refreshIntervalSelect.value = data.rankInterval;
+    } else {
+        // Enforce default 10 min if not saved
+        refreshIntervalSelect.value = '2';
+        lastSavedSettings.rankInterval = '2';
     }
     if (data.adrInterval) {
         lastSavedSettings.adrInterval = data.adrInterval;
+    } else {
+        lastSavedSettings.adrInterval = '2';
     }
 
     const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
@@ -452,7 +508,7 @@ function applyData(data) {
 
 function resetDynamicTabs() {
     document.querySelectorAll('.tab-btn:not(.add-tab-btn):not([data-perm])').forEach(b => b.remove());
-    document.querySelectorAll('.tab-content:not(#tab_rank):not(#tab_adr)').forEach(c => c.remove());
+    document.querySelectorAll('.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings):not(#tab_overseas)').forEach(c => c.remove());
 }
 
 function activateTab(tabId) {
@@ -460,14 +516,13 @@ function activateTab(tabId) {
     const content = document.getElementById(tabId);
     if (!btn || !content) return;
 
+    // Background refresh allowed: Do NOT stop refreshes here
+
     document.querySelectorAll(".tab-content.active").forEach(tab => {
         if (tab.id !== tabId) {
-            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID) {
+            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID && tab.id !== OVERSEAS_TAB_ID) {
                 saveTabState(tab.id);
                 tab.innerHTML = '';
-            }
-            if (tab.id === ADR_TAB_ID) {
-                stopAdrAutoRefresh();
             }
             tab.classList.remove("active");
         }
@@ -500,7 +555,13 @@ function activateTab(tabId) {
         }
         startAdrAutoRefresh();
     }
-    else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && !content.innerHTML.trim()) {
+    else if (tabId === EARNINGS_TAB_ID && !content.innerHTML.trim()) {
+        content.innerHTML = createChartGrid(tabId);
+    }
+    else if (tabId === OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
+        content.innerHTML = createChartGrid(tabId);
+    }
+    else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && tabId !== EARNINGS_TAB_ID && tabId !== OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
         loadChartsSequentially(content);
     }
@@ -523,6 +584,7 @@ function createTabContentElement(id) {
     if (document.getElementById(id)) return document.getElementById(id);
     const div = document.createElement("div");
     div.className = "tab-content";
+    if (id === EARNINGS_TAB_ID || id === OVERSEAS_TAB_ID) div.classList.add("full-tab");
     div.id = id;
     tabContents.appendChild(div);
     return div;
@@ -630,6 +692,59 @@ function createChartGrid(tabId) {
             </div>`;
     }
 
+    if (tabId === EARNINGS_TAB_ID) {
+        const perm = "clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share";
+        const sand = "allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation";
+        return `<iframe src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" allow="${perm}" sandbox="${sand}"></iframe>`;
+    }
+
+    if (tabId === OVERSEAS_TAB_ID) {
+        // Finviz charts - 12 charts (2 columns: Left 1-6, Right 7-12)
+        // Futures use 'fut_chart.ashx', Stocks/ETFs use 'chart.ashx'
+        const leftCharts = [
+            { url: "https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l", title: "DX – 달러인덱스" },
+            { url: "https://finviz.com/fut_chart.ashx?t=GC&ty=c&ta=1&p=d&s=l", title: "GOLD – 금" }, // GOLD -> GC
+            { url: "https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l", title: "SI – 은" },
+            { url: "https://finviz.com/fut_chart.ashx?t=HG&ty=c&ta=1&p=d&s=l", title: "HG – 구리" },
+            { url: "https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l", title: "CL – 크루드오일 WTI" },
+            { url: "https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l", title: "BTC – 비트코인" }
+        ];
+
+        const rightCharts = [
+            { url: "https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l", title: "S&P500 선물" },
+            { url: "https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l", title: "나스닥 선물" },
+            { url: "https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l", title: "유로존 대표 50 선물" },
+            { url: "https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l", title: "NIKKEI 선물" },
+            { url: "https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l", title: "FXI – 중국 대형주" }, // Stock/ETF
+            { url: "https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l", title: "홍콩 항셍 테크 ETF" } // Stock/ETF
+        ];
+
+        const renderChart = (chart) => {
+            const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(chart.url)}`;
+            return `
+                <div class="finviz-chart-box">
+                    <div class="finviz-chart-title">${chart.title}</div>
+                    <img src="${proxyUrl}" class="finviz-chart-img" alt="${chart.title}">
+                </div>
+            `;
+        };
+
+        let html = '<div class="finviz-container">';
+
+        // Left Column
+        html += '<div class="finviz-col">';
+        leftCharts.forEach(chart => { html += renderChart(chart); });
+        html += '</div>';
+
+        // Right Column
+        html += '<div class="finviz-col">';
+        rightCharts.forEach(chart => { html += renderChart(chart); });
+        html += '</div>';
+
+        html += '</div>';
+        return html;
+    }
+
     if (!tabData[tabId]) {
         const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT", "SP:SPX", "KRX:005930"];
         tabData[tabId] = defaults.map(sym => ({ symbol: sym, lastSymbol: sym, mode: 'main', mainSrc: '', subSrc: '' }));
@@ -729,7 +844,10 @@ function loadChartFromInput(inputElement) {
 async function updateAdrFromSource() {
     const url = `/api/adr?t=${Date.now()}`;
     console.log("🔄 [ADR] Step 1: Fetching from backend proxy:", url);
-    if (loadingIndicator) loadingIndicator.style.display = 'flex';
+    const activeTab = document.querySelector('.tab-content.active');
+    const isAdrActive = activeTab && activeTab.id === ADR_TAB_ID;
+
+    if (isAdrActive && loadingIndicator) loadingIndicator.style.display = 'flex';
 
     const adrStatusTextElem = document.getElementById('adrStatusText');
     const adrLastUpdateElem = document.getElementById('adrLastUpdate');
@@ -771,12 +889,12 @@ async function updateAdrFromSource() {
 
         if (parsed.kospi.length === 0 && parsed.kosdaq.length === 0) {
             console.warn("⚠️ [ADR] No data parsed!");
-            alert('데이터를 파싱할 수 없습니다. ADR 정보 사이트의 구조가 이전과 다를 수 있습니다.');
+            if (isAdrActive) alert('데이터를 파싱할 수 없습니다. ADR 정보 사이트의 구조가 이전과 다를 수 있습니다.');
         }
     } catch (e) {
         console.error('❌ [ADR] 업데이트 실패:', e);
         if (adrStatusTextElem) adrStatusTextElem.textContent = "업데이트 실패";
-        alert('ADR 업데이트 실패: ' + e.message);
+        if (isAdrActive) alert('ADR 업데이트 실패: ' + e.message);
     } finally {
         if (loadingIndicator) loadingIndicator.style.display = 'none';
     }
@@ -1061,11 +1179,13 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
     // Last Point Dot
     if (points.length > 0) {
         const lastP = points[points.length - 1];
-        ctx.fillStyle = '#339af0';
+        ctx.fillStyle = '#ff0000';
         ctx.beginPath();
         ctx.arc(lastP.x, lastP.y, 4, 0, Math.PI * 2);
         ctx.fill();
-        ctx.stroke(); // white border 2px
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.stroke();
     }
 
     // --- X-Axis Labels ---

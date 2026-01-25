@@ -414,6 +414,39 @@ app.get('/api/adr', async (req, res) => {
     }
 });
 
+/**
+ * Finviz 이미지 프록시 API (CORS 방지용)
+ */
+app.get('/api/finviz-image', async (req, res) => {
+    console.log("🚀 [API START] /api/finviz-image 요청 발생");
+    try {
+        const imageUrl = req.query.url;
+        if (!imageUrl) {
+            return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
+        }
+
+        const response = await axios.get(imageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://finviz.com/'
+            }
+        });
+
+        // 이미지 타입 설정
+        const contentType = response.headers['content-type'] || 'image/png';
+        res.set('Content-Type', contentType);
+        res.set('Cache-Control', 'public, max-age=300'); // 5분 캐시
+        res.send(response.data);
+
+        console.log("✅ Finviz 이미지 획득 성공");
+    } catch (error) {
+        console.error("❌ Finviz 이미지 프록시 에러:", error.message);
+        res.status(500).json({ error: "이미지를 가져오는데 실패했습니다.", details: error.message });
+    }
+});
+
 // 2. 그 다음 정적 파일 서빙
 app.use(express.static(path.join(__dirname, 'public')));
 
