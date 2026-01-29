@@ -15,7 +15,7 @@ let tabData = {};
 let targetTabBtn = null;
 
 // DOM Elements
-const loadingIndicator = document.getElementById('loadingIndicator');
+
 const errorMessage = document.getElementById('errorMessage');
 const errorText = document.getElementById('errorText');
 const dataContainer = document.getElementById('dataContainer');
@@ -195,14 +195,10 @@ async function loadTransactionRank() {
  * 데이터 로드
  */
 async function loadData() {
-    if (loadingIndicator && loadingIndicator.style.display === 'flex') return;
 
     try {
         const activeTab = document.querySelector('.tab-content.active');
         const isRankActive = activeTab && activeTab.id === PERM_TAB_ID;
-
-        // Only show loader if Rank tab is active
-        if (isRankActive && loadingIndicator) loadingIndicator.style.display = 'flex';
 
         if (errorMessage) errorMessage.style.display = 'none';
         updateStatus('loading', '데이터 로딩 중...');
@@ -258,7 +254,6 @@ async function loadData() {
             console.warn('[Rank] 백그라운드 갱신 실패 (UI 억제됨):', error.message);
         }
     } finally {
-        if (loadingIndicator) loadingIndicator.style.display = 'none';
     }
 }
 
@@ -560,12 +555,19 @@ function activateTab(tabId) {
     }
     else if (tabId === OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
-        // Attach refresh button event listener after content is created
+        // Attach refresh button event listener and trigger initial load
         setTimeout(() => {
             const refreshBtn = document.getElementById('overseasManualRefresh');
+            const statusText = document.getElementById('overseasStatusText');
+            const lastUpdate = document.getElementById('overseasLastUpdate');
+
             if (refreshBtn) {
                 refreshBtn.addEventListener('click', refreshOverseasCharts);
             }
+
+            // Initial load status update
+            if (statusText) statusText.textContent = '데이터 로딩 완료';
+            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
         }, 100);
     }
     else if (tabId === OVERSEAS_TAB_ID) {
@@ -735,11 +737,14 @@ function createChartGrid(tabId) {
         ];
 
         const renderChart = (chart) => {
+            const isFuture = chart.url.includes('fut_chart.ashx');
             const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(chart.url)}`;
             return `
                 <div class="finviz-chart-box">
                     <div class="finviz-chart-title">${chart.title}</div>
-                    <img src="${proxyUrl}" class="finviz-chart-img" alt="${chart.title}" data-chart-url="${chart.url}">
+                    <div class="finviz-img-wrapper ${isFuture ? 'is-future' : ''}">
+                        <img src="${proxyUrl}" class="finviz-chart-img ${isFuture ? 'future' : 'stock'}" alt="${chart.title}" data-chart-url="${chart.url}">
+                    </div>
                 </div>
             `;
         };
@@ -754,6 +759,11 @@ function createChartGrid(tabId) {
                                 조회
                             </button>
                         </div>
+                    </div>
+                    <div class="status-info">
+                        <span id="overseasLastUpdate">-</span>
+                        <span class="status-separator">|</span>
+                        <span id="overseasStatusText">대기 중...</span>
                     </div>
                 </header>
                 <div class="finviz-container" style="flex: 1; overflow: auto;">`;
@@ -874,7 +884,7 @@ async function updateAdrFromSource() {
     const activeTab = document.querySelector('.tab-content.active');
     const isAdrActive = activeTab && activeTab.id === ADR_TAB_ID;
 
-    if (isAdrActive && loadingIndicator) loadingIndicator.style.display = 'flex';
+
 
     const adrStatusTextElem = document.getElementById('adrStatusText');
     const adrLastUpdateElem = document.getElementById('adrLastUpdate');
@@ -923,7 +933,6 @@ async function updateAdrFromSource() {
         if (adrStatusTextElem) adrStatusTextElem.textContent = "업데이트 실패";
         if (isAdrActive) alert('ADR 업데이트 실패: ' + e.message);
     } finally {
-        if (loadingIndicator) loadingIndicator.style.display = 'none';
     }
 }
 
@@ -1738,13 +1747,39 @@ function refreshOverseasCharts() {
     const overseasContent = document.getElementById(OVERSEAS_TAB_ID);
     if (!overseasContent) return;
 
+    // Update status
+    const statusText = document.getElementById('overseasStatusText');
+    const lastUpdate = document.getElementById('overseasLastUpdate');
+
+    if (statusText) statusText.textContent = '데이터 로딩 중...';
+
     const chartImages = overseasContent.querySelectorAll('.finviz-chart-img');
+    let loadedCount = 0;
+    const totalCount = chartImages.length;
+
     chartImages.forEach(img => {
         const originalUrl = img.getAttribute('data-chart-url');
         if (originalUrl) {
             // Add cache-busting timestamp
             const timestamp = Date.now();
             const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(originalUrl)}&t=${timestamp}`;
+
+            img.onload = () => {
+                loadedCount++;
+                if (loadedCount === totalCount) {
+                    if (statusText) statusText.textContent = '데이터 로딩 완료';
+                    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+                }
+            };
+
+            img.onerror = () => {
+                loadedCount++;
+                if (loadedCount === totalCount) {
+                    if (statusText) statusText.textContent = '일부 데이터 로딩 실패';
+                    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+                }
+            };
+
             img.src = proxyUrl;
         }
     });
