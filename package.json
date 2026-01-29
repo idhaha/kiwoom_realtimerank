@@ -1,19 +1,17 @@
 {
     "name": "kiwoom-realtimerank",
-    "version": "1.1.4",
-    "description": "키움증권 실시간종목조회순위 웹서비스",
-    "main": "launcher/main.js",
+    "version": "1.2.0",
+    "description": "키움증권 실시간종목조회순위 웹서비스 (Oracle Cloud)",
+    "main": "server.js",
     "scripts": {
         "dev": "node server.js",
-        "start": "node server.js",
-        "launcher": "electron launcher/main.js",
-        "build": "electron-builder"
+        "start": "node server.js"
     },
     "keywords": [
         "kiwoom",
         "stock",
         "realtime",
-        "local"
+        "oracle-cloud"
     ],
     "author": "idhaha",
     "license": "MIT",
@@ -25,34 +23,5 @@
     },
     "engines": {
         "node": ">=18.0.0"
-    },
-    "devDependencies": {
-        "cross-env": "^10.1.0",
-        "electron": "^39.2.7",
-        "electron-builder": "^24.13.3"
-    },
-    "build": {
-        "appId": "com.idhaha.kiwoom-rank",
-        "productName": "KiwoomRank",
-        "directories": {
-            "output": "dist"
-        },
-        "win": {
-            "target": [
-                {
-                    "target": "nsis",
-                    "arch": [
-                        "x64"
-                    ]
-                }
-            ]
-        },
-        "asar": false,
-        "files": [
-            "**/*",
-            "!dist/**/*",
-            "!node_modules/electron/**/*",
-            "!node_modules/electron-builder/**/*"
-        ]
     }
 }

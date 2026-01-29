@@ -1,111 +1,142 @@
 # 키움증권 실시간종목조회순위 웹서비스
 
-Vercel을 활용한 키움증권 실시간종목조회순위 데이터 표시 웹 애플리케이션입니다.
+Oracle Cloud Free Tier를 활용한 키움증권 실시간종목조회순위 데이터 표시 웹 애플리케이션입니다.
 
 ## 📋 기능
 
 - ✅ 키움증권 REST API를 통한 실시간종목조회순위 데이터 조회
-- ✅ 자동 새로고침 (30초 간격)
+- ✅ 거래대금 순위 및 실시간 조회 순위 표시
+- ✅ ADR 차트 (KOSPI/KOSDAQ)
+- ✅ 실적 발표 캘린더
+- ✅ 해외 동향 차트 (Finviz)
+- ✅ 자동 새로고침 (설정 가능)
 - ✅ 현대적이고 아름다운 다크모드 UI
 - ✅ 반응형 디자인 (모바일/태블릿/데스크톱)
-- ✅ Vercel Serverless Functions로 안전한 API 키 관리
-- ✅ Vercel로 빠른 배포 및 자동 HTTPS
+- ✅ Oracle Cloud Free Tier에서 24/7 운영
 
 ## 🏗️ 프로젝트 구조
 
 ```
 d:\Program\Kiwoom\
-├── api/                    # Vercel Serverless Functions
-│   └── stock.js           # 키움 API 호출 로직
 ├── public/                # 정적 파일 (프론트엔드)
 │   ├── index.html         # 메인 HTML
 │   ├── style.css          # 스타일시트
 │   └── app.js             # 클라이언트 JavaScript
+├── server.js              # Express 서버 (백엔드)
 ├── package.json           # 프로젝트 의존성
-├── vercel.json            # Vercel 설정
+├── .env                   # 환경 변수 (API 키)
 └── .gitignore             # Git 제외 파일
 ```
 
-## 🚀 Vercel 배포 가이드
+## 🚀 Oracle Cloud 배포 가이드
 
-### 1. GitHub Repository 준비
+### 1. Oracle Cloud 인스턴스 생성
 
-이미 완료! ✅
-- Repository: https://github.com/idhaha/kiwoom_realtimerank
+1. **Compute Instance 생성**
+   - Shape: `VM.Standard.E2.1.Micro` (Free Tier)
+   - Image: Ubuntu 22.04 LTS
+   - Public IP 할당
 
-### 2. Vercel에 프로젝트 Import
+2. **보안 리스트 설정**
+   - TCP 22 (SSH)
+   - TCP 3000 (Node.js 서버)
+   - 선택: TCP 80/443 (Nginx 프록시 사용 시)
 
-1. **Vercel 로그인**
-   - https://vercel.com 접속
-   - GitHub 계정으로 로그인
+### 2. 인스턴스 설정
 
-2. **새 프로젝트 생성**
-   - Dashboard에서 "Add New..." → "Project" 클릭
-   - GitHub repository 연동 (처음이라면 Vercel에 GitHub 접근 권한 부여)
+SSH로 접속:
+```bash
+ssh -i <your_key> ubuntu@<public_ip>
+```
 
-3. **Repository 선택**
-   - `idhaha/kiwoom_realtimerank` 선택
-   - "Import" 클릭
+필수 패키지 설치:
+```bash
+# 시스템 업데이트
+sudo apt update && sudo apt upgrade -y
 
-4. **프로젝트 설정**
-   - **Project Name**: `kiwoom-realtimerank` (또는 원하는 이름)
-   - **Framework Preset**: Other (자동 감지됨)
-   - **Root Directory**: `./` (기본값)
-   - **Build Command**: 비워두기 (필요 없음)
-   - **Output Directory**: `public` (자동 설정됨)
+# Node.js 24 설치
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs git
 
-### 3. 환경변수 설정 ⚠️ 중요!
+# PM2 설치 (프로세스 매니저)
+sudo npm install -g pm2
+```
 
-배포 전에 반드시 환경변수를 설정해야 합니다:
+### 3. 프로젝트 배포
 
-1. **Environment Variables 섹션으로 이동**
-2. **다음 환경변수 추가**:
+```bash
+# 저장소 클론
+git clone https://github.com/idhaha/kiwoom_realtimerank.git
+cd kiwoom_realtimerank
+git checkout br_oracle
 
-   | Name | Value |
-   |------|-------|
-   | `KIWOOM_APPKEY` | 발급받은 APP KEY |
-   | `KIWOOM_SECRETKEY` | 발급받은 SECRET KEY |
+# 의존성 설치
+npm ci
 
-3. **Environment**: `Production`, `Preview`, `Development` 모두 선택
+# 환경 변수 설정
+nano .env
+```
 
-### 4. 배포
+`.env` 파일 내용:
+```dotenv
+KIWOOM_APPKEY=your_app_key_here
+KIWOOM_SECRETKEY=your_secret_key_here
+```
 
-1. **Deploy 버튼 클릭**
-2. 배포 진행 상황 확인 (약 1-2분 소요)
-3. 배포 완료 후 URL 확인 (예: `https://kiwoom-realtimerank.vercel.app`)
+### 4. 서버 실행
 
-### 5. 배포 확인
+```bash
+# PM2로 서버 시작
+pm2 start server.js --name kiwoom-service
 
-1. 제공된 URL 접속
-2. 실시간종목조회순위 데이터가 표시되는지 확인
-3. 새로고침 버튼 작동 확인
-4. 자동 새로고침 기능 확인 (30초 대기)
+# 부팅 시 자동 시작 설정
+pm2 save
+pm2 startup  # 출력된 명령어 실행
+
+# 상태 확인
+pm2 status
+pm2 logs kiwoom-service
+```
+
+### 5. 접속
+
+브라우저에서 `http://<public_ip>:3000` 접속
 
 ## 🔄 업데이트 배포
 
-코드를 수정한 후:
+로컬에서 코드 수정 후:
 
 ```bash
+# 로컬 PC
 git add .
 git commit -m "업데이트 내용"
-git push
+git push origin br_oracle
 ```
 
-→ Vercel이 자동으로 감지하고 재배포합니다! 🎉
+Oracle 인스턴스에서:
+
+```bash
+# Oracle Cloud 인스턴스
+cd ~/kiwoom_realtimerank
+git pull origin br_oracle
+npm ci  # 의존성 변경 시
+pm2 restart kiwoom-service
+```
 
 ## 🔑 키움 API 정보
 
-- **API ID**: ka00198
-- **API 명**: 실시간종목조회순위
-- **URL**: /api/dostk/stkinfo
+- **실시간종목조회순위**: ka00198
+- **거래대금상위**: ka10032
+- **주식기본정보**: ka10100
+- **시세표성정보**: ka10007
 - **도메인**: https://api.kiwoom.com
 
 ## 💡 사용 방법
 
 1. 웹사이트에 접속하면 자동으로 데이터가 로드됩니다
-2. 자동 새로고침이 기본으로 활성화되어 있습니다 (30초 간격)
-3. 수동으로 새로고침하려면 "새로고침" 버튼을 클릭하세요
-4. 자동 새로고침을 끄려면 토글 스위치를 클릭하세요
+2. 4개의 고정 탭: Rank, ADR, 실적, 해외동향
+3. `+` 버튼으로 커스텀 차트 탭 추가 가능
+4. 자동 새로고침 간격 설정 가능 (30초 ~ 1시간)
 
 ## 🎨 UI 특징
 
@@ -113,56 +144,39 @@ git push
 - 그라디언트 및 glassmorphism 효과
 - 부드러운 애니메이션 및 호버 효과
 - 반응형 레이아웃
-
-## 📊 Vercel 무료 플랜 한도
-
-이 프로젝트는 Vercel 무료 플랜(Hobby Plan)으로 충분히 운영 가능합니다:
-
-- **Serverless Functions 실행 시간**: 월 100 GB-시간
-- **대역폭**: 월 100GB
-- **빌드 시간**: 월 100시간
-- **자동 HTTPS**: 무료
-- **커스텀 도메인**: 무료
+- 탭 기반 멀티 뷰
 
 ## 🔧 문제 해결
 
-### 환경변수 오류
+### 서버가 실행되지 않음
+```bash
+pm2 logs kiwoom-service  # 로그 확인
+pm2 restart kiwoom-service  # 재시작
 ```
-API 키가 설정되지 않았습니다
-```
-→ Vercel Dashboard → 프로젝트 → Settings → Environment Variables에서 `KIWOOM_APPKEY`와 `KIWOOM_SECRETKEY`를 설정했는지 확인하세요.
 
-### 배포 실패
-→ Vercel Dashboard → Deployments에서 로그를 확인하세요.
+### 포트 접근 불가
+- Oracle Cloud 보안 리스트에서 포트 3000 허용 확인
+- 인스턴스 방화벽 확인: `sudo ufw status`
 
 ### 데이터가 표시되지 않음
-→ 브라우저 개발자 도구(F12)의 Console 탭에서 에러 메시지를 확인하세요.
-
-### CORS 오류
-→ `api/stock.js`에 CORS 헤더가 설정되어 있습니다. 문제가 지속되면 Vercel 로그를 확인하세요.
+- `.env` 파일에 API 키가 올바르게 설정되었는지 확인
+- 브라우저 개발자 도구(F12) Console 탭에서 에러 확인
 
 ## 🛠️ 로컬 개발
-
-로컬에서 테스트하려면:
 
 ```bash
 # 의존성 설치
 npm install
 
-# Vercel CLI 설치 (전역)
-npm install -g vercel
+# 환경 변수 설정 (.env 파일 생성)
+# KIWOOM_APPKEY=...
+# KIWOOM_SECRETKEY=...
 
-# 로컬 개발 서버 시작
-vercel dev
+# 개발 서버 시작
+npm run dev
 ```
 
 브라우저에서 `http://localhost:3000` 접속
-
-> **주의**: 로컬 개발 시 환경변수를 `.env` 파일에 설정해야 합니다:
-> ```
-> KIWOOM_APPKEY=your_app_key
-> KIWOOM_SECRETKEY=your_secret_key
-> ```
 
 ## 📝 라이선스
 
@@ -170,10 +184,10 @@ vercel dev
 
 ## 🙋 도움말
 
-- [Vercel 문서](https://vercel.com/docs)
+- [Oracle Cloud 문서](https://docs.oracle.com/en-us/iaas/Content/home.htm)
 - [키움증권 API 문서](https://apiportal.kiwoom.com/)
 - [GitHub Repository](https://github.com/idhaha/kiwoom_realtimerank)
 
 ---
 
-**Made with ❤️ using Vercel**
+**Made with ❤️ using Oracle Cloud Free Tier**
