@@ -560,6 +560,21 @@ function activateTab(tabId) {
     }
     else if (tabId === OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
+        // Attach refresh button event listener after content is created
+        setTimeout(() => {
+            const refreshBtn = document.getElementById('overseasManualRefresh');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', refreshOverseasCharts);
+            }
+        }, 100);
+    }
+    else if (tabId === OVERSEAS_TAB_ID) {
+        // Already rendered, just ensure button listener is attached
+        const refreshBtn = document.getElementById('overseasManualRefresh');
+        if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
+            refreshBtn.addEventListener('click', refreshOverseasCharts);
+            refreshBtn.setAttribute('data-listener-attached', 'true');
+        }
     }
     else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && tabId !== EARNINGS_TAB_ID && tabId !== OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
@@ -724,12 +739,24 @@ function createChartGrid(tabId) {
             return `
                 <div class="finviz-chart-box">
                     <div class="finviz-chart-title">${chart.title}</div>
-                    <img src="${proxyUrl}" class="finviz-chart-img" alt="${chart.title}">
+                    <img src="${proxyUrl}" class="finviz-chart-img" alt="${chart.title}" data-chart-url="${chart.url}">
                 </div>
             `;
         };
 
-        let html = '<div class="finviz-container">';
+        let html = `
+            <div class="container" style="height: 100%; display: flex; flex-direction: column;">
+                <header>
+                    <div class="header-single-line">
+                        <h1><strong>해외동향</strong></h1>
+                        <div class="header-controls">
+                            <button id="overseasManualRefresh" class="btn-refresh" aria-label="조회">
+                                조회
+                            </button>
+                        </div>
+                    </div>
+                </header>
+                <div class="finviz-container" style="flex: 1; overflow: auto;">`;
 
         // Left Column
         html += '<div class="finviz-col">';
@@ -741,7 +768,7 @@ function createChartGrid(tabId) {
         rightCharts.forEach(chart => { html += renderChart(chart); });
         html += '</div>';
 
-        html += '</div>';
+        html += '</div></div>';
         return html;
     }
 
@@ -1701,6 +1728,27 @@ captureBtn.addEventListener('click', async () => {
         track.stop();
     } catch (err) { console.error(err); }
 });
+
+// ==========================================================
+// Overseas Tab Refresh Function
+// ==========================================================
+
+function refreshOverseasCharts() {
+    console.log('[Overseas] Manual refresh triggered');
+    const overseasContent = document.getElementById(OVERSEAS_TAB_ID);
+    if (!overseasContent) return;
+
+    const chartImages = overseasContent.querySelectorAll('.finviz-chart-img');
+    chartImages.forEach(img => {
+        const originalUrl = img.getAttribute('data-chart-url');
+        if (originalUrl) {
+            // Add cache-busting timestamp
+            const timestamp = Date.now();
+            const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(originalUrl)}&t=${timestamp}`;
+            img.src = proxyUrl;
+        }
+    });
+}
 
 // ==========================================================
 // Initialization
