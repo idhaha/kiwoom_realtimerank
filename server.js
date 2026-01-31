@@ -23,7 +23,8 @@ const SERVER_START_TIME = new Date().toLocaleString();
 
 // 미들웨어 설정
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // 모든 요청 로그 출력 (매우 잘 보이게)
 app.use((req, res, next) => {
@@ -444,6 +445,40 @@ app.get('/api/finviz-image', async (req, res) => {
     } catch (error) {
         console.error("❌ Finviz 이미지 프록시 에러:", error.message);
         res.status(500).json({ error: "이미지를 가져오는데 실패했습니다.", details: error.message });
+    }
+});
+
+/**
+ * 사용자 설정 저장 및 불러오기 API
+ */
+const SETTINGS_FILE = path.join(__dirname, 'user_settings.json');
+
+app.get('/api/settings', (req, res) => {
+    try {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+        if (fs.existsSync(SETTINGS_FILE)) {
+            const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
+            res.json({ success: true, data: JSON.parse(data) });
+        } else {
+            res.json({ success: true, data: null });
+        }
+    } catch (error) {
+        console.error("❌ 설정 불러오기 에러:", error.message);
+        res.status(500).json({ error: "설정을 불러오는데 실패했습니다." });
+    }
+});
+
+app.post('/api/settings', (req, res) => {
+    try {
+        const settings = req.body;
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+        res.json({ success: true });
+        console.log("✅ 설정 저장 완료");
+    } catch (error) {
+        console.error("❌ 설정 저장 에러:", error.message);
+        res.status(500).json({ error: "설정을 저장하는데 실패했습니다." });
     }
 });
 

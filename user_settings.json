@@ -1,0 +1,51 @@
+{
+  "activeTabId": "tab_custom_1769866239038",
+  "tabs": [
+    {
+      "id": "tab_rank",
+      "name": "Rank"
+    },
+    {
+      "id": "tab_adr",
+      "name": "ADR"
+    },
+    {
+      "id": "tab_earnings",
+      "name": "실적"
+    },
+    {
+      "id": "tab_overseas",
+      "name": "해외동향"
+    },
+    {
+      "id": "tab_custom_1769866202949",
+      "name": "해외종목 1"
+    },
+    {
+      "id": "tab_custom_1769866202920",
+      "name": "해외종목 2"
+    },
+    {
+      "id": "tab_custom_1769866239038",
+      "name": "해외종목 3"
+    }
+  ],
+  "contents": {
+    "tab_custom_1769866202949": {
+      "type": "overseas_custom",
+      "config": "< 화폐 가치 >\n(\"https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l\", \"DX – 달러인덱스\")\n(\"https://finviz.com/chart.ashx?t=GOLD&ty=c&ta=1&p=d&s=l\", \"GOLD – 금\")\n(\"https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l\", \"SI – 은\")\n(\"https://finviz.com/chart.ashx?t=HG&ty=c&ta=1&p=d&s=l\", \"HG – 구리\")\n(\"https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l\", \"CL – 크루드오일 WTI\")\n(”https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l\", \"BTC – 비트코인\")\n< 각국 지수 >\n(\"https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l\", \"S&P500 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l\", \"나스닥 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l\", “유로존 대표 50 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l\", “NIKKEI 선물\")\n(\"https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l\", \"FXI – 중국 대형주\")\n(\"https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l\", \"홍콩 항셍 테크 ETF\")\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1769866202920": {
+      "type": "overseas_custom",
+      "config": "< 화폐 가치 >\n(\"https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l\", \"DX – 달러인덱스\")\n(\"https://finviz.com/chart.ashx?t=GOLD&ty=c&ta=1&p=d&s=l\", \"GOLD – 금\")\n(\"https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l\", \"SI – 은\")\n(\"https://finviz.com/chart.ashx?t=HG&ty=c&ta=1&p=d&s=l\", \"HG – 구리\")\n(\"https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l\", \"CL – 크루드오일 WTI\")\n(”https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l\", \"BTC – 비트코인\")\n< 각국 지수 >\n(\"https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l\", \"S&P500 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l\", \"나스닥 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l\", “유로존 대표 50 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l\", “NIKKEI 선물\")\n(\"https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l\", \"FXI – 중국 대형주\")\n(\"https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l\", \"홍콩 항셍 테크 ETF\")\n\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1769866239038": {
+      "type": "overseas_custom",
+      "config": "\n\n",
+      "sectorColors": {}
+    }
+  },
+  "rankInterval": "2"
+}

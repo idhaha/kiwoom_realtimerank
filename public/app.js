@@ -35,6 +35,9 @@ const tabContents = document.getElementById("tabContents");
 const addTabBtn = document.getElementById("addTabBtn");
 const captureBtn = document.getElementById("captureBtn");
 const contextMenu = document.getElementById("contextMenu");
+const addTabMenu = document.getElementById("addTabMenu");
+
+let currentConfigTabId = null; // Track which tab is being configured
 
 let autoRefreshInterval = null;
 let adrAutoRefreshInterval = null;
@@ -403,34 +406,83 @@ function ensurePermanentTabs() {
     }
 }
 
-function saveAppData() {
+function saveAppData(overrideTabData = null) {
     const activeContent = document.querySelector('.tab-content.active');
     if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID && activeContent.id !== OVERSEAS_TAB_ID) {
         saveTabState(activeContent.id);
     }
 
-    const tabs = [];
+    // Clear tabs array and rebuild from DOM to preserve order
+    const capturedTabs = [];
     document.querySelectorAll('.tab-btn:not(.add-tab-btn)').forEach(btn => {
-        tabs.push({ id: btn.dataset.tab, name: btn.textContent });
+        capturedTabs.push({ id: btn.dataset.tab, name: btn.textContent });
     });
 
-    const activeTabId = activeContent ? activeContent.id : (tabs.length > 0 ? tabs[0].id : PERM_TAB_ID);
+    // Fallback: If DOM missed some custom tabs (race condition during import), populate from tabData or override
+    const sourceData = overrideTabData || tabData;
+
+    Object.keys(sourceData).forEach(key => {
+        if (key.startsWith('tab_custom_') && !capturedTabs.find(t => t.id === key)) {
+            const btn = document.querySelector(`.tab-btn[data-tab="${key}"]`);
+            const name = btn ? btn.textContent : "복구된 탭";
+            capturedTabs.push({ id: key, name: name });
+            console.warn("[saveAppData] Tab found in data but not in DOM list (Recovered):", key, name);
+        }
+    });
+
+    console.log("[saveAppData] Final tabs list to save:", capturedTabs.length, capturedTabs);
+
+    const activeTabId = activeContent ? activeContent.id : (capturedTabs.length > 0 ? capturedTabs[0].id : PERM_TAB_ID);
 
     const storageData = {
         activeTabId: activeTabId,
-        tabs: tabs,
-        contents: tabData,
+        tabs: capturedTabs,
+        contents: sourceData,
         rankInterval: refreshIntervalSelect.value,
         adrInterval: document.getElementById('adrRefreshInterval')?.value
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
-    console.log("💾 데이터 저장 완료:", storageData);
+    console.log("💾 데이터 로컬 저장 완료. Tabs:", capturedTabs.length, "Contents:", Object.keys(tabData).length);
+
+    // Sync to server (Return promise)
+    return syncSettingsToServer(storageData);
+}
+
+async function syncSettingsToServer(data) {
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+        }
+
+        const resData = await response.json();
+        if (resData.success) {
+            console.log("☁️ 데이터 서버 동기화 완료");
+            return true;
+        } else {
+            console.error("❌ 서버 동기화 실패 (Response false):", resData);
+            alert("서버 저장 실패: " + (resData.error || "알 수 없는 오류"));
+            return false;
+        }
+    } catch (e) {
+        console.error("❌ 서버 동기화 실패:", e);
+        alert("서버 저장 중 오류 발생: " + e.message);
+        return false;
+    }
 }
 
 function saveTabState(tabId) {
     const content = document.getElementById(tabId);
     if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID || tabId === EARNINGS_TAB_ID || tabId === OVERSEAS_TAB_ID) return;
+
+    // Special handling for dynamic overseas tabs: they don't use standard grid saving
+    if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') return;
 
     const boxes = content.querySelectorAll('.chart-box');
     const state = [];
@@ -464,6 +516,24 @@ function loadFromLocalStorage() {
         return true;
     } catch (e) {
         console.error("로컬 스토리지 로딩 실패:", e);
+        return false;
+    }
+}
+
+async function loadAppDataFromServer() {
+    try {
+        console.log("☁️ 서버에서 설정 불러오는 중...");
+        const response = await fetch(`/api/settings?_t=${Date.now()}`);
+        const resData = await response.json();
+
+        if (resData.success && resData.data) {
+            console.log("✅ 서버 설정 로드 성공:", resData.data);
+            applyData(resData.data);
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error("❌ 서버 설정 로드 실패:", e);
         return false;
     }
 }
@@ -503,7 +573,7 @@ function applyData(data) {
 
 function resetDynamicTabs() {
     document.querySelectorAll('.tab-btn:not(.add-tab-btn):not([data-perm])').forEach(b => b.remove());
-    document.querySelectorAll('.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings):not(#tab_overseas)').forEach(c => c.remove());
+    document.querySelectorAll(`.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings):not(#tab_overseas):not(#${OVERSEAS_CUSTOM_TAB_ID})`).forEach(c => c.remove());
 }
 
 function activateTab(tabId) {
@@ -553,30 +623,44 @@ function activateTab(tabId) {
     else if (tabId === EARNINGS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
     }
-    else if (tabId === OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
+    else if (tabId === EARNINGS_TAB_ID) {
+        // Already rendered, do nothing
+    }
+    else if ((tabId === OVERSEAS_TAB_ID || (tabData[tabId] && tabData[tabId].type === 'overseas_custom')) && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
         // Attach refresh button event listener and trigger initial load
         setTimeout(() => {
-            const refreshBtn = document.getElementById('overseasManualRefresh');
-            const statusText = document.getElementById('overseasStatusText');
-            const lastUpdate = document.getElementById('overseasLastUpdate');
+            const isCustom = (tabData[tabId] && tabData[tabId].type === 'overseas_custom');
+            const prefix = isCustom ? `overseasCustom_${tabId}` : 'overseas';
+            const refreshBtn = document.getElementById(isCustom ? `refreshOverlay_${tabId}` : 'overseasManualRefresh');
+            const statusText = document.getElementById(`${prefix}StatusText`);
+            const lastUpdate = document.getElementById(`${prefix}LastUpdate`);
 
             if (refreshBtn) {
-                refreshBtn.addEventListener('click', refreshOverseasCharts);
+                refreshBtn.addEventListener('click', isCustom ? () => refreshOverseasCustomCharts(tabId) : refreshOverseasCharts);
             }
 
             // Initial load status update
             if (statusText) statusText.textContent = '데이터 로딩 완료';
             if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+
+            // Initialize cursor sync logic
+            setupOverseasCursorSync();
+
+            // NEW: Setup sector group listeners
+            if (isCustom) setupSectorGroupListeners(tabId);
         }, 100);
     }
-    else if (tabId === OVERSEAS_TAB_ID) {
-        // Already rendered, just ensure button listener is attached
-        const refreshBtn = document.getElementById('overseasManualRefresh');
+    else if (tabId === OVERSEAS_TAB_ID || (tabData[tabId] && tabData[tabId].type === 'overseas_custom')) {
+        // Already rendered
+        const isCustom = (tabData[tabId] && tabData[tabId].type === 'overseas_custom');
+        const refreshBtn = document.getElementById(isCustom ? `refreshOverlay_${tabId}` : 'overseasManualRefresh');
         if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
-            refreshBtn.addEventListener('click', refreshOverseasCharts);
+            refreshBtn.addEventListener('click', isCustom ? () => refreshOverseasCustomCharts(tabId) : refreshOverseasCharts);
             refreshBtn.setAttribute('data-listener-attached', 'true');
         }
+
+        setupOverseasCursorSync();
     }
     else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && tabId !== EARNINGS_TAB_ID && tabId !== OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
@@ -715,71 +799,117 @@ function createChartGrid(tabId) {
         return `<iframe src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" allow="${perm}" sandbox="${sand}"></iframe>`;
     }
 
-    if (tabId === OVERSEAS_TAB_ID) {
-        // Finviz charts - 12 charts (2 columns: Left 1-6, Right 7-12)
-        // Futures use 'fut_chart.ashx', Stocks/ETFs use 'chart.ashx'
-        const leftCharts = [
-            { url: "https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l", title: "DX – 달러인덱스" },
-            { url: "https://finviz.com/fut_chart.ashx?t=GC&ty=c&ta=1&p=d&s=l", title: "GOLD – 금" }, // GOLD -> GC
-            { url: "https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l", title: "SI – 은" },
-            { url: "https://finviz.com/fut_chart.ashx?t=HG&ty=c&ta=1&p=d&s=l", title: "HG – 구리" },
-            { url: "https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l", title: "CL – 크루드오일 WTI" },
-            { url: "https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l", title: "BTC – 비트코인" }
-        ];
+    if (tabId === OVERSEAS_TAB_ID || (tabData[tabId] && tabData[tabId].type === 'overseas_custom')) {
+        const isCustom = (tabData[tabId] && tabData[tabId].type === 'overseas_custom');
+        const prefix = isCustom ? `overseasCustom_${tabId}` : 'overseas';
 
-        const rightCharts = [
-            { url: "https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l", title: "S&P500 선물" },
-            { url: "https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l", title: "나스닥 선물" },
-            { url: "https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l", title: "유로존 대표 50 선물" },
-            { url: "https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l", title: "NIKKEI 선물" },
-            { url: "https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l", title: "FXI – 중국 대형주" }, // Stock/ETF
-            { url: "https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l", title: "홍콩 항셍 테크 ETF" } // Stock/ETF
-        ];
+        let titleText = isCustom ? '해외종목' : '해외동향';
+        // If it's a dynamic custom tab, try to find the button text
+        if (tabId.startsWith('tab_custom_')) {
+            const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+            if (btn) titleText = btn.textContent;
+        }
 
-        const renderChart = (chart) => {
-            const isFuture = chart.url.includes('fut_chart.ashx');
-            const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(chart.url)}`;
-            return `
-                <div class="finviz-chart-box">
-                    <div class="finviz-chart-title">${chart.title}</div>
-                    <div class="finviz-img-wrapper ${isFuture ? 'is-future' : ''}">
-                        <img src="${proxyUrl}" class="finviz-chart-img ${isFuture ? 'future' : 'stock'}" alt="${chart.title}" data-chart-url="${chart.url}">
+        let gridContent = '';
+        if (isCustom) {
+            let charts = [];
+            if (tabData[tabId] && tabData[tabId].config) {
+                charts = parseCustomCharts(tabData[tabId].config);
+            }
+
+            if (charts.length === 0) {
+                gridContent = `
+                    <div class="empty-custom-charts" style="padding: 50px; text-align: center; color: var(--text-muted);">
+                        <p>등록된 차트가 없습니다. [종목입력] 버튼을 눌러 차트를 추가하세요.</p>
+                    </div>`;
+            } else {
+                const sectorColors = tabData[tabId].sectorColors || {};
+                let currentItemColor = '';
+                let colorIdx = 0;
+
+                const renderedItems = charts.map((item, idx) => {
+                    if (item.type === 'comment') return ''; // Skip rendering comments
+
+                    if (item.type === 'divider') {
+                        currentItemColor = item.color || sectorColors[item.title] || SECTOR_COLORS[colorIdx++ % SECTOR_COLORS.length];
+                        return `
+                        <div class="finviz-divider" data-index="${idx}" style="--section-color: ${currentItemColor}">
+                            <div class="divider-title">
+                                <span class="title-text">${item.title}</span>
+                            </div>
+                            <div class="divider-line"></div>
+                            <div class="divider-controls">
+                                <button class="btn-section-edit" title="섹션 편집">⚙️</button>
+                                <div class="section-edit-popup">
+                                    <div class="edit-group">
+                                        <label>제목</label>
+                                        <input type="text" class="edit-section-title" value="${item.title}">
+                                    </div>
+                                    <div class="edit-group">
+                                        <label>색상</label>
+                                        <div class="color-presets">
+                                            ${SECTOR_COLORS.map(c => `<div class="color-swatch" style="background:${c}" data-color="${c}"></div>`).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>`;
+                    } else {
+                        return renderFinvizChartItem(item, currentItemColor);
+                    }
+                }).join('');
+
+                gridContent = `<div class="finviz-container">${renderedItems}</div>`;
+            }
+        } else {
+            // Original Overseas - fixed 12 layout
+            const leftCharts = [
+                { url: "https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l", title: "DX – 달러인덱스" },
+                { url: "https://finviz.com/fut_chart.ashx?t=GC&ty=c&ta=1&p=d&s=l", title: "GOLD – 금" },
+                { url: "https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l", title: "SI – 은" },
+                { url: "https://finviz.com/fut_chart.ashx?t=HG&ty=c&ta=1&p=d&s=l", title: "HG – 구리" },
+                { url: "https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l", title: "CL – 크루드오일 WTI" },
+                { url: "https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l", title: "BTC – 비트코인" }
+            ];
+            const rightCharts = [
+                { url: "https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l", title: "S&P500 선물" },
+                { url: "https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l", title: "나스닥 선물" },
+                { url: "https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l", title: "유로존 대표 50 선물" },
+                { url: "https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l", title: "NIKKEI 선물" },
+                { url: "https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l", title: "FXI – 중국 대형주" },
+                { url: "https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l", title: "홍콩 항셍 테크 ETF" }
+            ];
+            gridContent = `
+                <div class="finviz-container">
+                    <div class="finviz-col">
+                        ${leftCharts.map(c => renderFinvizChartItem(c)).join('')}
                     </div>
-                </div>
-            `;
-        };
+                    <div class="finviz-col">
+                        ${rightCharts.map(c => renderFinvizChartItem(c)).join('')}
+                    </div>
+                </div>`;
+        }
 
-        let html = `
-            <div class="container" style="height: 100%; display: flex; flex-direction: column;">
+        return `
+            <div class="container overseas-container">
                 <header>
                     <div class="header-single-line">
-                        <h1><strong>해외동향</strong></h1>
+                        <h1><strong>${titleText}</strong></h1>
                         <div class="header-controls">
-                            <button id="overseasManualRefresh" class="btn-refresh" aria-label="조회">
-                                조회
-                            </button>
+                            <button id="${isCustom ? `refreshOverlay_${tabId}` : 'overseasManualRefresh'}" class="btn-refresh" aria-label="조회">조회</button>
                         </div>
                     </div>
                     <div class="status-info">
-                        <span id="overseasLastUpdate">-</span>
+                        <span id="${prefix}LastUpdate">-</span>
                         <span class="status-separator">|</span>
-                        <span id="overseasStatusText">대기 중...</span>
+                        <span id="${prefix}StatusText">대기 중...</span>
+                        ${isCustom ? `<button class="btn-config status-btn config-trigger" data-tab="${tabId}">종목입력</button>` : ''}
                     </div>
                 </header>
-                <div class="finviz-container" style="flex: 1; overflow: auto;">`;
-
-        // Left Column
-        html += '<div class="finviz-col">';
-        leftCharts.forEach(chart => { html += renderChart(chart); });
-        html += '</div>';
-
-        // Right Column
-        html += '<div class="finviz-col">';
-        rightCharts.forEach(chart => { html += renderChart(chart); });
-        html += '</div>';
-
-        html += '</div></div>';
-        return html;
+                <div class="overseas-content-scroll" style="flex:1; overflow:auto;">
+                    ${gridContent}
+                </div>
+            </div>`;
     }
 
     if (!tabData[tabId]) {
@@ -808,18 +938,18 @@ function createChartGrid(tabId) {
         const mainStyle = state.mode === 'sub' ? 'display:none;' : 'display:block;';
         const subStyle = state.mode === 'sub' ? 'display:block;' : 'display:none;';
         html += `
-            <div class="chart-box" data-last-symbol="${lastSymbol}">
-                <div class="chart-header">
-                    <input type="text" class="chart-title-input" value="Chart ${i + 1}" readonly>
-                    <input type="text" class="chart-input" value="${symbol}" placeholder="심볼 또는 URL">
-                    <button class="chart-go-btn">이동</button>
-                    <img src="https://www.google.com/s2/favicons?domain=tradingview.com&sz=32" class="chart-control-icon chart-t-btn" title="TradingView">
-                    <img src="https://www.google.com/s2/favicons?domain=investing.com&sz=32" class="chart-control-icon chart-i-btn" title="Investing.com">
-                    <img src="https://www.google.com/s2/favicons?domain=alphasquare.co.kr&sz=32" class="chart-control-icon chart-a-btn" title="AlphaSquare">
-                </div>
-                <iframe class="iframe-main" ${mainSrcAttr} src="${mainSrcVal}" style="${mainStyle}" allow="${perm}" sandbox="${sand}"></iframe>
-                <iframe class="iframe-sub" src="${subSrc}" style="${subStyle}" allow="${perm}" sandbox="${sand}"></iframe>
-            </div>`;
+        <div class="chart-box" data-last-symbol="${lastSymbol}">
+            <div class="chart-header">
+                <input type="text" class="chart-title-input" value="Chart ${i + 1}" readonly>
+                <input type="text" class="chart-input" value="${symbol}" placeholder="심볼 또는 URL">
+                <button class="chart-go-btn">이동</button>
+                <img src="https://www.google.com/s2/favicons?domain=tradingview.com&sz=32" class="chart-control-icon chart-t-btn" title="TradingView">
+                <img src="https://www.google.com/s2/favicons?domain=investing.com&sz=32" class="chart-control-icon chart-i-btn" title="Investing.com">
+                <img src="https://www.google.com/s2/favicons?domain=alphasquare.co.kr&sz=32" class="chart-control-icon chart-a-btn" title="AlphaSquare">
+            </div>
+            <iframe class="iframe-main" ${mainSrcAttr} src="${mainSrcVal}" style="${mainStyle}" allow="${perm}" sandbox="${sand}"></iframe>
+            <iframe class="iframe-sub" src="${subSrc}" style="${subStyle}" allow="${perm}" sandbox="${sand}"></iframe>
+        </div>`;
     });
     html += '</div>';
     return html;
@@ -1592,6 +1722,14 @@ document.body.addEventListener('click', function (e) {
         loadChartFromInput(goBtn.previousElementSibling);
         return;
     }
+
+    // --- Dynamic Finviz Config Trigger ---
+    const configTrigger = e.target.closest('.config-trigger');
+    if (configTrigger) {
+        currentConfigTabId = configTrigger.dataset.tab;
+        openCustomChartModal();
+        return;
+    }
     if (e.target.classList.contains('chart-t-btn')) {
         const chartBox = e.target.closest('.chart-box');
         const iframeMain = chartBox.querySelector('.iframe-main');
@@ -1662,17 +1800,28 @@ tabContainer.addEventListener("contextmenu", e => {
     }
 });
 
-contextMenu.addEventListener("click", () => {
+contextMenu.addEventListener("click", (e) => {
     if (!targetTabBtn || targetTabBtn.dataset.perm) { contextMenu.style.display = "none"; targetTabBtn = null; return; }
-    const tabId = targetTabBtn.dataset.tab;
-    const content = document.getElementById(tabId);
-    targetTabBtn.remove();
-    if (content) content.remove();
-    delete tabData[tabId];
-    saveAppData();
-    const remainingTabs = document.querySelectorAll(".tab-btn:not(.add-tab-btn)");
-    if (remainingTabs.length > 0) {
-        if (!document.querySelector(".tab-btn.active")) activateTab(remainingTabs[0].dataset.tab);
+
+    // Check if the clicked item is 'deleteTab'
+    if (e.target.id === 'deleteTab') {
+        const confirmed = confirm("정말로 이 탭을 삭제하시겠습니까?");
+        if (!confirmed) {
+            contextMenu.style.display = "none";
+            targetTabBtn = null;
+            return;
+        }
+
+        const tabId = targetTabBtn.dataset.tab;
+        const content = document.getElementById(tabId);
+        targetTabBtn.remove();
+        if (content) content.remove();
+        delete tabData[tabId];
+        saveAppData();
+        const remainingTabs = document.querySelectorAll(".tab-btn:not(.add-tab-btn)");
+        if (remainingTabs.length > 0) {
+            if (!document.querySelector(".tab-btn.active")) activateTab(remainingTabs[0].dataset.tab);
+        }
     }
     targetTabBtn = null;
     contextMenu.style.display = "none";
@@ -1710,13 +1859,52 @@ tabContainer.addEventListener('dragover', function (e) {
     if (afterElement == null) { tabContainer.insertBefore(draggedItem, addTabBtn); } else { tabContainer.insertBefore(draggedItem, afterElement); }
 });
 
-addTabBtn.addEventListener("click", () => {
+addTabBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    addTabMenu.style.display = "block";
+    addTabMenu.style.left = e.pageX + "px";
+    addTabMenu.style.top = e.pageY + "px";
+});
+
+// Close menus when clicking elsewhere
+window.addEventListener('click', () => {
+    if (contextMenu) contextMenu.style.display = 'none';
+    if (addTabMenu) addTabMenu.style.display = 'none';
+});
+
+// Add Overseas Stocks Tab
+document.getElementById('addOverseasTab').addEventListener('click', () => {
     const uniqueId = Date.now();
-    const newTabId = "tab_" + uniqueId;
-    const tabCount = document.querySelectorAll(".tab-btn:not(.add-tab-btn)").length + 1;
-    createTabButtonElement(newTabId, "탭 " + tabCount);
+    const newTabId = "tab_custom_" + uniqueId;
+    const currentTabs = Array.from(document.querySelectorAll(".tab-btn"));
+    const overseasCount = currentTabs.filter(btn => btn.textContent.startsWith("해외종목")).length + 1;
+
+    // Initialize tabData for this tab as a custom overseas type
+    tabData[newTabId] = { type: 'overseas_custom', config: '' };
+
+    createTabButtonElement(newTabId, "해외종목 " + overseasCount);
     createTabContentElement(newTabId);
     activateTab(newTabId);
+    addTabMenu.style.display = "none";
+    saveAppData();
+});
+
+// Add Chart Tab
+document.getElementById('addChartTab').addEventListener('click', () => {
+    const uniqueId = Date.now();
+    const newTabId = "tab_grid_" + uniqueId;
+    const currentTabs = Array.from(document.querySelectorAll(".tab-btn"));
+    const chartCount = currentTabs.filter(btn => btn.textContent.startsWith("차트")).length + 1;
+
+    // Default 6-grid behavior
+    const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT", "SP:SPX", "KRX:005930"];
+    tabData[newTabId] = defaults.map(sym => ({ symbol: sym, lastSymbol: sym, mode: 'main', mainSrc: '', subSrc: '' }));
+
+    createTabButtonElement(newTabId, "차트 " + chartCount);
+    createTabContentElement(newTabId);
+    activateTab(newTabId);
+    addTabMenu.style.display = "none";
+    saveAppData();
 });
 
 captureBtn.addEventListener('click', async () => {
@@ -1747,7 +1935,6 @@ function refreshOverseasCharts() {
     const overseasContent = document.getElementById(OVERSEAS_TAB_ID);
     if (!overseasContent) return;
 
-    // Update status
     const statusText = document.getElementById('overseasStatusText');
     const lastUpdate = document.getElementById('overseasLastUpdate');
 
@@ -1757,42 +1944,652 @@ function refreshOverseasCharts() {
     let loadedCount = 0;
     const totalCount = chartImages.length;
 
+    if (totalCount === 0) {
+        if (statusText) statusText.textContent = '데이터 없음';
+        return;
+    }
+
+    const checkComplete = () => {
+        if (++loadedCount === totalCount) {
+            if (statusText) statusText.textContent = '데이터 로딩 완료';
+            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+            setupOverseasCursorSync();
+        }
+    };
+
     chartImages.forEach(img => {
         const originalUrl = img.getAttribute('data-chart-url');
         if (originalUrl) {
-            // Add cache-busting timestamp
-            const timestamp = Date.now();
-            const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(originalUrl)}&t=${timestamp}`;
-
-            img.onload = () => {
-                loadedCount++;
-                if (loadedCount === totalCount) {
-                    if (statusText) statusText.textContent = '데이터 로딩 완료';
-                    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
-                }
-            };
-
+            const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(originalUrl)}&_t=${Date.now()}`;
+            img.onload = checkComplete;
             img.onerror = () => {
-                loadedCount++;
-                if (loadedCount === totalCount) {
-                    if (statusText) statusText.textContent = '일부 데이터 로딩 실패';
-                    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
-                }
+                console.warn('[Refresh] Image load failed:', originalUrl);
+                checkComplete();
             };
-
             img.src = proxyUrl;
+        } else {
+            checkComplete();
         }
     });
 }
+
+/**
+ * 해외동향 차트 커서 동기화 설정
+ */
+function setupOverseasCursorSync() {
+    const activeContent = document.querySelector('.tab-content.active');
+    if (!activeContent) return;
+
+    const isOverseas = (activeContent.id === OVERSEAS_TAB_ID ||
+        (tabData[activeContent.id] && tabData[activeContent.id].type === 'overseas_custom'));
+
+    if (!isOverseas) return;
+
+    // Use delegation - only attach once per DOM life of the tab content
+    if (activeContent.dataset.cursorSyncAttached === 'true') return;
+
+    const handleMouseMove = (e) => {
+        const wrapper = e.target.closest('.finviz-img-wrapper');
+        const lines = activeContent.querySelectorAll('.finviz-cursor-line');
+
+        if (!wrapper) {
+            lines.forEach(l => l.style.visibility = 'hidden');
+            return;
+        }
+
+        const rect = wrapper.getBoundingClientRect();
+        const offsetRight = rect.right - e.clientX;
+
+        lines.forEach((line) => {
+            line.style.right = `${offsetRight}px`;
+            line.style.visibility = 'visible';
+        });
+    };
+
+    const handleMouseLeave = () => {
+        const lines = activeContent.querySelectorAll('.finviz-cursor-line');
+        lines.forEach(line => line.style.visibility = 'hidden');
+    };
+
+    activeContent.addEventListener('mousemove', handleMouseMove);
+    activeContent.addEventListener('mouseleave', handleMouseLeave);
+    activeContent.dataset.cursorSyncAttached = 'true';
+    console.log(`[CursorSync] Delegation attached to ${activeContent.id}`);
+}
+
+/**
+ * 해외 차트 렌더링 도우미
+ */
+const SECTOR_COLORS = [
+    '#1864ab', '#2b8a3e', '#e67700', '#5f3dc4', '#c2255c',
+    '#0b7285', '#5c940d', '#d9480f', '#862e9c', '#a61e4d'
+];
+
+function renderFinvizChartItem(chart, color = '') {
+    const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(chart.url)}`;
+    const isFuture = chart.url.includes('fut_chart.ashx');
+
+    // Safety check: ensure title is clean of accidental leading/trailing quotes
+    const cleanTitle = (chart.title || '').replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '').trim();
+
+    // Convert hex to semi-transparent version for background
+    let style = '';
+    if (color) {
+        style = `--section-color: ${color}; --section-color-alpha: ${color}22;`;
+    }
+
+    return `
+        <div class="finviz-chart-box" style="${style}">
+            <div class="finviz-chart-title ${color ? 'colorful' : ''}">${cleanTitle}</div>
+            <div class="finviz-img-wrapper ${isFuture ? 'is-future' : ''}">
+                <img src="${proxyUrl}" class="finviz-chart-img ${isFuture ? 'future' : 'stock'}" alt="${cleanTitle}" data-chart-url="${chart.url}">
+                <div class="finviz-cursor-line"></div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 사용자 정의 해외 차트 데이터 파싱
+ */
+function parseCustomCharts(input) {
+    const items = [];
+    const lines = input.split('\n');
+
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            // Preserve empty lines if we want, but simpler to skip for now
+            return;
+        }
+
+        // Comment Check: //
+        if (trimmed.startsWith('//')) {
+            items.push({
+                type: 'comment',
+                content: line // keep original line with indentation
+            });
+            return;
+        }
+
+        // Divider Check: <Title, Color>
+        if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+            const content = trimmed.substring(1, trimmed.length - 1);
+            const parts = content.split(',').map(s => s.trim());
+            items.push({
+                type: 'divider',
+                title: parts[0],
+                color: parts[1] || '' // Fallback to auto-assigning later
+            });
+            return;
+        }
+
+        // Chart Check: (url, title)
+        const chartRegex = /\(\s*(.*?)\s*,\s*(.*?)\s*\)/;
+        const match = trimmed.match(chartRegex);
+        if (match) {
+            // Strip any surrounding quotes (standard or smart)
+            const cleanUrl = match[1].trim().replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '');
+            const cleanTitle = match[2].trim().replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '');
+
+            items.push({
+                type: 'chart',
+                url: cleanUrl,
+                title: cleanTitle
+            });
+        }
+    });
+
+    return items;
+}
+
+/**
+ * 섹터 그룹 편집 리스너 설정
+ */
+function setupSectorGroupListeners(tabId) {
+    const content = document.getElementById(tabId);
+    if (!content) return;
+
+    const dividers = content.querySelectorAll('.finviz-divider');
+    dividers.forEach(divider => {
+        const btn = divider.querySelector('.btn-section-edit');
+        const popup = divider.querySelector('.section-edit-popup');
+        const titleInput = divider.querySelector('.edit-section-title');
+        const swatches = divider.querySelectorAll('.color-swatch');
+        const index = parseInt(divider.dataset.index);
+
+        // Toggle popup
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Close other popups first
+            document.querySelectorAll('.section-edit-popup.active').forEach(p => {
+                if (p !== popup) p.classList.remove('active');
+            });
+            popup.classList.toggle('active');
+        });
+
+        // Prevent closing when clicking inside the popup (including text selection)
+        popup.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // Update Title
+        titleInput.addEventListener('input', () => {
+            const newTitle = titleInput.value.trim() || 'No Title';
+            divider.querySelector('.title-text').textContent = newTitle;
+            updateConfigString(tabId, index, { title: newTitle });
+        });
+
+        // Update Color
+        swatches.forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                const newColor = swatch.dataset.color;
+                divider.style.setProperty('--section-color', newColor);
+
+                // Update following charts' background
+                let next = divider.nextElementSibling;
+                while (next && !next.classList.contains('finviz-divider')) {
+                    if (next.classList.contains('finviz-chart-box')) {
+                        next.style.setProperty('--section-color', newColor);
+                        next.style.setProperty('--section-color-alpha', newColor + '22');
+                        next.querySelector('.finviz-chart-title').classList.add('colorful');
+                    }
+                    next = next.nextElementSibling;
+                }
+
+                updateConfigString(tabId, index, { color: newColor });
+                popup.classList.remove('active');
+            });
+        });
+    });
+}
+
+/**
+ * 섹션 데이터 변경 시 config 문자열 동기화
+ */
+function updateConfigString(tabId, index, updates) {
+    if (!tabData[tabId] || !tabData[tabId].config) return;
+
+    const items = parseCustomCharts(tabData[tabId].config);
+    if (items[index] && items[index].type === 'divider') {
+        if (updates.title !== undefined) {
+            // If title changed, migrate the color to the new title key if it exists
+            const oldTitle = items[index].title;
+            const currentColors = tabData[tabId].sectorColors || {};
+            if (currentColors[oldTitle]) {
+                currentColors[updates.title] = currentColors[oldTitle];
+                // Optional: delete currentColors[oldTitle];
+            }
+            items[index].title = updates.title;
+        }
+        if (updates.color !== undefined) {
+            tabData[tabId].sectorColors = tabData[tabId].sectorColors || {};
+            tabData[tabId].sectorColors[items[index].title] = updates.color;
+        }
+    }
+
+    // JSON-like array objects back to config string (WITHOUT colors, preserving comments)
+    const newConfig = items.map(item => {
+        if (item.type === 'comment') {
+            return item.content;
+        } else if (item.type === 'divider') {
+            return `<${item.title}>`;
+        } else {
+            return `(${item.url}, ${item.title})`;
+        }
+    }).join('\n');
+
+    tabData[tabId].config = newConfig;
+
+    // Sync to Modal if open
+    const textarea = document.getElementById('customChartInput');
+    if (textarea && currentConfigTabId === tabId) {
+        textarea.value = newConfig;
+    }
+
+    saveAppData(); // Auto-save & Sync
+
+    // Refresh highlight if editor is open
+    updateSyntaxHighlighting();
+}
+
+/**
+ * 주석 구문 강조 (녹색 처리)
+ */
+function updateSyntaxHighlighting() {
+    const textarea = document.getElementById('customChartInput');
+    const backdrop = document.getElementById('highlightBackdrop');
+    if (!textarea || !backdrop) return;
+
+    const text = textarea.value;
+    const lines = text.split('\n');
+
+    const highlighted = lines.map(line => {
+        const trimmed = line.trim();
+        // HTML escape
+        const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        if (trimmed.startsWith('//')) {
+            return `<span class="syntax-comment">${escaped}</span>`;
+        }
+        return escaped;
+    }).join('\n');
+
+    // Add a trailing newline to avoid height mismatch at end of content
+    backdrop.innerHTML = highlighted + (text.endsWith('\n') ? '\n ' : '');
+}
+/**
+ * 커스텀 차트 설정 모달 열기
+ */
+function openCustomChartModal() {
+    const modal = document.getElementById('customChartModal');
+    if (!modal) return;
+    const textarea = document.getElementById('customChartInput');
+    if (textarea) {
+        if (currentConfigTabId && tabData[currentConfigTabId]) {
+            textarea.value = tabData[currentConfigTabId].config || '';
+        } else {
+            textarea.value = '';
+        }
+    }
+    modal.style.display = 'flex';
+
+    // Auto-focus and highlight
+    setTimeout(() => {
+        if (textarea) textarea.focus();
+        updateSyntaxHighlighting();
+    }, 10);
+}
+
+/**
+ * 해외 커스텀 차트 새로고침
+ */
+function refreshOverseasCustomCharts(tabId) {
+    const content = document.getElementById(tabId);
+    if (!content) return;
+    const prefix = `overseasCustom_${tabId}`;
+    const statusText = document.getElementById(`${prefix}StatusText`);
+    const lastUpdate = document.getElementById(`${prefix}LastUpdate`);
+
+    if (statusText) statusText.textContent = '데이터 로딩 중...';
+
+    const images = content.querySelectorAll('.finviz-chart-img');
+    let loadedCount = 0;
+    const totalCount = images.length;
+
+    if (totalCount === 0) {
+        if (statusText) statusText.textContent = '데이터 없음';
+        return;
+    }
+
+    const checkComplete = () => {
+        if (++loadedCount === totalCount) {
+            if (statusText) statusText.textContent = '데이터 로딩 완료';
+            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+            setupOverseasCursorSync();
+        }
+    };
+
+    images.forEach(img => {
+        const proxyUrl = `/api/finviz-image?url=${encodeURIComponent(img.dataset.chartUrl)}&_t=${Date.now()}`;
+        img.onload = checkComplete;
+        img.onerror = () => {
+            console.warn('[RefreshCustom] Image load failed:', img.dataset.chartUrl);
+            checkComplete();
+        };
+        img.src = proxyUrl;
+    });
+}
+
+// ==========================================================
+// Bulk Settings (Export/Import All Tabs)
+// ==========================================================
+
+function setupBulkSettingsHandlers() {
+    const bulkUploadBtn = document.getElementById('bulkUpload');
+    const bulkDownloadBtn = document.getElementById('bulkDownload');
+    const bulkFileInput = document.getElementById('bulkFileInput');
+
+    if (bulkDownloadBtn) {
+        bulkDownloadBtn.addEventListener('click', bulkExportSettings);
+    }
+
+    if (bulkUploadBtn && bulkFileInput) {
+        bulkUploadBtn.addEventListener('click', () => {
+            bulkFileInput.value = '';
+            bulkFileInput.click();
+        });
+
+        bulkFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                bulkImportSettings(file);
+            }
+        });
+    }
+}
+
+/**
+ * 전용 탭들의 설정을 [탭이름] 섹션으로 구분하여 통합 파일로 내보내기
+ */
+function bulkExportSettings() {
+    let content = "";
+
+    // Find all custom overseas tabs
+    const tabButtons = Array.from(document.querySelectorAll('.tab-btn:not(.add-tab-btn)'));
+    let hasData = false;
+
+    tabButtons.forEach(btn => {
+        const tabId = btn.dataset.tab;
+        if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+            const title = btn.textContent.trim();
+            const config = tabData[tabId].config || "";
+            const sectorColors = tabData[tabId].sectorColors || {};
+
+            // Add Header
+            content += `[${title}]\n`;
+
+            const lines = config.split('\n');
+            const exportLines = lines.map(line => {
+                const trimmed = line.trim();
+                // Check if it's a divider <Title>
+                if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+                    const titleMatch = trimmed.match(/^<([^,>]+)(?:,\s*([^>]+))?>$/);
+                    if (titleMatch) {
+                        const divTitle = titleMatch[1].trim();
+                        if (sectorColors[divTitle]) {
+                            // Re-append color
+                            return `<${divTitle}, ${sectorColors[divTitle]}>`;
+                        }
+                    }
+                }
+                return line;
+            });
+
+            content += exportLines.join('\n');
+            content += "\n\n";
+            hasData = true;
+        }
+    });
+
+    if (!hasData) {
+        alert("내보낼 커스텀 탭 설정이 없습니다.");
+        return;
+    }
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bulk_settings_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * 통합 파일에서 설정 불러오기
+ */
+/**
+ * 통합 파일에서 설정 불러오기
+ */
+function bulkImportSettings(file) {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        // Remove BOM if present (Common in Windows Notepad files)
+        const text = e.target.result.replace(/^\uFEFF/, '');
+        console.log("📂 Bulk Import Started. File content length:", text.length);
+
+        if (!confirm("현재의 모든 커스텀 탭 설정이 덮어씌워지거나 추가됩니다. 계속하시겠습니까?")) {
+            return;
+        }
+
+        const lines = text.split(/\r?\n/);
+        let currentTitle = null;
+        let currentConfigLines = [];
+        let importCount = 0;
+
+        // Local accumulator for robust saving
+        const localImportedData = {};
+
+        // Helper to process a finished section
+        const processSection = (title, configLines) => {
+            // Handle duplicate names by appending (1), (2), etc.
+            let uniqueTitle = title;
+            let counter = 1;
+            while (true) {
+                // Check if this title is already used in this CURRENT import session?
+                // Or check global existence?
+                // Logic:
+                // If it's the FIRST time we see "MyTab" in this session, we can reuse existing "MyTab".
+                // If we see "MyTab" AGAIN in this session, we must rename it.
+
+                // However, distinguishing between "reusing existing non-session tab" and "duplicate in file" is hard without a session cache.
+                // Let's rely on DOM.
+
+                const existingBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === uniqueTitle);
+
+                // If no button exists with this name, it's unique!
+                if (!existingBtn) break;
+
+                // If button exists:
+                // Is it one we JUST created in this session? (Check localImportedData)
+                const existingId = existingBtn.dataset.tab;
+                if (localImportedData[existingId]) {
+                    // YES, we just created/modified this tab in this session.
+                    // This means the CURRENT title is a duplicate within the file!
+                    // We must rename the CURRENT title.
+                    uniqueTitle = `${title} (${counter++})`;
+                } else {
+                    // NO, this is a pre-existing tab from before import.
+                    // We can overwrite/Reuse it.
+                    break;
+                }
+            }
+
+            console.log(`Processing Section: [${uniqueTitle}], Lines: ${configLines.length}`);
+
+            // Check if tab already exists by name (using the unique name)
+            let targetTabId = null;
+            const existingBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === uniqueTitle);
+
+            if (existingBtn) {
+                targetTabId = existingBtn.dataset.tab;
+                // If exists but not custom overseas, skip
+                if (!tabData[targetTabId] || tabData[targetTabId].type !== 'overseas_custom') {
+                    console.warn(`Skipping existing non-custom tab: ${uniqueTitle}`);
+                    return;
+                }
+            } else {
+                // Create new tab
+                const uniqueId = Date.now() + Math.floor(Math.random() * 1000);
+                targetTabId = "tab_custom_" + uniqueId;
+
+                // Init data
+                tabData[targetTabId] = { type: 'overseas_custom', config: '', sectorColors: {} };
+                createTabButtonElement(targetTabId, uniqueTitle);
+                createTabContentElement(targetTabId);
+                console.log(`Created new tab: ${uniqueTitle} (${targetTabId})`);
+            }
+
+            // Parse config & Colors
+            const finalLines = [];
+            const newColors = tabData[targetTabId].sectorColors || {};
+
+            configLines.forEach(line => {
+                const trimmed = line.trim();
+                const divMatch = trimmed.match(/^<([^,>]+),\s*([^>]+)>$/);
+                if (divMatch) {
+                    const divTitle = divMatch[1].trim();
+                    const divColor = divMatch[2].trim();
+                    newColors[divTitle] = divColor;
+                    finalLines.push(`<${divTitle}>`);
+                } else {
+                    finalLines.push(line);
+                }
+            });
+
+            tabData[targetTabId].config = finalLines.join('\n');
+            tabData[targetTabId].sectorColors = newColors;
+
+            // Also update local accumulator
+            localImportedData[targetTabId] = tabData[targetTabId];
+
+            importCount++;
+            console.log(`[bulkImport] Processed tab ${targetTabId}. Data keys:`, Object.keys(tabData));
+        };
+
+        try {
+            // Line-by-line parser
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmed = line.trim();
+
+                // Regex: Allow optional trailing whitespace
+                const titleMatch = trimmed.match(/^\[(.*?)\]\s*$/);
+                if (titleMatch) {
+                    if (currentTitle) {
+                        processSection(currentTitle, currentConfigLines);
+                    }
+                    currentTitle = titleMatch[1].trim();
+                    currentConfigLines = [];
+                } else {
+                    if (currentTitle) {
+                        currentConfigLines.push(line);
+                    }
+                }
+            }
+
+            if (currentTitle) {
+                processSection(currentTitle, currentConfigLines);
+            }
+
+            // DEBUG: Debug Parsed sections
+            const foundTitles = Object.keys(localImportedData).map(k => {
+                // Find name from button logic?
+                // We don't store Name in localImportedData structure?
+                // We only stored the data object { type, config ... }
+                // We can find the button
+                const btn = document.querySelector(`.tab-btn[data-tab="${k}"]`);
+                return btn ? btn.textContent : "Unknown";
+            });
+
+            console.log("Parsed Titles:", foundTitles);
+
+            if (importCount > 0) {
+                // Give DOM a moment to update completely
+                await new Promise(r => setTimeout(r, 500));
+
+                console.log("[bulkImport] Pre-save check. Global tabData keys:", Object.keys(tabData));
+
+                // Merge global and local to be 100% sure we have everything
+                const mergedData = Object.assign({}, tabData, localImportedData);
+
+                console.log("[bulkImport] Force saving with merged data. Keys:", Object.keys(mergedData));
+
+                if (Object.keys(mergedData).length === 0) {
+                    console.error("CRITICAL: mergedData is empty despite importCount > 0!");
+                    alert("오류: 데이터 변수가 비어있습니다. 저장이 실패할 수 있습니다.");
+                }
+
+                // Force save with explicitly merged data
+                await saveAppData(mergedData);
+
+                alert(`${importCount}개의 탭 설정이 성공적으로 로드되었습니다.`);
+
+                // Activate the newly created tab (use the last processed title as best guess)
+                if (currentTitle) {
+                    const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === currentTitle);
+                    if (btn) {
+                        activateTab(btn.dataset.tab);
+                    }
+                }
+            } else {
+                alert("가져올 설정 데이터가 없거나 형식이 올바르지 않습니다.\n파일 내용을 확인해주세요.");
+            }
+        } catch (err) {
+            console.error(err);
+            alert(`[치명적 오류 발생]\n불러오기 중 오류가 발생했습니다.\n${err.message}`);
+        }
+    };
+    reader.readAsText(file);
+}
+
 
 // ==========================================================
 // Initialization
 // ==========================================================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('앱 초기화...');
 
-    const loaded = loadFromLocalStorage();
+    // Try server sync first, fall back to localStorage
+    let loaded = await loadAppDataFromServer();
+    if (!loaded) {
+        loaded = loadFromLocalStorage();
+    }
+
     ensurePermanentTabs();
 
     if (!loaded || !document.querySelector('.tab-content.active')) {
@@ -1802,7 +2599,131 @@ document.addEventListener('DOMContentLoaded', () => {
     loadData();
     loadTransactionRank();
     startAutoRefresh();
+    setupBulkSettingsHandlers();
+
+    // Global listener for closing sector popups (Improved to handle text selection)
+    let isSectorPopupClick = false;
+    document.addEventListener('mousedown', (e) => {
+        isSectorPopupClick = !!e.target.closest('.divider-controls');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.divider-controls') && !isSectorPopupClick) {
+            document.querySelectorAll('.section-edit-popup.active').forEach(p => {
+                p.classList.remove('active');
+            });
+        }
+    });
 
     if (mrktTpSelect) mrktTpSelect.addEventListener('change', loadTransactionRank);
     if (stexTpSelect) stexTpSelect.addEventListener('change', loadTransactionRank);
+
+    // --- Custom Chart Modal Handlers ---
+    const modal = document.getElementById('customChartModal');
+    if (modal) {
+        const saveBtn = document.getElementById('saveCustomCharts');
+        const cancelBtn = document.getElementById('cancelCustomCharts');
+        const closeX = modal.querySelector('.close-modal');
+
+        const closeModal = () => { modal.style.display = 'none'; };
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                const textarea = document.getElementById('customChartInput');
+                const input = textarea ? textarea.value : '';
+
+                if (currentConfigTabId && tabData[currentConfigTabId]) {
+                    tabData[currentConfigTabId].config = input;
+                    saveAppData();
+                }
+                console.log('[Modal] Saved custom charts for:', currentConfigTabId);
+
+                const content = document.getElementById(currentConfigTabId);
+                if (content && content.classList.contains('active')) {
+                    content.innerHTML = createChartGrid(currentConfigTabId);
+                    refreshOverseasCustomCharts(currentConfigTabId);
+
+                    // Re-setup listeners for dividers
+                    if (tabData[currentConfigTabId] && tabData[currentConfigTabId].type === 'overseas_custom') {
+                        setupSectorGroupListeners(currentConfigTabId);
+                    }
+                }
+                closeModal();
+            });
+        }
+        if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+        if (closeX) closeX.addEventListener('click', closeModal);
+
+        // Improved click-outside logic: only close if both mousedown and click targets are the modal backdrop
+        let isBackdropClick = false;
+        modal.addEventListener('mousedown', (e) => {
+            isBackdropClick = (e.target === modal);
+        });
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal && isBackdropClick) closeModal();
+        });
+
+        // Add input & scroll listener for syntax highlighting
+        const textarea = document.getElementById('customChartInput');
+        const backdrop = document.getElementById('highlightBackdrop');
+        if (textarea && backdrop) {
+            textarea.addEventListener('input', updateSyntaxHighlighting);
+            textarea.addEventListener('scroll', () => {
+                backdrop.scrollTop = textarea.scrollTop;
+                backdrop.scrollLeft = textarea.scrollLeft;
+            });
+        }
+
+        // --- Config Download Handler ---
+        const downloadBtn = document.getElementById('downloadConfig');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', () => {
+                const text = textarea ? textarea.value : '';
+                if (!text.trim()) {
+                    alert('다운로드할 내용이 없습니다.');
+                    return;
+                }
+
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+
+                // Use current tab name or generic filename
+                const tabBtn = document.querySelector(`.tab-btn[data-tab="${currentConfigTabId}"]`);
+                const filename = (tabBtn ? tabBtn.textContent.trim() : 'overseas_config') + '.txt';
+
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        // --- Config Upload Handler ---
+        const uploadBtn = document.getElementById('uploadConfig');
+        const fileInput = document.getElementById('configFileInput');
+        if (uploadBtn && fileInput) {
+            uploadBtn.addEventListener('click', () => {
+                fileInput.value = ''; // Reset to allow re-upload of same file
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const content = event.target.result;
+                    if (textarea) {
+                        textarea.value = content;
+                        updateSyntaxHighlighting();
+                    }
+                };
+                reader.readAsText(file);
+            });
+        }
+    }
 });
