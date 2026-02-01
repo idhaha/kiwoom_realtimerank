@@ -11,8 +11,10 @@ const PERM_TAB_ID = 'tab_rank';
 const ADR_TAB_ID = 'tab_adr';
 const EARNINGS_TAB_ID = 'tab_earnings';
 const OVERSEAS_TAB_ID = 'tab_overseas';
+const EXCHANGE_TAB_ID = 'tab_exchange_perm';
 let tabData = {};
 let targetTabBtn = null;
+let isInitializing = false; // Flag to prevent auto-save during startup
 
 // DOM Elements
 
@@ -24,6 +26,7 @@ const lastUpdate = document.getElementById('lastUpdate');
 const statusText = document.getElementById('statusText');
 const refreshIntervalSelect = document.getElementById('refreshInterval');
 const manualRefreshBtn = document.getElementById('manualRefresh');
+const globalRefreshBtn = document.getElementById('globalRefreshBtn');
 
 const transactionBody = document.getElementById('transactionBody');
 const mrktTpSelect = document.getElementById('mrktTp');
@@ -326,6 +329,12 @@ manualRefreshBtn.addEventListener('click', () => {
     loadTransactionRank();
 });
 
+if (globalRefreshBtn) {
+    globalRefreshBtn.addEventListener('click', () => {
+        refreshAllTabs();
+    });
+}
+
 // 페이지 언로드 시 정리
 window.addEventListener('beforeunload', () => {
     stopAutoRefresh();
@@ -404,11 +413,40 @@ function ensurePermanentTabs() {
 
         createTabContentElement(OVERSEAS_TAB_ID);
     }
+
+    // 5. Exchange Rate Tab (EXCHANGE_TAB_ID)
+    if (!document.querySelector(`.tab-btn[data-tab="${EXCHANGE_TAB_ID}"]`)) {
+        const btn = document.createElement('button');
+        btn.className = 'tab-btn perm-tab';
+        btn.dataset.tab = EXCHANGE_TAB_ID;
+        btn.textContent = '환율/금리';
+        btn.draggable = false;
+        btn.dataset.perm = 'true';
+        btn.title = '고정 탭 (TradingEconomics 차트)';
+
+        const overseasBtn = document.querySelector(`.tab-btn[data-tab="${OVERSEAS_TAB_ID}"]`);
+        if (overseasBtn && overseasBtn.nextSibling) tabContainer.insertBefore(btn, overseasBtn.nextSibling);
+        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
+        else tabContainer.appendChild(btn);
+
+        createTabContentElement(EXCHANGE_TAB_ID);
+
+        // Initialize data for the permanent tab if not already present
+        if (!tabData[EXCHANGE_TAB_ID]) {
+            tabData[EXCHANGE_TAB_ID] = { type: 'exchange_rate', config: '' };
+        }
+    }
 }
 
 function saveAppData(overrideTabData = null) {
+    // CRITICAL: Prevent saving if we are in the middle of initialization or if tabData is empty (safety)
+    if (isInitializing) {
+        console.log("⏳ [saveAppData] Skipped: System is still initializing.");
+        return Promise.resolve(false);
+    }
+
     const activeContent = document.querySelector('.tab-content.active');
-    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID && activeContent.id !== OVERSEAS_TAB_ID) {
+    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID && activeContent.id !== OVERSEAS_TAB_ID && activeContent.id !== EXCHANGE_TAB_ID) {
         saveTabState(activeContent.id);
     }
 
@@ -418,19 +456,25 @@ function saveAppData(overrideTabData = null) {
         capturedTabs.push({ id: btn.dataset.tab, name: btn.textContent });
     });
 
-    // Fallback: If DOM missed some custom tabs (race condition during import), populate from tabData or override
+    // Fallback: If DOM missed some custom tabs, populate from tabData
     const sourceData = overrideTabData || tabData;
 
     Object.keys(sourceData).forEach(key => {
-        if (key.startsWith('tab_custom_') && !capturedTabs.find(t => t.id === key)) {
+        const type = sourceData[key]?.type;
+        const isDynamic = (type === 'overseas_custom' || type === 'exchange_rate');
+
+        if (isDynamic && !capturedTabs.find(t => t.id === key)) {
             const btn = document.querySelector(`.tab-btn[data-tab="${key}"]`);
-            const name = btn ? btn.textContent : "복구된 탭";
+            const name = btn ? btn.textContent : (type === 'exchange_rate' ? "환율/금리(복구)" : "해외종목(복구)");
             capturedTabs.push({ id: key, name: name });
-            console.warn("[saveAppData] Tab found in data but not in DOM list (Recovered):", key, name);
+            console.warn("[saveAppData] Dynamic tab found in data but not in DOM list (Recovered):", key, name);
         }
     });
 
-    console.log("[saveAppData] Final tabs list to save:", capturedTabs.length, capturedTabs);
+    if (capturedTabs.length === 0 && Object.keys(tabData).length > 0) {
+        console.error("🛑 [saveAppData] Refused to save: DOM tabs are empty but data exists. Preventing data loss.");
+        return Promise.resolve(false);
+    }
 
     const activeTabId = activeContent ? activeContent.id : (capturedTabs.length > 0 ? capturedTabs[0].id : PERM_TAB_ID);
 
@@ -439,11 +483,12 @@ function saveAppData(overrideTabData = null) {
         tabs: capturedTabs,
         contents: sourceData,
         rankInterval: refreshIntervalSelect.value,
-        adrInterval: document.getElementById('adrRefreshInterval')?.value
+        adrInterval: document.getElementById('adrRefreshInterval')?.value,
+        updatedAt: Date.now() // Version control
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
-    console.log("💾 데이터 로컬 저장 완료. Tabs:", capturedTabs.length, "Contents:", Object.keys(tabData).length);
+    console.log("💾 데이터 로컬 저장 완료. updatedAt:", new Date(storageData.updatedAt).toLocaleString());
 
     // Sync to server (Return promise)
     return syncSettingsToServer(storageData);
@@ -479,10 +524,11 @@ async function syncSettingsToServer(data) {
 
 function saveTabState(tabId) {
     const content = document.getElementById(tabId);
-    if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID || tabId === EARNINGS_TAB_ID || tabId === OVERSEAS_TAB_ID) return;
+    if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID || tabId === EARNINGS_TAB_ID || tabId === OVERSEAS_TAB_ID || tabId === EXCHANGE_TAB_ID) return;
 
-    // Special handling for dynamic overseas tabs: they don't use standard grid saving
-    if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') return;
+    // Special handling for dynamic overseas/exchange tabs: they don't use standard grid saving
+    const type = tabData[tabId]?.type;
+    if (type === 'overseas_custom' || type === 'exchange_rate') return;
 
     const boxes = content.querySelectorAll('.chart-box');
     const state = [];
@@ -508,16 +554,21 @@ function saveTabState(tabId) {
 
 function loadFromLocalStorage() {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
+    if (!raw) return null;
     try {
         const data = JSON.parse(raw);
-        if (!data.tabs || data.tabs.length === 0) return false;
-        applyData(data);
-        return true;
+        if (!data.tabs || data.tabs.length === 0) return null;
+        return data;
     } catch (e) {
         console.error("로컬 스토리지 로딩 실패:", e);
-        return false;
+        return null;
     }
+}
+
+function loadFromSyncData(data) {
+    if (!data || !data.tabs || data.tabs.length === 0) return false;
+    applyData(data);
+    return true;
 }
 
 async function loadAppDataFromServer() {
@@ -527,53 +578,63 @@ async function loadAppDataFromServer() {
         const resData = await response.json();
 
         if (resData.success && resData.data) {
-            console.log("✅ 서버 설정 로드 성공:", resData.data);
-            applyData(resData.data);
-            return true;
+            console.log("✅ 서버 설정 로드 성공 (updatedAt):", resData.data.updatedAt);
+            return resData.data;
         }
-        return false;
+        return null;
     } catch (e) {
         console.error("❌ 서버 설정 로드 실패:", e);
-        return false;
+        return null;
     }
 }
 
 function applyData(data) {
-    resetDynamicTabs();
-    tabData = data.contents || {};
-    ensurePermanentTabs();
+    if (!data || !data.tabs) return;
 
-    data.tabs.forEach(t => {
-        if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID || t.id === OVERSEAS_TAB_ID) {
-            const btn = document.querySelector(`.tab-btn[data-tab="${t.id}"]`);
-            if (btn) btn.textContent = t.name;
-            return;
+    isInitializing = true; // Block auto-save during application
+    try {
+        resetDynamicTabs();
+        tabData = data.contents || {};
+        ensurePermanentTabs();
+
+        data.tabs.forEach(t => {
+            if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID || t.id === OVERSEAS_TAB_ID || t.id === EXCHANGE_TAB_ID) {
+                const btn = document.querySelector(`.tab-btn[data-tab="${t.id}"]`);
+                if (btn) btn.textContent = t.name;
+                return;
+            }
+            createTabButtonElement(t.id, t.name);
+            createTabContentElement(t.id);
+        });
+
+        if (data.rankInterval) {
+            lastSavedSettings.rankInterval = data.rankInterval;
+            refreshIntervalSelect.value = data.rankInterval;
+        } else {
+            // Enforce default 10 min if not saved
+            refreshIntervalSelect.value = '2';
+            lastSavedSettings.rankInterval = '2';
         }
-        createTabButtonElement(t.id, t.name);
-        createTabContentElement(t.id);
-    });
+        if (data.adrInterval) {
+            lastSavedSettings.adrInterval = data.adrInterval;
+        } else {
+            lastSavedSettings.adrInterval = '2';
+        }
 
-    if (data.rankInterval) {
-        lastSavedSettings.rankInterval = data.rankInterval;
-        refreshIntervalSelect.value = data.rankInterval;
-    } else {
-        // Enforce default 10 min if not saved
-        refreshIntervalSelect.value = '2';
-        lastSavedSettings.rankInterval = '2';
+        const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
+        activateTab(targetId);
+    } finally {
+        // Delay unblocking a bit to ensure all internal activateTab calls finished
+        setTimeout(() => {
+            isInitializing = false;
+            console.log("🔓 [InitialLoad] System ready. Auto-save enabled.");
+        }, 500);
     }
-    if (data.adrInterval) {
-        lastSavedSettings.adrInterval = data.adrInterval;
-    } else {
-        lastSavedSettings.adrInterval = '2';
-    }
-
-    const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
-    activateTab(targetId);
 }
 
 function resetDynamicTabs() {
     document.querySelectorAll('.tab-btn:not(.add-tab-btn):not([data-perm])').forEach(b => b.remove());
-    document.querySelectorAll(`.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings):not(#tab_overseas):not(#${OVERSEAS_CUSTOM_TAB_ID})`).forEach(c => c.remove());
+    document.querySelectorAll('.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings):not(#tab_overseas):not(#tab_exchange_perm)').forEach(c => c.remove());
 }
 
 function activateTab(tabId) {
@@ -585,7 +646,7 @@ function activateTab(tabId) {
 
     document.querySelectorAll(".tab-content.active").forEach(tab => {
         if (tab.id !== tabId) {
-            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID && tab.id !== OVERSEAS_TAB_ID) {
+            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID && tab.id !== OVERSEAS_TAB_ID && tab.id !== EXCHANGE_TAB_ID) {
                 saveTabState(tab.id);
                 tab.innerHTML = '';
             }
@@ -622,9 +683,24 @@ function activateTab(tabId) {
     }
     else if (tabId === EARNINGS_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
+        // Attach refresh button event listener
+        setTimeout(() => {
+            const refreshBtn = document.getElementById(`refreshEarnings_${tabId}`);
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
+            }
+            const statusText = document.getElementById(`earningsStatusText_${tabId}`);
+            const lastUpdate = document.getElementById(`earningsLastUpdate_${tabId}`);
+            if (statusText) statusText.textContent = '데이터 로딩 완료';
+            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+        }, 100);
     }
     else if (tabId === EARNINGS_TAB_ID) {
-        // Already rendered, do nothing
+        const refreshBtn = document.getElementById(`refreshEarnings_${tabId}`);
+        if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
+            refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
+            refreshBtn.setAttribute('data-listener-attached', 'true');
+        }
     }
     else if ((tabId === OVERSEAS_TAB_ID || (tabData[tabId] && tabData[tabId].type === 'overseas_custom')) && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
@@ -662,7 +738,36 @@ function activateTab(tabId) {
 
         setupOverseasCursorSync();
     }
-    else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && tabId !== EARNINGS_TAB_ID && tabId !== OVERSEAS_TAB_ID && !content.innerHTML.trim()) {
+    // Exchange Rate/Interest Rate Tab (TradingEconomics) - first render
+    else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate' && !content.innerHTML.trim()) {
+        content.innerHTML = createChartGrid(tabId);
+        // Attach refresh button event listener and trigger initial load
+        setTimeout(() => {
+            const prefix = `exchangeRate_${tabId}`;
+            const refreshBtn = document.getElementById(`refreshExchangeRate_${tabId}`);
+            const statusText = document.getElementById(`${prefix}StatusText`);
+            const lastUpdate = document.getElementById(`${prefix}LastUpdate`);
+
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => refreshExchangeRateCharts(tabId));
+            }
+
+            // Initial load
+            refreshExchangeRateCharts(tabId);
+
+            // Setup sector group listeners for dividers
+            setupSectorGroupListeners(tabId);
+        }, 100);
+    }
+    // Exchange Rate/Interest Rate Tab - already rendered
+    else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
+        const refreshBtn = document.getElementById(`refreshExchangeRate_${tabId}`);
+        if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
+            refreshBtn.addEventListener('click', () => refreshExchangeRateCharts(tabId));
+            refreshBtn.setAttribute('data-listener-attached', 'true');
+        }
+    }
+    else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && tabId !== EARNINGS_TAB_ID && tabId !== OVERSEAS_TAB_ID && tabId !== EXCHANGE_TAB_ID && !content.innerHTML.trim()) {
         content.innerHTML = createChartGrid(tabId);
         loadChartsSequentially(content);
     }
@@ -685,7 +790,7 @@ function createTabContentElement(id) {
     if (document.getElementById(id)) return document.getElementById(id);
     const div = document.createElement("div");
     div.className = "tab-content";
-    if (id === EARNINGS_TAB_ID || id === OVERSEAS_TAB_ID) div.classList.add("full-tab");
+    if (id === EARNINGS_TAB_ID || id === OVERSEAS_TAB_ID || id === EXCHANGE_TAB_ID) div.classList.add("full-tab");
     div.id = id;
     tabContents.appendChild(div);
     return div;
@@ -796,10 +901,36 @@ function createChartGrid(tabId) {
     if (tabId === EARNINGS_TAB_ID) {
         const perm = "clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share";
         const sand = "allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation";
-        return `<iframe src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" allow="${perm}" sandbox="${sand}"></iframe>`;
+        return `
+            <div class="container overseas-container">
+                <header>
+                    <div class="header-single-line">
+                        <h1><strong>실적 캘린더</strong></h1>
+                        <div class="header-controls">
+                            <button id="refreshEarnings_${tabId}" class="btn-refresh" aria-label="조회">조회</button>
+                        </div>
+                    </div>
+                    <div class="status-info">
+                        <span id="earningsLastUpdate_${tabId}">-</span>
+                        <span class="status-separator">|</span>
+                        <span id="earningsStatusText_${tabId}">대기 중...</span>
+                    </div>
+                </header>
+                <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
+                    <iframe id="iframeEarnings_${tabId}" src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                </div>
+            </div>`;
     }
 
     if (tabId === OVERSEAS_TAB_ID || (tabData[tabId] && tabData[tabId].type === 'overseas_custom')) {
+        // Auto-recovery for corrupted custom tabs
+        if (tabId.startsWith('tab_custom_') && (!tabData[tabId] || Array.isArray(tabData[tabId]) || tabData[tabId].type !== 'overseas_custom')) {
+            console.warn("[createChartGrid] Recovering corrupted custom overseas tab:", tabId);
+            const oldConfig = tabData[tabId]?.config || '';
+            const oldColors = tabData[tabId]?.sectorColors || {};
+            tabData[tabId] = { type: 'overseas_custom', config: oldConfig, sectorColors: oldColors };
+        }
+
         const isCustom = (tabData[tabId] && tabData[tabId].type === 'overseas_custom');
         const prefix = isCustom ? `overseasCustom_${tabId}` : 'overseas';
 
@@ -912,10 +1043,106 @@ function createChartGrid(tabId) {
             </div>`;
     }
 
+    // Exchange Rate/Interest Rate Tab (TradingEconomics)
+    // Auto-recovery: if it's a tab_exchange_ but has wrong type or structure, fix it
+    if (tabId.startsWith('tab_exchange_') && (!tabData[tabId] || Array.isArray(tabData[tabId]) || tabData[tabId].type !== 'exchange_rate')) {
+        console.warn("[createChartGrid] Recovering corrupted exchange tab:", tabId);
+        const oldConfig = tabData[tabId]?.config || '';
+        tabData[tabId] = { type: 'exchange_rate', config: oldConfig };
+    }
+
+    if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
+        const prefix = `exchangeRate_${tabId}`;
+
+        let titleText = '환율/금리';
+        // Try to find the button text
+        if (tabId.startsWith('tab_exchange_')) {
+            const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+            if (btn) titleText = btn.textContent;
+        }
+
+        let gridContent = '';
+        let charts = [];
+        if (tabData[tabId] && tabData[tabId].config) {
+            charts = parseCustomCharts(tabData[tabId].config);
+        }
+
+        if (charts.length === 0) {
+            gridContent = `
+                <div class="empty-custom-charts" style="padding: 50px; text-align: center; color: var(--text-muted);">
+                    <p>등록된 차트가 없습니다. [종목입력] 버튼을 눌러 TradingEconomics 차트를 추가하세요.</p>
+                    <p style="font-size: 12px; margin-top: 10px; color: var(--text-secondary);">
+                        예시: ("https://api.tradingeconomics.com/historical/country/united states/indicator/government bond 10y?c=guest:guest&d1=2025-01-24&d2=2026-01-24", "미국 10년 국채")
+                    </p>
+                </div>`;
+        } else {
+            const sectorColors = tabData[tabId].sectorColors || {};
+            let currentItemColor = '';
+            let colorIdx = 0;
+
+            const renderedItems = charts.map((item, idx) => {
+                if (item.type === 'comment') return ''; // Skip rendering comments
+
+                if (item.type === 'divider') {
+                    currentItemColor = item.color || sectorColors[item.title] || SECTOR_COLORS[colorIdx++ % SECTOR_COLORS.length];
+                    return `
+                    <div class="finviz-divider" data-index="${idx}" style="--section-color: ${currentItemColor}">
+                        <div class="divider-title">
+                            <span class="title-text">${item.title}</span>
+                        </div>
+                        <div class="divider-line"></div>
+                        <div class="divider-controls">
+                            <button class="btn-section-edit" title="섹션 편집">⚙️</button>
+                            <div class="section-edit-popup">
+                                <div class="edit-group">
+                                    <label>제목</label>
+                                    <input type="text" class="edit-section-title" value="${item.title}">
+                                </div>
+                                <div class="edit-group">
+                                    <label>색상</label>
+                                    <div class="color-presets">
+                                        ${SECTOR_COLORS.map(c => `<div class="color-swatch" style="background:${c}" data-color="${c}"></div>`).join('')}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                } else {
+                    // Render TradingEconomics chart (Canvas-based)
+                    return renderTradingEconomicsChartItem(item, currentItemColor, tabId, idx);
+                }
+            }).join('');
+
+            gridContent = `<div class="finviz-container te-container">${renderedItems}</div>`;
+        }
+
+        return `
+            <div class="container overseas-container">
+                <header>
+                    <div class="header-single-line">
+                        <h1><strong>${titleText}</strong></h1>
+                        <div class="header-controls">
+                            <button id="refreshExchangeRate_${tabId}" class="btn-refresh" aria-label="조회">조회</button>
+                        </div>
+                    </div>
+                    <div class="status-info">
+                        <span id="${prefix}LastUpdate">-</span>
+                        <span class="status-separator">|</span>
+                        <span id="${prefix}StatusText">대기 중...</span>
+                        <button class="btn-config status-btn config-trigger" data-tab="${tabId}">종목입력</button>
+                    </div>
+                </header>
+                <div class="overseas-content-scroll" style="flex:1; overflow:auto;">
+                    ${gridContent}
+                </div>
+            </div>`;
+    }
+
     if (!tabData[tabId]) {
         const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT", "SP:SPX", "KRX:005930"];
         tabData[tabId] = defaults.map(sym => ({ symbol: sym, lastSymbol: sym, mode: 'main', mainSrc: '', subSrc: '' }));
     }
+
 
     let states = tabData[tabId];
     let html = '<div class="chart-grid">';
@@ -1907,6 +2134,7 @@ document.getElementById('addChartTab').addEventListener('click', () => {
     saveAppData();
 });
 
+
 captureBtn.addEventListener('click', async () => {
     try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false, preferCurrentTab: true });
@@ -2050,21 +2278,374 @@ function renderFinvizChartItem(chart, color = '') {
 }
 
 /**
+ * TradingEconomics 차트 아이템 렌더링
+ */
+function renderTradingEconomicsChartItem(chart, color = '', tabId, idx) {
+    // Safety check: ensure title is clean of accidental leading/trailing quotes
+    const cleanTitle = (chart.title || '').replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '').trim();
+
+    // Convert hex to semi-transparent version for background
+    let style = '';
+    if (color) {
+        style = `--section-color: ${color}; --section-color-alpha: ${color}22;`;
+    }
+
+    const canvasId = `te_chart_${tabId}_${idx}`;
+
+    return `
+        <div class="finviz-chart-box te-chart-box" style="${style}" data-te-url="${chart.url}" data-te-idx="${idx}">
+            <div class="finviz-chart-title ${color ? 'colorful' : ''}">${cleanTitle}</div>
+            <div class="te-chart-wrapper">
+                <canvas id="${canvasId}" class="te-chart-canvas" width="400" height="200"></canvas>
+                <div class="te-chart-loading">데이터 로딩 중...</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * TradingEconomics 차트 데이터 로드 및 렌더링
+ */
+async function loadTradingEconomicsChart(canvas, url, title) {
+    const wrapper = canvas.closest('.te-chart-wrapper');
+    const loadingEl = wrapper?.querySelector('.te-chart-loading');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+
+    try {
+        const proxyUrl = `/api/trading-economics?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        const result = await response.json();
+
+        if (!result.success || !result.data || !Array.isArray(result.data)) {
+            let errorMsg = result.error || 'Invalid data format';
+            if (result.data === null) {
+                errorMsg = '데이터 없음 (Guest 계정 제한 또는 URL 오류)';
+            } else if (!Array.isArray(result.data)) {
+                errorMsg = `Invalid data format: Expected array but got ${typeof result.data}`;
+                if (result.data && result.data.Message) errorMsg += ` (${result.data.Message})`;
+            }
+            throw new Error(errorMsg);
+        }
+
+        const rawData = result.data;
+        if (rawData.length > 0) {
+            console.log('[TradingEconomics] Data sample:', rawData[0]);
+        }
+
+        // Parse data: find date and value fields dynamically
+        const chartData = rawData.map(item => {
+            const dateStr = item.DateTime || item.Date || item.date || item.last_update;
+            const val = item.Value !== undefined ? item.Value :
+                (item.Close !== undefined ? item.Close :
+                    (item.Actual !== undefined ? item.Actual :
+                        (item.actual !== undefined ? item.actual :
+                            (item.LatestValue !== undefined ? item.LatestValue :
+                                (item.latest_value !== undefined ? item.latest_value :
+                                    (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
+
+            return {
+                date: new Date(dateStr),
+                value: parseFloat(val)
+            };
+        }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
+            .sort((a, b) => a.date - b.date);
+
+        if (chartData.length === 0) {
+            const keys = rawData.length > 0 ? Object.keys(rawData[0]).join(', ') : 'none';
+            throw new Error(`데이터 파싱 실패 (구성 항목: ${keys})`);
+        }
+
+        if (loadingEl) loadingEl.style.display = 'none';
+
+        // Draw the chart
+        drawTradingEconomicsLineChart(canvas, chartData, title);
+
+    } catch (error) {
+        console.error('[TradingEconomics] Chart load error:', error);
+        if (loadingEl) {
+            loadingEl.textContent = '로드 실패: ' + error.message;
+            loadingEl.style.color = '#e74c3c';
+        }
+    }
+}
+
+/**
+ * TradingEconomics 라인 차트 그리기
+ */
+function drawTradingEconomicsLineChart(canvas, data, title) {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+
+    // Set canvas size with DPR
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+
+    // Clear
+    ctx.clearRect(0, 0, w, h);
+
+    const padding = { top: 20, right: 50, bottom: 30, left: 10 };
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
+
+    // Calculate min/max values
+    const values = data.map(d => d.value);
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const range = maxVal - minVal || 1;
+    const buffer = range * 0.1;
+
+    const yMin = minVal - buffer;
+    const yMax = maxVal + buffer;
+
+    // Draw grid lines
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 0.5;
+    const gridLines = 5;
+    for (let i = 0; i <= gridLines; i++) {
+        const y = padding.top + (chartH / gridLines) * i;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(w - padding.right, y);
+        ctx.stroke();
+
+        // Y-axis labels
+        const val = yMax - ((yMax - yMin) / gridLines) * i;
+        ctx.fillStyle = '#666';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
+    }
+
+    // Draw line
+    ctx.strokeStyle = '#3498db';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+
+    data.forEach((point, i) => {
+        const x = padding.left + (i / (data.length - 1)) * chartW;
+        const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
+
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    ctx.stroke();
+
+    // Draw data points
+    ctx.fillStyle = '#3498db';
+    if (data.length <= 60) {
+        data.forEach((point, i) => {
+            const x = padding.left + (i / (data.length - 1)) * chartW;
+            const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
+            ctx.beginPath();
+            ctx.arc(x, y, 2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+
+    // Draw X-axis labels (first and last date)
+    ctx.fillStyle = '#666';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+
+    const firstDate = data[0].date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+    const lastDate = data[data.length - 1].date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+
+    ctx.fillText(firstDate, padding.left, h - 5);
+    ctx.fillText(lastDate, w - padding.right, h - 5);
+
+    // Draw latest value in top-right
+    const latestValue = data[data.length - 1].value;
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = 'bold 12px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(latestValue.toFixed(2), w - padding.right, padding.top - 5);
+}
+
+/**
+ * 환율/금리 탭 차트 새로고침
+ */
+async function refreshExchangeRateCharts(tabId) {
+    const content = document.getElementById(tabId);
+    if (!content) return;
+
+    const prefix = `exchangeRate_${tabId}`;
+    const statusText = document.getElementById(`${prefix}StatusText`);
+    const lastUpdate = document.getElementById(`${prefix}LastUpdate`);
+
+    if (statusText) statusText.textContent = '데이터 로딩 중...';
+
+    const chartBoxes = content.querySelectorAll('.te-chart-box');
+    let loadedCount = 0;
+    const totalCount = chartBoxes.length;
+
+    if (totalCount === 0) {
+        if (statusText) statusText.textContent = '차트 없음';
+        return;
+    }
+
+    const checkComplete = () => {
+        if (++loadedCount >= totalCount) {
+            if (statusText) statusText.textContent = '데이터 로딩 완료';
+            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+        }
+    };
+
+    for (const box of chartBoxes) {
+        const url = box.dataset.teUrl;
+        const idx = box.dataset.teIdx;
+        const canvas = box.querySelector('.te-chart-canvas');
+        const title = box.querySelector('.finviz-chart-title')?.textContent || '';
+
+        if (url && canvas) {
+            try {
+                await loadTradingEconomicsChart(canvas, url, title);
+            } catch (e) {
+                console.error('[ExchangeRate] Chart load failed:', e);
+            }
+        }
+        checkComplete();
+    }
+}
+
+/**
+ * 실적 탭 새로고침
+ */
+function refreshEarningsTab(tabId) {
+    const iframe = document.getElementById(`iframeEarnings_${tabId}`);
+    if (iframe) {
+        const currentSrc = iframe.src;
+        console.log(`[Refresh] Reloading Earnings iframe for ${tabId}`);
+        iframe.src = 'about:blank';
+        setTimeout(() => {
+            iframe.src = currentSrc;
+            const statusText = document.getElementById(`earningsStatusText_${tabId}`);
+            const lastUpdate = document.getElementById(`earningsLastUpdate_${tabId}`);
+            if (statusText) statusText.textContent = '새로고침 완료';
+            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+        }, 100);
+    }
+}
+
+/**
+ * 모든 탭 전체 새로고침 (백그라운드 포함)
+ */
+async function refreshAllTabs() {
+    console.log("🔄 전체조회 시작...");
+    if (globalRefreshBtn) {
+        const originalText = globalRefreshBtn.textContent;
+        globalRefreshBtn.textContent = "갱신 중...";
+        globalRefreshBtn.disabled = true;
+        setTimeout(() => {
+            globalRefreshBtn.textContent = originalText;
+            globalRefreshBtn.disabled = false;
+        }, 2000);
+    }
+
+    // 1. 순위 탭
+    loadData();
+    loadTransactionRank();
+
+    // 2. ADR 탭
+    updateAdrFromSource();
+
+    // 3. 해외동향 (고정)
+    refreshOverseasCharts();
+
+    // 4. 기타 동적 탭들
+    Object.keys(tabData).forEach(tabId => {
+        const type = tabData[tabId]?.type;
+        if (tabId === EARNINGS_TAB_ID) {
+            refreshEarningsTab(tabId);
+        } else if (type === 'exchange_rate') {
+            refreshExchangeRateCharts(tabId);
+        } else if (type === 'overseas_custom') {
+            refreshOverseasCustomCharts(tabId);
+        }
+    });
+
+    if (statusText) statusText.textContent = "전체 탭 갱신 명령 전송됨";
+    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+}
+
+/**
  * 사용자 정의 해외 차트 데이터 파싱
  */
 function parseCustomCharts(input) {
     const items = [];
     const lines = input.split('\n');
+    let inBlockComment = false; // Block comment state tracker
 
     lines.forEach(line => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-            // Preserve empty lines if we want, but simpler to skip for now
+        let trimmed = line.trim();
+
+        // Block comment handling
+        if (inBlockComment) {
+            // Check if block comment ends on this line
+            const endIdx = trimmed.indexOf('*/');
+            if (endIdx !== -1) {
+                inBlockComment = false;
+                // Process any content after */ on the same line
+                const afterComment = trimmed.substring(endIdx + 2).trim();
+                if (!afterComment) {
+                    items.push({ type: 'comment', content: line }); // Keep the original line for display
+                    return;
+                }
+                // Re-parse the remaining content (recursive single-line check)
+                line = afterComment;
+                trimmed = line.trim(); // Update trimmed for the rest of the parsing
+            } else {
+                // Still inside block comment, skip this line
+                items.push({
+                    type: 'comment',
+                    content: line
+                });
+                return;
+            }
+        }
+
+        // Check for block comment start
+        const startIdx = trimmed.indexOf('/*');
+        if (startIdx !== -1) {
+            // Check if it also ends on the same line
+            const endIdx = trimmed.indexOf('*/', startIdx + 2);
+            if (endIdx !== -1) {
+                // Single line block comment - remove it and continue parsing
+                const beforeComment = trimmed.substring(0, startIdx);
+                const afterComment = trimmed.substring(endIdx + 2);
+                const remaining = (beforeComment + afterComment).trim();
+                if (!remaining) {
+                    items.push({ type: 'comment', content: line }); // Keep the original line for display
+                    return;
+                }
+                // Continue with remaining content
+                line = remaining;
+                trimmed = line.trim(); // Update trimmed for the rest of the parsing
+            } else {
+                // Block comment starts but doesn't end on this line
+                inBlockComment = true;
+                items.push({
+                    type: 'comment',
+                    content: line
+                });
+                return;
+            }
+        }
+
+        // Skip empty lines after processing
+        const processedTrimmed = trimmed; // Use the potentially modified 'trimmed'
+        if (!processedTrimmed) {
             return;
         }
 
         // Comment Check: //
-        if (trimmed.startsWith('//')) {
+        if (processedTrimmed.startsWith('//')) {
             items.push({
                 type: 'comment',
                 content: line // keep original line with indentation
@@ -2073,8 +2654,8 @@ function parseCustomCharts(input) {
         }
 
         // Divider Check: <Title, Color>
-        if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-            const content = trimmed.substring(1, trimmed.length - 1);
+        if (processedTrimmed.startsWith('<') && processedTrimmed.endsWith('>')) {
+            const content = processedTrimmed.substring(1, processedTrimmed.length - 1);
             const parts = content.split(',').map(s => s.trim());
             items.push({
                 type: 'divider',
@@ -2086,7 +2667,7 @@ function parseCustomCharts(input) {
 
         // Chart Check: (url, title)
         const chartRegex = /\(\s*(.*?)\s*,\s*(.*?)\s*\)/;
-        const match = trimmed.match(chartRegex);
+        const match = processedTrimmed.match(chartRegex);
         if (match) {
             // Strip any surrounding quotes (standard or smart)
             const cleanUrl = match[1].trim().replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '');
@@ -2214,7 +2795,7 @@ function updateConfigString(tabId, index, updates) {
 }
 
 /**
- * 주석 구문 강조 (녹색 처리)
+ * 주석 구문 강조 (녹색 처리) - 라인 주석(//) 및 블록 주석 지원
  */
 function updateSyntaxHighlighting() {
     const textarea = document.getElementById('customChartInput');
@@ -2223,12 +2804,30 @@ function updateSyntaxHighlighting() {
 
     const text = textarea.value;
     const lines = text.split('\n');
+    let inBlockComment = false;
 
     const highlighted = lines.map(line => {
         const trimmed = line.trim();
         // HTML escape
         const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+        // If we're inside a block comment
+        if (inBlockComment) {
+            if (trimmed.includes('*/')) {
+                inBlockComment = false;
+            }
+            return `<span class="syntax-comment">${escaped}</span>`;
+        }
+
+        // Check for block comment start
+        if (trimmed.includes('/*')) {
+            if (!trimmed.includes('*/')) {
+                inBlockComment = true;
+            }
+            return `<span class="syntax-comment">${escaped}</span>`;
+        }
+
+        // Line comment check: //
         if (trimmed.startsWith('//')) {
             return `<span class="syntax-comment">${escaped}</span>`;
         }
@@ -2238,6 +2837,7 @@ function updateSyntaxHighlighting() {
     // Add a trailing newline to avoid height mismatch at end of content
     backdrop.innerHTML = highlighted + (text.endsWith('\n') ? '\n ' : '');
 }
+
 /**
  * 커스텀 차트 설정 모달 열기
  */
@@ -2341,7 +2941,8 @@ function bulkExportSettings() {
 
     tabButtons.forEach(btn => {
         const tabId = btn.dataset.tab;
-        if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+        const type = tabData[tabId]?.type;
+        if (tabData[tabId] && (type === 'overseas_custom' || type === 'exchange_rate')) {
             const title = btn.textContent.trim();
             const config = tabData[tabId].config || "";
             const sectorColors = tabData[tabId].sectorColors || {};
@@ -2450,27 +3051,33 @@ function bulkImportSettings(file) {
 
             console.log(`Processing Section: [${uniqueTitle}], Lines: ${configLines.length}`);
 
+            // Detect type from title
+            const isExchangeRate = uniqueTitle.includes('환율') || uniqueTitle.includes('금리');
+            const targetType = isExchangeRate ? 'exchange_rate' : 'overseas_custom';
+
             // Check if tab already exists by name (using the unique name)
             let targetTabId = null;
             const existingBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === uniqueTitle);
 
             if (existingBtn) {
                 targetTabId = existingBtn.dataset.tab;
-                // If exists but not custom overseas, skip
-                if (!tabData[targetTabId] || tabData[targetTabId].type !== 'overseas_custom') {
+                // If exists but not a custom tab, skip
+                if (!tabData[targetTabId] || (tabData[targetTabId].type !== 'overseas_custom' && tabData[targetTabId].type !== 'exchange_rate')) {
                     console.warn(`Skipping existing non-custom tab: ${uniqueTitle}`);
                     return;
                 }
+                // Update type if needed
+                tabData[targetTabId].type = targetType;
             } else {
                 // Create new tab
                 const uniqueId = Date.now() + Math.floor(Math.random() * 1000);
-                targetTabId = "tab_custom_" + uniqueId;
+                targetTabId = (isExchangeRate ? "tab_exchange_" : "tab_custom_") + uniqueId;
 
                 // Init data
-                tabData[targetTabId] = { type: 'overseas_custom', config: '', sectorColors: {} };
+                tabData[targetTabId] = { type: targetType, config: '', sectorColors: {} };
                 createTabButtonElement(targetTabId, uniqueTitle);
                 createTabContentElement(targetTabId);
-                console.log(`Created new tab: ${uniqueTitle} (${targetTabId})`);
+                console.log(`Created new tab: ${uniqueTitle} (${targetTabId}) [Type: ${targetType}]`);
             }
 
             // Parse config & Colors
@@ -2584,15 +3191,29 @@ function bulkImportSettings(file) {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('앱 초기화...');
 
-    // Try server sync first, fall back to localStorage
-    let loaded = await loadAppDataFromServer();
-    if (!loaded) {
-        loaded = loadFromLocalStorage();
+    // Try server sync and localStorage, then compare timestamps
+    const serverData = await loadAppDataFromServer();
+    const localData = loadFromLocalStorage();
+
+    let finalData = null;
+    if (serverData && localData) {
+        const serverTime = serverData.updatedAt || 0;
+        const localTime = localData.updatedAt || 0;
+        console.log(`⏱️ 데이터 시점 비교 - Server: ${new Date(serverTime).toLocaleString()}, Local: ${new Date(localTime).toLocaleString()}`);
+        finalData = serverTime >= localTime ? serverData : localData;
+    } else {
+        finalData = serverData || localData;
     }
 
-    ensurePermanentTabs();
-
-    if (!loaded || !document.querySelector('.tab-content.active')) {
+    if (finalData) {
+        applyData(finalData);
+        // If local was newer than server, or server was missing, force sync this local content to server
+        if (finalData === localData) {
+            console.log("📡 로컬 데이터가 최신입니다. 서버에 백업합니다.");
+            setTimeout(() => saveAppData(), 5000); // 5s delay to ensure full load
+        }
+    } else {
+        ensurePermanentTabs();
         activateTab(PERM_TAB_ID);
     }
 
@@ -2641,10 +3262,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const content = document.getElementById(currentConfigTabId);
                 if (content && content.classList.contains('active')) {
                     content.innerHTML = createChartGrid(currentConfigTabId);
-                    refreshOverseasCustomCharts(currentConfigTabId);
+
+                    const type = tabData[currentConfigTabId]?.type;
+                    if (type === 'exchange_rate') {
+                        refreshExchangeRateCharts(currentConfigTabId);
+                    } else {
+                        refreshOverseasCustomCharts(currentConfigTabId);
+                    }
 
                     // Re-setup listeners for dividers
-                    if (tabData[currentConfigTabId] && tabData[currentConfigTabId].type === 'overseas_custom') {
+                    if (type === 'overseas_custom' || type === 'exchange_rate') {
                         setupSectorGroupListeners(currentConfigTabId);
                     }
                 }

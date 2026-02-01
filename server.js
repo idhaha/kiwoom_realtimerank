@@ -12,9 +12,13 @@ const marketCache = {};
 const LOG_FILE = path.join(__dirname, 'server_debug.log');
 
 function fileLog(message) {
-    // 이제 모든 콘솔 출력은 런처(메인 프로세스)에서 가로채서 'launcher_debug.log'에 통합 저장합니다.
-    // 서버 자체에서의 중복 파일 쓰기는 제거합니다.
+    const logMessage = `[${new Date().toLocaleString()}] ${message}\n`;
     console.log(message);
+    try {
+        fs.appendFileSync(path.join(__dirname, 'server_debug.log'), logMessage);
+    } catch (e) {
+        // ignore
+    }
 }
 
 const app = express();
@@ -445,6 +449,60 @@ app.get('/api/finviz-image', async (req, res) => {
     } catch (error) {
         console.error("❌ Finviz 이미지 프록시 에러:", error.message);
         res.status(500).json({ error: "이미지를 가져오는데 실패했습니다.", details: error.message });
+    }
+});
+
+/**
+ * TradingEconomics API 프록시 (CORS 방지용)
+ * 환율, 금리 등 경제 지표 데이터 제공
+ */
+app.get('/api/trading-economics', async (req, res) => {
+    console.log("🚀 [API START] /api/trading-economics 요청 발생");
+    try {
+        const apiUrl = req.query.url;
+        if (!apiUrl) {
+            return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
+        }
+
+        // Validate that it's a tradingeconomics.com URL
+        if (!apiUrl.includes('tradingeconomics.com')) {
+            return res.status(400).json({ error: "TradingEconomics URL만 허용됩니다." });
+        }
+
+        fileLog(`📡 Fetching TE: ${apiUrl}`);
+        const response = await axios.get(apiUrl, {
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json'
+            }
+        });
+
+        fileLog(`✅ TE Status: ${response.status}`);
+        fileLog(`✅ TE Data Type: ${typeof response.data}`);
+        const sample = JSON.stringify(response.data).substring(0, 500);
+        fileLog(`✅ TE Data Sample: ${sample}`);
+
+        console.log("✅ TradingEconomics Status:", response.status);
+        console.log("✅ TradingEconomics Data Type:", typeof response.data);
+        console.log("✅ TradingEconomics Data Sample:", JSON.stringify(response.data).substring(0, 200));
+
+        console.log("✅ TradingEconomics 데이터 획득 성공 (항목 수:", Array.isArray(response.data) ? response.data.length : 'N/A', ")");
+
+        // Set caching headers
+        res.set('Cache-Control', 'public, max-age=300'); // 5분 캐시
+        res.json({
+            success: true,
+            data: response.data
+        });
+
+    } catch (error) {
+        console.error("❌ TradingEconomics 프록시 에러:", error.message);
+        res.status(500).json({
+            success: false,
+            error: "TradingEconomics 데이터를 가져오는데 실패했습니다.",
+            details: error.message
+        });
     }
 });
 
