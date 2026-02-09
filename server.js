@@ -4,6 +4,7 @@ const axios = require('axios');
 const path = require('path');
 const cors = require('cors');
 const fs = require('fs');
+const { exec } = require('child_process');
 
 // 전역 시장구분 캐시 (종목코드: 'K'/'Q') - 429 에러 방지용
 const marketCache = {};
@@ -507,6 +508,57 @@ app.get('/api/trading-economics', async (req, res) => {
 });
 
 /**
+ * FRED 데이터 제공 API (캐싱 적용)
+ */
+const fredCache = {}; // { "seriesId_period": { timestamp: 12345, data: ... } }
+const FRED_CACHE_DURATION = 60 * 60 * 6 * 1000; // 6시간
+
+app.get('/api/fred', (req, res) => {
+    const seriesId = req.query.series_id;
+    const period = req.query.period || '1년';
+
+    if (!seriesId) {
+        return res.status(400).json({ success: false, error: 'series_id is required' });
+    }
+
+    const cacheKey = `${seriesId}_${period}`;
+    const cached = fredCache[cacheKey];
+    if (cached && (Date.now() - cached.timestamp < FRED_CACHE_DURATION)) {
+        console.log(`[API] Serving FRED from Cache: ${cacheKey}`);
+        return res.json(cached.data);
+    }
+
+    // Python 스크립트 실행
+    const command = `python fred_api.py "${seriesId}" "${period}"`;
+    console.log(`[API] Executing: ${command}`);
+
+    exec(command, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`[API] Exec error: ${error.message}`);
+            return res.status(500).json({ success: false, error: error.message });
+        }
+        if (stderr) {
+            console.warn(`[API] Exec stderr: ${stderr}`);
+        }
+
+        try {
+            const result = JSON.parse(stdout);
+            if (result.success) {
+                // 캐시 저장
+                fredCache[cacheKey] = {
+                    timestamp: Date.now(),
+                    data: result
+                };
+            }
+            res.json(result);
+        } catch (e) {
+            console.error(`[API] JSON Parse Error: ${e.message}, Output: ${stdout}`);
+            res.status(500).json({ success: false, error: 'Invalid output from script: ' + stdout });
+        }
+    });
+});
+
+/**
  * 사용자 설정 저장 및 불러오기 API
  */
 const SETTINGS_FILE = path.join(__dirname, 'user_settings.json');
@@ -537,6 +589,53 @@ app.post('/api/settings', (req, res) => {
     } catch (error) {
         console.error("❌ 설정 저장 에러:", error.message);
         res.status(500).json({ error: "설정을 저장하는데 실패했습니다." });
+    }
+});
+
+/**
+ * ECOS (한국은행 경제통계시스템) API 프록시
+ */
+app.get('/api/ecos', async (req, res) => {
+    const table = req.query.table || '817Y002'; // 기본값: 817Y002 (일일 금리)
+    const item = req.query.item;
+    const start = req.query.start;
+    const end = req.query.end;
+
+    if (!item || !start || !end) {
+        return res.status(400).json({ success: false, error: 'item, start, end 파라미터가 필요합니다.' });
+    }
+
+    const apiKey = process.env.ECOS_APIKEY;
+    if (!apiKey) {
+        return res.status(500).json({ success: false, error: 'ECOS_APIKEY가 설정되지 않았습니다.' });
+    }
+
+    // URL Construction: https://ecos.bok.or.kr/api/StatisticSearch/KEY/json/kr/1/100000/TABLE/D/START/END/ITEM
+    // numOfdata is set to 100000 to fetch all data in range as requested ("불러온 데이터를 모두 보여주도록 계산해")
+    const url = `https://ecos.bok.or.kr/api/StatisticSearch/${apiKey}/json/kr/1/100000/${table}/D/${start}/${end}/${item}`;
+
+    console.log(`[API] ECOS Request: ${table}, ${item}, ${start}~${end}`);
+
+    try {
+        const response = await axios.get(url, { timeout: 10000 });
+        const result = response.data;
+
+        if (result.StatisticSearch && result.StatisticSearch.row) {
+            res.json({
+                success: true,
+                data: result.StatisticSearch.row
+            });
+        } else {
+            console.warn('[API] ECOS Error Response:', JSON.stringify(result));
+            res.json({
+                success: false,
+                error: result.RESULT ? result.RESULT.MESSAGE : '데이터가 없습니다.',
+                raw: result
+            });
+        }
+    } catch (error) {
+        console.error('[API] ECOS Fetch Error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
