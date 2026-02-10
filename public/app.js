@@ -2369,7 +2369,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
 
                 if (fredMatch) {
                     // 따옴표 제거 및 공백 제거 유틸
-                    const cleanArg = (s) => s ? s.replace(/['"]/g, '').trim() : '';
+                    const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
 
                     const sid = cleanArg(fredMatch[1]);
                     const per = cleanArg(fredMatch[2]) || '1년';
@@ -2391,7 +2391,12 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         clearTimeout(timeoutId);
 
                         if (!resp.ok) {
-                            throw new Error(`HTTP Error ${resp.status}`);
+                            let errorMsg = `HTTP Error ${resp.status}`;
+                            try {
+                                const errJson = await resp.json();
+                                if (errJson.error) errorMsg += `: ${errJson.error}`;
+                            } catch (e) { }
+                            throw new Error(errorMsg);
                         }
 
                         const resJson = await resp.json();

@@ -535,7 +535,9 @@ app.get('/api/fred', (req, res) => {
     exec(command, (error, stdout, stderr) => {
         if (error) {
             console.error(`[API] Exec error: ${error.message}`);
-            return res.status(500).json({ success: false, error: error.message });
+            console.error(`[API] Stdout: ${stdout}`);
+            console.error(`[API] Stderr: ${stderr}`);
+            return res.status(500).json({ success: false, error: error.message, stdout, stderr });
         }
         if (stderr) {
             console.warn(`[API] Exec stderr: ${stderr}`);
