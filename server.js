@@ -529,7 +529,7 @@ app.get('/api/fred', (req, res) => {
     }
 
     // Python 스크립트 실행
-    const command = `python fred_api.py "${seriesId}" "${period}"`;
+    const command = `python3 fred_api.py "${seriesId}" "${period}"`;
     console.log(`[API] Executing: ${command}`);
 
     exec(command, (error, stdout, stderr) => {

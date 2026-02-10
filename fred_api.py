@@ -57,7 +57,7 @@ def get_fred_data(series_id, period_str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(json.dumps({"success": False, "error": "Usage: python fred_api.py <series_id> [period_str]"}))
+        print(json.dumps({"success": False, "error": "Usage: python3 fred_api.py <series_id> [period_str]"}))
     else:
         series_id = sys.argv[1]
         period_str = sys.argv[2] if len(sys.argv) > 2 else '1년'

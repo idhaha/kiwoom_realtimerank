@@ -1,5 +1,5 @@
 {
-  "activeTabId": "tab_earnings",
+  "activeTabId": "tab_custom_1770648933891",
   "tabs": [
     {
       "id": "tab_rank",
@@ -9885,6 +9885,10 @@
           {
             "date": 1770562800000,
             "value": 114.16
+          },
+          {
+            "date": 1770649200000,
+            "value": 120.3
           }
         ],
         "kosdaq": [
@@ -19703,9 +19707,13 @@
           {
             "date": 1770562800000,
             "value": 102.64
+          },
+          {
+            "date": 1770649200000,
+            "value": 107.16
           }
         ],
-        "updated": 1770648914676
+        "updated": 1770728148962
       }
     },
     "tab_custom_1770648933891": {
@@ -19771,5 +19779,5 @@
   },
   "rankInterval": "2",
   "adrInterval": "2",
-  "updatedAt": 1770649057682
+  "updatedAt": 1770728148964
 }
