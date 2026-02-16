@@ -15,6 +15,62 @@ let tabData = {};
 let targetTabBtn = null;
 let isInitializing = false; // Flag to prevent auto-save during startup
 
+/**
+ * ===== GOOGLE AUTHENTICATION & APP LOCK =====
+ */
+window.handleCredentialResponse = function (response) {
+    const payload = parseJwt(response.credential);
+    console.log("🔓 Login Successful:", payload.email);
+
+    localStorage.setItem('user_session', JSON.stringify({
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+        expiry: Date.now() + (24 * 60 * 60 * 1000) // 24 Hours
+    }));
+
+    unlockApp();
+};
+
+function parseJwt(token) {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+}
+
+function unlockApp() {
+    const loginOverlay = document.getElementById('loginOverlay');
+    const tabContainer = document.getElementById('tabContainer');
+    const tabContents = document.getElementById('tabContents');
+
+    if (loginOverlay) loginOverlay.style.display = 'none';
+    if (tabContainer) tabContainer.style.display = 'flex';
+    if (tabContents) tabContents.style.display = 'block';
+    console.log("🚀 App Unlocked & Ready");
+}
+
+function checkLoginSession() {
+    const session = localStorage.getItem('user_session');
+    if (session) {
+        try {
+            const sessionData = JSON.parse(session);
+            if (Date.now() < sessionData.expiry) {
+                unlockApp();
+                return true;
+            }
+        } catch (e) {
+            console.error("Session parse error", e);
+        }
+    }
+    return false;
+}
+
+// Check session immediately
+checkLoginSession();
+
 // DOM Elements
 
 const errorMessage = document.getElementById('errorMessage');
@@ -4149,6 +4205,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     activateTab(MEMO_TAB_ID);
                 }
             });
+
+            // Logout Button
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', () => {
+                    if (confirm('로그아웃 하시겠습니까?')) {
+                        localStorage.removeItem('user_session');
+                        location.reload();
+                    }
+                });
+            }
         }
     }, 500);
 });
