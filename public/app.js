@@ -9,6 +9,7 @@ const API_URL = '/api/stock';
 const STORAGE_KEY = 'MultiChart_State_v1';
 const PERM_TAB_ID = 'tab_rank';
 const ADR_TAB_ID = 'tab_adr';
+const MEMO_TAB_ID = 'tab_memo';
 const EARNINGS_TAB_ID = 'tab_earnings';
 let tabData = {};
 let targetTabBtn = null;
@@ -59,15 +60,11 @@ function updateStatus(status, message, data = {}) {
  * 시간 포맷팅
  */
 function formatTime(date) {
-    return date.toLocaleString('ko-KR', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
+    if (!date) return '-';
+    const d = new Date(date);
+    const dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+    return `${dateStr} ${timeStr}`;
 }
 
 /**
@@ -376,7 +373,24 @@ function ensurePermanentTabs() {
         createTabContentElement(ADR_TAB_ID);
     }
 
-    // 3. Earnings Tab (EARNINGS_TAB_ID)
+    // 3. Memo Tab (MEMO_TAB_ID)
+    if (!document.querySelector(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`)) {
+        const btn = document.createElement('button');
+        btn.className = 'tab-btn perm-tab';
+        btn.dataset.tab = MEMO_TAB_ID;
+        btn.textContent = '📝 메모';
+        btn.draggable = false;
+        btn.dataset.perm = 'true';
+        btn.title = '고정 탭 (메모)';
+        btn.style.fontWeight = 'bold';
+
+        const adrBtn = document.querySelector(`.tab-btn[data-tab="${ADR_TAB_ID}"]`);
+        if (adrBtn && adrBtn.nextSibling) tabContainer.insertBefore(btn, adrBtn.nextSibling);
+        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
+        else tabContainer.appendChild(btn);
+    }
+
+    // 4. Earnings Tab (EARNINGS_TAB_ID)
     if (!document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`)) {
         const btn = document.createElement('button');
         btn.className = 'tab-btn perm-tab';
@@ -386,8 +400,8 @@ function ensurePermanentTabs() {
         btn.dataset.perm = 'true';
         btn.title = '고정 탭 (실적 발표 캘린더)';
 
-        const adrBtn = document.querySelector(`.tab-btn[data-tab="${ADR_TAB_ID}"]`);
-        if (adrBtn && adrBtn.nextSibling) tabContainer.insertBefore(btn, adrBtn.nextSibling);
+        const memoBtn = document.querySelector(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`);
+        if (memoBtn && memoBtn.nextSibling) tabContainer.insertBefore(btn, memoBtn.nextSibling);
         else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
         else tabContainer.appendChild(btn);
 
@@ -403,7 +417,7 @@ function saveAppData(overrideTabData = null) {
     }
 
     const activeContent = document.querySelector('.tab-content.active');
-    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID) {
+    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID && activeContent.id !== MEMO_TAB_ID) {
         saveTabState(activeContent.id);
     }
 
@@ -435,12 +449,27 @@ function saveAppData(overrideTabData = null) {
 
     const activeTabId = activeContent ? activeContent.id : (capturedTabs.length > 0 ? capturedTabs[0].id : PERM_TAB_ID);
 
+    // Capture Memo content if Quill is initialized
+    let memoHtml = '';
+    let memoDelta = null;
+    if (quillEditor) {
+        memoHtml = quillEditor.root.innerHTML;
+        memoDelta = quillEditor.getContents();
+    } else {
+        // Fallback to localStorage if Quill not ready but we are saving
+        memoHtml = localStorage.getItem('memoContent_html') || '';
+        const savedDelta = localStorage.getItem('memoContent_delta');
+        if (savedDelta) memoDelta = JSON.parse(savedDelta);
+    }
+
     const storageData = {
         activeTabId: activeTabId,
         tabs: capturedTabs,
         contents: sourceData,
         rankInterval: refreshIntervalSelect.value,
         adrInterval: document.getElementById('adrRefreshInterval')?.value,
+        memoHtml: memoHtml,
+        memoDelta: memoDelta,
         updatedAt: Date.now() // Version control
     };
 
@@ -481,7 +510,7 @@ async function syncSettingsToServer(data) {
 
 function saveTabState(tabId) {
     const content = document.getElementById(tabId);
-    if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID || tabId === EARNINGS_TAB_ID) return;
+    if (!content || tabId === PERM_TAB_ID || tabId === ADR_TAB_ID || tabId === EARNINGS_TAB_ID || tabId === MEMO_TAB_ID) return;
 
     // Special handling for dynamic overseas/exchange tabs: they don't use standard grid saving
     const type = tabData[tabId]?.type;
@@ -550,12 +579,12 @@ function applyData(data) {
 
     isInitializing = true; // Block auto-save during application
     try {
+        ensurePermanentTabs(); // Always ensure permanent tabs first
         resetDynamicTabs();
         tabData = data.contents || {};
-        ensurePermanentTabs();
 
         data.tabs.forEach(t => {
-            if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID) {
+            if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID || t.id === MEMO_TAB_ID) {
                 const btn = document.querySelector(`.tab-btn[data-tab="${t.id}"]`);
                 if (btn) btn.textContent = t.name;
                 return;
@@ -580,6 +609,21 @@ function applyData(data) {
 
         const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
         activateTab(targetId);
+
+        // Restore Memo content from server data
+        if (data.memoHtml || data.memoDelta) {
+            console.log("📝 [applyData] Restoring Memo from server data...");
+            if (data.memoHtml) localStorage.setItem('memoContent_html', data.memoHtml);
+            if (data.memoDelta) localStorage.setItem('memoContent_delta', typeof data.memoDelta === 'string' ? data.memoDelta : JSON.stringify(data.memoDelta));
+
+            if (quillEditor) {
+                if (data.memoDelta) {
+                    quillEditor.setContents(data.memoDelta);
+                } else if (data.memoHtml) {
+                    quillEditor.root.innerHTML = data.memoHtml;
+                }
+            }
+        }
     } finally {
         // Delay unblocking a bit to ensure all internal activateTab calls finished
         setTimeout(() => {
@@ -591,7 +635,7 @@ function applyData(data) {
 
 function resetDynamicTabs() {
     document.querySelectorAll('.tab-btn:not(.add-tab-btn):not([data-perm])').forEach(b => b.remove());
-    document.querySelectorAll('.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings)').forEach(c => c.remove());
+    document.querySelectorAll('.tab-content:not(#tab_rank):not(#tab_adr):not(#tab_earnings):not(#tab_memo)').forEach(c => c.remove());
 }
 
 function activateTab(tabId) {
@@ -603,9 +647,9 @@ function activateTab(tabId) {
 
     document.querySelectorAll(".tab-content.active").forEach(tab => {
         if (tab.id !== tabId) {
-            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID) {
+            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID && tab.id !== MEMO_TAB_ID) {
                 saveTabState(tab.id);
-                tab.innerHTML = '';
+                // tab.innerHTML = ''; // Removed to persist content and prevent reload
             }
             tab.classList.remove("active");
         }
@@ -618,115 +662,85 @@ function activateTab(tabId) {
     btn.classList.add("active");
     content.classList.add("active");
 
-    if (tabId === ADR_TAB_ID && !content.innerHTML.trim()) {
-        content.innerHTML = createChartGrid(tabId);
-        // Restore ADR interval setting
-        const adrSelect = document.getElementById('adrRefreshInterval');
-        if (adrSelect && lastSavedSettings.adrInterval) {
-            adrSelect.value = lastSavedSettings.adrInterval;
-        }
-        setTimeout(() => {
-            updateAdrFromSource();
-            startAdrAutoRefresh(); // Start auto refresh
-        }, 100);
-    }
-    else if (tabId === ADR_TAB_ID) {
-        // If already rendered, ensure refresh starts
-        const adrSelect = document.getElementById('adrRefreshInterval');
-        if (adrSelect && lastSavedSettings.adrInterval) {
-            adrSelect.value = lastSavedSettings.adrInterval;
-        }
+    // Initialize tab if empty, or just ensure intervals/listeners are active
+    const wasEmpty = initializeTab(tabId);
+
+    if (tabId === ADR_TAB_ID) {
         startAdrAutoRefresh();
+    } else if (tabId === MEMO_TAB_ID) {
+        // Memo tab specifics if needed
+    } else if (tabId === EARNINGS_TAB_ID || (tabData[tabId] && (tabData[tabId].type === 'overseas_custom' || tabData[tabId].type === 'exchange_rate'))) {
+        if (!wasEmpty) {
+            redrawTabCharts(tabId);
+        }
+    } else if (tabId !== PERM_TAB_ID && wasEmpty) {
+        loadChartsSequentially(content);
     }
-    else if (tabId === EARNINGS_TAB_ID && !content.innerHTML.trim()) {
+}
+
+/**
+ * 전 전용 탭들의 레이어 구성 및 이벤트 리스너 통합 초기화
+ * @returns {boolean} true if the tab was newly initialized (rendered)
+ */
+function initializeTab(tabId) {
+    const content = document.getElementById(tabId);
+    if (!content) return false;
+
+    const isInitialized = content.innerHTML.trim().length > 0;
+
+    // 1. Render layout if empty
+    if (!isInitialized) {
+        console.log(`🏗️ [InitTab] Rendering initial layout for ${tabId}`);
         content.innerHTML = createChartGrid(tabId);
-        // Attach refresh button event listener
-        setTimeout(() => {
-            const refreshBtn = document.getElementById(`refreshEarnings_${tabId}`);
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
-            }
-            const statusText = document.getElementById(`earningsStatusText_${tabId}`);
-            const lastUpdate = document.getElementById(`earningsLastUpdate_${tabId}`);
-            if (statusText) statusText.textContent = '데이터 로딩 완료';
-            if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
-        }, 100);
     }
-    else if (tabId === EARNINGS_TAB_ID) {
+
+    // 2. Attach specialized listeners (idempotent checks included)
+    if (tabId === ADR_TAB_ID) {
+        const adrSelect = document.getElementById('adrRefreshInterval');
+        if (adrSelect && lastSavedSettings.adrInterval) {
+            adrSelect.value = lastSavedSettings.adrInterval;
+        }
+    } else if (tabId === EARNINGS_TAB_ID) {
         const refreshBtn = document.getElementById(`refreshEarnings_${tabId}`);
         if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
             refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
             refreshBtn.setAttribute('data-listener-attached', 'true');
         }
-    }
-    else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom' && !content.innerHTML.trim()) {
-        content.innerHTML = createChartGrid(tabId);
-        // Attach refresh button event listener and trigger initial load
-        setTimeout(() => {
-            const prefix = `overseasCustom_${tabId}`;
-            const refreshBtn = document.getElementById(`refreshOverlay_${tabId}`);
-            const statusText = document.getElementById(`${prefix}StatusText`);
-            const lastUpdate = document.getElementById(`${prefix}LastUpdate`);
-
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', () => refreshOverseasCustomCharts(tabId));
-            }
-
-            // Initial load for custom tabs to trigger Canvas rendering
-            refreshOverseasCustomCharts(tabId);
-
-            // Initialize cursor sync logic
-            setupOverseasCursorSync();
-
-            // Setup sector group listeners
-            setupSectorGroupListeners(tabId);
-        }, 100);
-    }
-    else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+    } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+        const prefix = `overseasCustom_${tabId}`;
         const refreshBtn = document.getElementById(`refreshOverlay_${tabId}`);
         if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
             refreshBtn.addEventListener('click', () => refreshOverseasCustomCharts(tabId));
             refreshBtn.setAttribute('data-listener-attached', 'true');
         }
-
         setupOverseasCursorSync();
-    }
-    // Exchange Rate/Interest Rate Tab (TradingEconomics) - first render
-    else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate' && !content.innerHTML.trim()) {
-        content.innerHTML = createChartGrid(tabId);
-        // Attach refresh button event listener and trigger initial load
-        setTimeout(() => {
-            const prefix = `exchangeRate_${tabId}`;
-            const refreshBtn = document.getElementById(`refreshExchangeRate_${tabId}`);
-            const statusText = document.getElementById(`${prefix}StatusText`);
-            const lastUpdate = document.getElementById(`${prefix}LastUpdate`);
-
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', () => refreshExchangeRateCharts(tabId));
-            }
-
-            // Initial load
-            refreshExchangeRateCharts(tabId);
-
-            // Setup sector group listeners for dividers
-            setupSectorGroupListeners(tabId);
-        }, 100);
-    }
-    // Exchange Rate/Interest Rate Tab - already rendered
-    else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
+        setupSectorGroupListeners(tabId);
+    } else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
         const refreshBtn = document.getElementById(`refreshExchangeRate_${tabId}`);
         if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
             refreshBtn.addEventListener('click', () => refreshExchangeRateCharts(tabId));
             refreshBtn.setAttribute('data-listener-attached', 'true');
         }
-    }
-    else if (tabId !== PERM_TAB_ID && tabId !== ADR_TAB_ID && tabId !== EARNINGS_TAB_ID && !content.innerHTML.trim()) {
-        content.innerHTML = createChartGrid(tabId);
-        loadChartsSequentially(content);
+        setupSectorGroupListeners(tabId);
     }
 
-    saveAppData();
+    // 3. Trigger initial load if it was empty
+    if (!isInitialized) {
+        if (tabId === ADR_TAB_ID) {
+            setTimeout(() => updateAdrFromSource(), 100);
+        } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+            refreshOverseasCustomCharts(tabId);
+        } else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
+            refreshExchangeRateCharts(tabId);
+        }
+        return true;
+    }
+
+    return false;
 }
+
+
+
 
 function createTabButtonElement(id, name) {
     const btn = document.createElement("button");
@@ -2118,8 +2132,10 @@ function renderFinvizChartItem(chart, color = '') {
 function renderCustomChartItem(item, color = '', tabId, idx) {
     const isMulti = item.urls && item.urls.length > 1;
     const isFred = item.urls && item.urls.some(url => url.toLowerCase().includes('fred('));
+    // Also treat single TradingEconomics URL as canvas chart, not image
+    const isTE = item.urls && item.urls.some(url => url.toLowerCase().includes('tradingeconomics.com'));
 
-    if (isMulti || isFred) {
+    if (isMulti || isFred || isTE) {
         const cleanTitle = (item.title || '').replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '').trim();
         let style = '';
         if (color) {
@@ -2258,6 +2274,15 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     const chartH = h - padding.top - padding.bottom;
 
     // Calculate min/max values
+    // Filter out NaN/null values and future dummy data
+    const now = new Date();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayEnd);
+    if (validData.length === 0) return;
+
+    // Update local data reference to filtered version
+    data = validData;
+
     const values = data.map(d => d.value);
     const minVal = Math.min(...values);
     const maxVal = Math.max(...values);
@@ -2266,6 +2291,15 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
 
     const yMin = minVal - buffer;
     const yMax = maxVal + buffer;
+
+    // Font settings
+    const axisFont = '11px sans-serif';
+    const headerFont = 'bold 12px sans-serif';
+    const dateFont = '10px sans-serif';
+
+    // Cache data for redraw
+    canvas.chartData = { data, title };
+    canvas.setAttribute('data-chart-type', 'te-single');
 
     // Draw grid lines
     ctx.strokeStyle = '#e0e0e0';
@@ -2281,7 +2315,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         // Y-axis labels
         const val = yMax - ((yMax - yMin) / gridLines) * i;
         ctx.fillStyle = '#666';
-        ctx.font = '10px Inter, sans-serif';
+        ctx.font = axisFont;
         ctx.textAlign = 'left';
         ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
     }
@@ -2315,22 +2349,24 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         });
     }
 
-    // Draw X-axis labels (first and last date)
-    ctx.fillStyle = '#666';
-    ctx.font = '10px Inter, sans-serif';
-    ctx.textAlign = 'center';
-
-    const firstDate = data[0].date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-    const lastDate = data[data.length - 1].date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-
     ctx.fillText(firstDate, padding.left, h - 5);
     ctx.fillText(lastDate, w - padding.right, h - 5);
 
-    // Draw latest value in top-right
-    const latestValue = data[data.length - 1].value;
-    ctx.fillStyle = '#2c3e50';
-    ctx.font = 'bold 12px Inter, sans-serif';
+    // Draw latest information in top-right
+    const latestItem = data[data.length - 1];
+    const latestValue = latestItem.value;
+    const latestDateStr = latestItem.date.toISOString().slice(0, 10).replace(/-/g, '/');
+
     ctx.textAlign = 'right';
+
+    // Latest Date
+    ctx.fillStyle = '#666';
+    ctx.font = dateFont;
+    ctx.fillText(latestDateStr, w - padding.right, padding.top - 18);
+
+    // Latest Value
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = headerFont;
     ctx.fillText(latestValue.toFixed(2), w - padding.right, padding.top - 5);
 }
 
@@ -2346,168 +2382,182 @@ async function loadMultiSeriesChart(canvas, urls, title) {
     }
 
     try {
-        // urls can be array of strings (legacy) or array of objects {url, label}
-        const seriesConfig = Array.isArray(urls) && urls.length > 0 && typeof urls[0] === 'object'
-            ? urls
-            : urls.map(u => ({ url: u, label: '' }));
+        // Check for flat array format: ["url1", "lbl1", "dur1", "url2", "lbl2", "dur2"]
+        let seriesConfig = [];
+        if (Array.isArray(urls)) {
+            // If all elements are strings and length is divisible by 3, treat as flat array
+            const allStrings = urls.every(u => typeof u === 'string');
+            if (urls.length > 0 && urls.length % 3 === 0 && allStrings &&
+                (urls[0].includes('http') || urls[0].includes('tradingeconomics'))) {
+
+                for (let i = 0; i < urls.length; i += 3) {
+                    seriesConfig.push({
+                        url: urls[i],
+                        label: urls[i + 1],
+                        duration: urls[i + 2]
+                    });
+                }
+                console.log('[MultiSeries] Detected flat array input, grouped into:', seriesConfig);
+            } else {
+                // Regular processing (array of strings or objects)
+                seriesConfig = urls.map(u => {
+                    if (typeof u === 'string') return { url: u, label: '' };
+                    if (Array.isArray(u)) return { url: u[0], label: u[1], duration: u[2] };
+                    return u;
+                });
+            }
+        }
 
         const seriesPromises = seriesConfig.map(async (item) => {
-            const url = item.url;
+            let url = item.url;
             let data = [];
             let label = item.label || "";
 
             let dataSource = '';
-            if (/fred\s*\(/i.test(url)) dataSource = 'fred';
-            else if (/ecos\s*\(/i.test(url)) dataSource = 'ecos';
+            const lowerUrl = url.toLowerCase().trim();
+            if (lowerUrl.indexOf('fred') !== -1) dataSource = 'fred';
+            else if (lowerUrl.indexOf('ecos') !== -1) dataSource = 'ecos';
+            else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
 
-            console.log(`[MultiSeries] Processing URL: "${url}", Detected Source: "${dataSource}"`);
+            console.log(`[MultiSeries] Final check - URL: "${url}", Source: "${dataSource}"`);
 
             if (dataSource === 'fred') {
-                // fred('ID', 'Period') 파서 (따옴표 유무 상관없이 처리)
-                // 정규식 개선: fred(...) 내부의 첫번째 인자와 선택적 두번째 인자를 캡처
+                // ... (existing FRED logic) ...
                 const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
-
                 if (fredMatch) {
-                    // 따옴표 제거 및 공백 제거 유틸
                     const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
-
                     const sid = cleanArg(fredMatch[1]);
                     const per = cleanArg(fredMatch[2]) || '1년';
-
                     if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
-
-                    if (!label) label = sid; // Fallback only if no explicit label provided
-                    console.log(`[MultiSeries] Fetching FRED data: ${sid}, Period: ${per}`);
-
-                    // Timeout 설정 (10초)
+                    if (!label) label = sid;
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
+                    const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s for reliability
                     try {
-                        console.log(`[MultiSeries] Requesting: /api/fred?series_id=${sid}&period=${per}`);
-                        const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(per)}`, {
-                            signal: controller.signal
-                        });
+                        const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(per)}`, { signal: controller.signal });
                         clearTimeout(timeoutId);
-
-                        if (!resp.ok) {
-                            let errorMsg = `HTTP Error ${resp.status}`;
-                            try {
-                                const errJson = await resp.json();
-                                if (errJson.error) errorMsg += `: ${errJson.error}`;
-                            } catch (e) { }
-                            throw new Error(errorMsg);
-                        }
-
+                        if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                         const resJson = await resp.json();
-                        console.log(`[MultiSeries] JSON parsed for ${sid}, success: ${resJson.success}`);
                         if (resJson.success) {
-                            if (!resJson.data || resJson.data.length === 0) {
-                                throw new Error('데이터가 비어있습니다.');
-                            }
+                            if (!resJson.data || resJson.data.length === 0) throw new Error('데이터가 비어있습니다.');
                             data = resJson.data.map(d => ({ date: new Date(d.date), value: d.value }));
-
-                            console.log(`[MultiSeries] Loaded ${data.length} points for ${sid}`);
-                        } else {
-                            throw new Error(resJson.error || 'Unknown FRED Error');
-                        }
+                        } else throw new Error(resJson.error || 'Unknown FRED Error');
                     } catch (fetchErr) {
                         clearTimeout(timeoutId);
-                        if (fetchErr.name === 'AbortError') {
-                            throw new Error('요청 시간 초과 (10초)');
-                        }
                         throw fetchErr;
                     }
-                } else {
-                    throw new Error(`Invalid FRED format: ${url}`);
-                }
+                } else throw new Error(`Invalid FRED format: ${url}`);
             } else if (dataSource === 'ecos') {
-                // ecos('Table', 'Item', 'Period') or ecos('Item', 'Period')
+                // ... (existing ECOS logic) ...
                 const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
                 if (innerResult) {
-                    // Extract args (comma-delimited, ignoring quotes)
                     const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
                     let table = '817Y002';
                     let itemCode = '';
                     let period = '';
-
-                    if (args.length === 3) {
-                        table = args[0];
-                        itemCode = args[1];
-                        period = args[2];
-                    } else if (args.length === 2) {
-                        itemCode = args[0];
-                        period = args[1];
-                    } else {
-                        throw new Error(`Invalid ECOS format: ${url}. Use ecos('Table','Item','Period') or ecos('Item','Period')`);
-                    }
-
+                    if (args.length === 3) { table = args[0]; itemCode = args[1]; period = args[2]; }
+                    else if (args.length === 2) { itemCode = args[0]; period = args[1]; }
+                    else throw new Error(`Invalid ECOS format: ${url}`);
                     if (!label) label = itemCode;
-
-                    // Date Calculation
                     const now = new Date();
                     const formatYMD = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
                     const endDate = formatYMD(now);
                     let startDateObj = new Date(now);
-
-                    if (period.includes('년')) {
-                        const y = parseInt(period.replace('년', '')) || 1;
-                        startDateObj.setFullYear(now.getFullYear() - y);
-                    } else if (period.includes('개월')) {
-                        const m = parseInt(period.replace('개월', '')) || 1;
-                        startDateObj.setMonth(now.getMonth() - m);
-                    } else if (period.includes('일')) {
-                        const d = parseInt(period.replace('일', '')) || 7;
-                        startDateObj.setDate(now.getDate() - d);
-                    } else {
-                        // Default 1 year fallback
-                        startDateObj.setFullYear(now.getFullYear() - 1);
-                    }
+                    if (period.includes('년')) startDateObj.setFullYear(now.getFullYear() - (parseInt(period) || 1));
+                    else if (period.includes('개월')) startDateObj.setMonth(now.getMonth() - (parseInt(period) || 1));
+                    else startDateObj.setFullYear(now.getFullYear() - 1);
                     const startDate = formatYMD(startDateObj);
-
-                    console.log(`[MultiSeries] Fetching ECOS: Table=${table}, Item=${itemCode}, Range=${startDate}~${endDate}`);
-
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 10000);
-
                     try {
-                        const resp = await fetch(`/api/ecos?table=${encodeURIComponent(table)}&item=${encodeURIComponent(itemCode)}&start=${startDate}&end=${endDate}`, {
-                            signal: controller.signal
-                        });
+                        const resp = await fetch(`/api/ecos?table=${encodeURIComponent(table)}&item=${encodeURIComponent(itemCode)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
                         clearTimeout(timeoutId);
-
                         if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                         const resJson = await resp.json();
-
                         if (resJson.success && resJson.data) {
-                            // Map Row: TIME (YYYYMMDD) -> Date, DATA_VALUE -> Value
                             data = resJson.data.map(r => {
-                                const dStr = r.TIME; // "20231025"
-                                if (dStr.length === 8) {
-                                    const y = dStr.substring(0, 4);
-                                    const m = dStr.substring(4, 6);
-                                    const d = dStr.substring(6, 8);
-                                    return {
-                                        date: new Date(`${y}-${m}-${d}`),
-                                        value: parseFloat(r.DATA_VALUE)
-                                    };
-                                }
+                                const dStr = r.TIME;
+                                if (dStr.length === 8) return { date: new Date(`${dStr.substring(0, 4)}-${dStr.substring(4, 6)}-${dStr.substring(6, 8)}`), value: parseFloat(r.DATA_VALUE) };
                                 return null;
-                            }).filter(x => x !== null);
-
-                            // Sort by date ascending
-                            data.sort((a, b) => a.date - b.date);
-                            console.log(`[MultiSeries] Loaded ${data.length} points for ECOS ${itemCode}`);
-
-                        } else {
-                            throw new Error(resJson.error || 'ECOS API returned no data');
-                        }
+                            }).filter(x => x !== null).sort((a, b) => a.date - b.date);
+                        } else throw new Error(resJson.error || 'ECOS API returned no data');
                     } catch (fetchErr) {
                         clearTimeout(timeoutId);
                         throw fetchErr;
                     }
-                } else {
-                    throw new Error(`Invalid ECOS format: ${url}`);
+                } else throw new Error(`Invalid ECOS format: ${url}`);
+            } else if (dataSource === 'te') {
+                // TradingEconomics logic - supports both URL and function formats
+                // Function format: tradingeconomics('path', 'duration')
+                // URL format: https://tradingeconomics.com/path
+
+                let actualUrl = url;
+                let period = item.duration || ''; // Duration from item object (e.g., '5년', '10년')
+
+                // No function parsing - duration comes from item.duration
+                console.log(`[MultiSeries] TE detected - URL: ${actualUrl}, Label: ${label || 'auto'}, Period: ${period || 'default'}`);
+
+                const controller = new AbortController();
+                // Scraping takes time (Puppeteer launch + navigation + click + data load)
+                // Increased to 60s to prevent premature timeout
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+                try {
+                    // Pass duration to backend so it can click the appropriate button
+                    let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
+                    if (period) {
+                        proxyUrl += `&duration=${encodeURIComponent(period)}`;
+                    }
+                    const resp = await fetch(proxyUrl, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    if (!resp.ok) {
+                        const errorData = await resp.json().catch(() => ({}));
+                        throw new Error(`서버 오류 (${resp.status}): ${errorData.details || errorData.error || 'TradingEconomics 접근 금지 (403)'}`);
+                    }
+                    const resJson = await resp.json();
+                    let rawData = resJson.data;
+
+                    // 이중 방어: 문자열인 경우 JSON 파싱 시도
+                    if (typeof rawData === 'string' && rawData.trim().startsWith('[')) {
+                        try {
+                            const parsed = JSON.parse(rawData.trim());
+                            if (Array.isArray(parsed)) rawData = parsed;
+                        } catch (e) {
+                            console.warn("[MultiSeries] TE String parse failed:", e);
+                        }
+                    }
+
+                    if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
+                        data = rawData.map(item => {
+                            const dateStr = item.DateTime || item.Date || item.date || item.last_update;
+                            const val = item.Value !== undefined ? item.Value :
+                                (item.Close !== undefined ? item.Close :
+                                    (item.Actual !== undefined ? item.Actual :
+                                        (item.actual !== undefined ? item.actual :
+                                            (item.LatestValue !== undefined ? item.LatestValue :
+                                                (item.latest_value !== undefined ? item.latest_value :
+                                                    (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
+                            return { date: new Date(dateStr), value: parseFloat(val) };
+                        }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
+                            .sort((a, b) => a.date - b.date);
+
+                        // Note: Duration filtering is handled by backend via button clicks (1Y/5Y/10Y/MAX)
+                        // No need for client-side filtering
+
+                        if (!label) label = actualUrl.split('/').pop().split('?')[0];
+                    }
+
+                    if (!Array.isArray(data) || data.length === 0) {
+                        let errorMsg = resJson.error || 'Invalid TE data format';
+                        const diagVal = (typeof rawData === 'string') ? rawData.toLowerCase() : (typeof resJson.data === 'string' ? resJson.data.toLowerCase() : '');
+                        if (diagVal.includes('<!doctype html>') || diagVal.includes('<html')) {
+                            errorMsg = 'TradingEconomics 브라우저 주소를 API가 거부했습니다. API 주소를 사용하거나 잠시 후 다시 시도해 주세요.';
+                        } else {
+                            errorMsg = `데이터 형식이 올바르지 않거나 비어있습니다. (Type: ${Array.isArray(rawData) ? 'Array' : typeof rawData})`;
+                        }
+                        throw new Error(errorMsg);
+                    }
+                } catch (fetchErr) {
+                    clearTimeout(timeoutId);
+                    throw fetchErr;
                 }
             } else {
                 throw new Error(`지원하지 않는 데이터 소스입니다. (Detected: ${dataSource || 'None'}, URL: ${url})`);
@@ -2543,6 +2593,11 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
+    // Font settings - consistent across all redraws
+    const axisFont = '11px sans-serif'; // for X/Y axis
+    const legendFont = 'bold 12px sans-serif'; // for legend
+    const dateFont = '10px sans-serif'; // for latest date
+
     canvas.width = w * dpr;
     canvas.height = h * dpr;
     ctx.scale(dpr, dpr);
@@ -2558,12 +2613,19 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     let maxDate = new Date(-8640000000000000);
 
     allSeries.forEach(s => {
+        // Filter out NaN/null values and future data before processing
+        const now = new Date();
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        s.data = s.data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayEnd);
+
         s.data.forEach(d => {
             allValues.push(d.value);
             if (d.date < minDate) minDate = d.date;
             if (d.date > maxDate) maxDate = d.date;
         });
     });
+
+    if (allValues.length === 0) return;
 
     const minVal = Math.min(...allValues);
     const maxVal = Math.max(...allValues);
@@ -2573,6 +2635,22 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     const yMin = minVal - buffer;
     const yMax = maxVal + buffer;
 
+    // 차트 데이터를 canvas에 저장 (마우스 이벤트에서 사용)
+    canvas.chartData = {
+        allSeries: allSeries,
+        minDate: minDate,
+        maxDate: maxDate,
+        yMin: yMin,
+        yMax: yMax,
+        padding: padding,
+        chartW: chartW,
+        chartH: chartH,
+        w: w,
+        h: h,
+        title: title
+    };
+    canvas.setAttribute('data-chart-type', 'multi-series');
+
     // 그리드
     ctx.strokeStyle = '#f0f0f0';
     ctx.lineWidth = 0.5;
@@ -2580,7 +2658,7 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
         const y = padding.top + (chartH / 5) * i;
         ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
         const val = yMax - ((yMax - yMin) / 5) * i;
-        ctx.fillStyle = '#999'; ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = '#999'; ctx.font = axisFont; ctx.textAlign = 'left';
         ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
     }
 
@@ -2602,18 +2680,298 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
 
         // 범례 표시 (우측 상단)
         ctx.fillStyle = color;
-        ctx.font = 'bold 10px sans-serif';
+        ctx.font = legendFont;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'top';
-        ctx.fillText(`${s.label}: ${s.data[s.data.length - 1].value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 12));
+        const lastItem = s.data[s.data.length - 1];
+        const dateStr = lastItem.date.toISOString().slice(5, 10).replace(/-/g, '/'); // MM/DD
+        ctx.fillText(`${s.label} (${dateStr}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15)); // increased spacing
+    });
+
+    // X축 라벨 (여러 개의 중간 날짜 표시)
+    ctx.fillStyle = '#999';
+    ctx.font = axisFont;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    // 날짜 범위에 따라 적절한 간격으로 레이블 표시
+    const dateRange = maxDate - minDate;
+    const daysDiff = dateRange / (1000 * 60 * 60 * 24);
+
+    let numLabels = 5; // 기본 5개 레이블
+    if (daysDiff > 3650) numLabels = 8; // 10년 이상이면 8개
+    else if (daysDiff > 1825) numLabels = 6; // 5년 이상이면 6개
+
+    for (let i = 0; i <= numLabels; i++) {
+        const ratio = i / numLabels;
+        const date = new Date(minDate.getTime() + dateRange * ratio);
+        const x = padding.left + chartW * ratio;
+
+        // 날짜 포맷 (년도만 또는 년-월)
+        let dateLabel;
+        if (daysDiff > 730) { // 2년 이상이면 년도만
+            dateLabel = date.getFullYear().toString();
+        } else if (daysDiff > 180) { // 6개월 이상이면 년-월
+            dateLabel = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+        } else { // 6개월 미만이면 월-일
+            dateLabel = `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+
+        ctx.fillText(dateLabel, x, h - 30);
+    }
+
+    // 마우스 이벤트 리스너 추가 (한 번만)
+    if (!canvas.hasInteractiveEvents) {
+        canvas.hasInteractiveEvents = true;
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!canvas.chartData) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const { padding, chartW, minDate, maxDate, allSeries } = canvas.chartData;
+
+            // 차트 영역 내에 있는지 확인
+            if (mouseX < padding.left || mouseX > padding.left + chartW) {
+                return;
+            }
+
+            // 마우스 X 위치를 날짜로 변환
+            const ratio = (mouseX - padding.left) / chartW;
+            const hoveredDate = new Date(minDate.getTime() + (maxDate - minDate) * ratio);
+
+            // 각 시리즈에서 가장 가까운 데이터 포인트 찾기
+            const hoveredValues = allSeries.map(s => {
+                if (!s.data || s.data.length === 0) return null;
+                const closest = s.data.reduce((prev, curr) => {
+                    return Math.abs(curr.date - hoveredDate) < Math.abs(prev.date - hoveredDate) ? curr : prev;
+                });
+                return { label: s.label, value: closest.value, date: closest.date };
+            }).filter(v => v !== null);
+
+            // 차트 다시 그리기 (수직선 + 툴팁 포함)
+            drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues);
+
+            // 같은 탭의 다른 차트에 동기화
+            syncCursorToOtherCharts(canvas, hoveredDate);
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            // 커서 제거하고 원래 차트 다시 그리기
+            if (canvas.chartData) {
+                drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
+            }
+            // 다른 차트의 커서도 제거
+            clearCursorFromOtherCharts(canvas);
+        });
+    }
+}
+
+/**
+ * 커서와 툴팁이 포함된 차트 그리기
+ */
+function drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues) {
+    if (!canvas.chartData) return;
+
+    const { allSeries, minDate, maxDate, yMin, yMax, padding, chartW, chartH, w, h, title } = canvas.chartData;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    // 캔버스 초기화
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    // Font settings
+    const axisFont = '11px sans-serif';
+    const legendFont = 'bold 12px sans-serif';
+
+    // 그리드
+    ctx.strokeStyle = '#f0f0f0';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (chartH / 5) * i;
+        ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+        const val = yMax - ((yMax - yMin) / 5) * i;
+        ctx.fillStyle = '#999'; ctx.font = axisFont; ctx.textAlign = 'left';
+        ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
+    }
+
+    // 데이터 그리기
+    const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+    allSeries.forEach((s, sIdx) => {
+        const color = colors[sIdx % colors.length];
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+
+        s.data.forEach((d, i) => {
+            const x = padding.left + ((d.date - minDate) / (maxDate - minDate)) * chartW;
+            const y = padding.top + (1 - (d.value - yMin) / (yMax - yMin)) * chartH;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // 범례 표시
+        ctx.fillStyle = color;
+        ctx.font = legendFont;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        const lastItem = s.data[s.data.length - 1];
+        const dateStr = lastItem.date.toISOString().slice(5, 10).replace(/-/g, '/');
+        ctx.fillText(`${s.label} (${dateStr}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15));
     });
 
     // X축 라벨
     ctx.fillStyle = '#999';
+    ctx.font = axisFont;
     ctx.textAlign = 'center';
-    ctx.fillText(minDate.toLocaleDateString(), padding.left + 20, h - 15);
-    ctx.fillText(maxDate.toLocaleDateString(), w - padding.right - 20, h - 15);
+    ctx.textBaseline = 'top';
+
+    const dateRange = maxDate - minDate;
+    const daysDiff = dateRange / (1000 * 60 * 60 * 24);
+    let numLabels = 5;
+    if (daysDiff > 3650) numLabels = 8;
+    else if (daysDiff > 1825) numLabels = 6;
+
+    for (let i = 0; i <= numLabels; i++) {
+        const ratio = i / numLabels;
+        const date = new Date(minDate.getTime() + dateRange * ratio);
+        const x = padding.left + chartW * ratio;
+
+        let dateLabel;
+        if (daysDiff > 730) {
+            dateLabel = date.getFullYear().toString();
+        } else if (daysDiff > 180) {
+            dateLabel = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+        } else {
+            dateLabel = `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+
+        ctx.fillText(dateLabel, x, h - 30);
+    }
+
+    // 수직 커서 라인
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(mouseX, padding.top);
+    ctx.lineTo(mouseX, padding.top + chartH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 툴팁
+    if (hoveredValues && hoveredValues.length > 0) {
+        const tooltipWidth = 150;
+        const tooltipHeight = 20 + hoveredValues.length * 15;
+        let tooltipX = mouseX + 10;
+        const tooltipY = padding.top + 10;
+
+        // 툴팁이 화면 밖으로 나가지 않도록 조정
+        if (tooltipX + tooltipWidth > w - padding.right) {
+            tooltipX = mouseX - tooltipWidth - 10;
+        }
+
+        // 툴팁 배경
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+        ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+        ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+
+        // 날짜
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const tDate = hoveredValues[0].date;
+        const dTooltipStr = `${tDate.getFullYear()}/${String(tDate.getMonth() + 1).padStart(2, '0')}/${String(tDate.getDate()).padStart(2, '0')}`;
+        ctx.fillText(dTooltipStr, tooltipX + 5, tooltipY + 5);
+
+        // 각 시리즈 값
+        hoveredValues.forEach((v, i) => {
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.font = '10px sans-serif';
+            ctx.fillText(`${v.label}: ${v.value.toFixed(2)}`, tooltipX + 5, tooltipY + 20 + i * 15);
+        });
+
+        // 호버된 데이터 포인트에 붉은색 원형 마커 표시
+        hoveredValues.forEach((v) => {
+            const x = padding.left + ((v.date - minDate) / (maxDate - minDate)) * chartW;
+            const y = padding.top + (1 - (v.value - yMin) / (yMax - yMin)) * chartH;
+
+            // 외곽선 (흰색)
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // 내부 원 (붉은색)
+            ctx.fillStyle = '#ff6b6b';
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, 2 * Math.PI);
+            ctx.fill();
+        });
+    }
 }
+
+/**
+ * 같은 탭의 다른 차트에 커서 동기화
+ */
+function syncCursorToOtherCharts(sourceCanvas, hoveredDate) {
+    const activeContent = document.querySelector('.tab-content.active');
+    if (!activeContent) return;
+
+    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"]');
+
+    allCanvases.forEach(canvas => {
+        if (canvas === sourceCanvas) return;
+        if (!canvas.chartData) return;
+
+        const { minDate, maxDate, padding, chartW, allSeries } = canvas.chartData;
+
+        // 날짜 범위 내에 있는지 확인
+        if (hoveredDate < minDate || hoveredDate > maxDate) return;
+
+        // 해당 날짜에 가장 가까운 X 위치 계산
+        const ratio = (hoveredDate - minDate) / (maxDate - minDate);
+        const mouseX = padding.left + chartW * ratio;
+
+        // 해당 위치의 값 찾기
+        const hoveredValues = allSeries.map(s => {
+            if (!s.data || s.data.length === 0) return null;
+            const closest = s.data.reduce((prev, curr) => {
+                return Math.abs(curr.date - hoveredDate) < Math.abs(prev.date - hoveredDate) ? curr : prev;
+            });
+            return { label: s.label, value: closest.value, date: closest.date };
+        }).filter(v => v !== null);
+
+        drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues);
+    });
+}
+
+/**
+ * 다른 차트의 커서 제거
+ */
+function clearCursorFromOtherCharts(sourceCanvas) {
+    const activeContent = document.querySelector('.tab-content.active');
+    if (!activeContent) return;
+
+    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"]');
+
+    allCanvases.forEach(canvas => {
+        if (canvas === sourceCanvas) return;
+        if (!canvas.chartData) return;
+
+        drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
+    });
+}
+
 
 /**
  * 환율/금리 탭 차트 새로고침
@@ -2716,6 +3074,30 @@ function refreshEarningsTab(tabId) {
 }
 
 /**
+ * 일반 동적 차트 탭 (6개 iframe) 새로고침
+ */
+function refreshDynamicChartsTab(tabId) {
+    const content = document.getElementById(tabId);
+    if (!content) return;
+
+    console.log(`🔄 [Refresh] Reloading dynamic iframes for tab: ${tabId}`);
+    const iframes = content.querySelectorAll('iframe');
+    iframes.forEach((iframe, index) => {
+        const currentSrc = iframe.src;
+        if (currentSrc && currentSrc !== 'about:blank') {
+            // 부하 방지를 위해 순차적 재로드
+            setTimeout(() => {
+                iframe.src = 'about:blank';
+                setTimeout(() => {
+                    iframe.src = currentSrc;
+                }, 100);
+            }, index * 800);
+        }
+    });
+}
+
+
+/**
  * 모든 탭 전체 새로고침 (백그라운드 포함)
  */
 async function refreshAllTabs() {
@@ -2739,13 +3121,21 @@ async function refreshAllTabs() {
 
     // 4. 기타 동적 탭들
     Object.keys(tabData).forEach(tabId => {
+        const wasEmpty = initializeTab(tabId);
         const type = tabData[tabId]?.type;
+
+        // Custom/Exchange/ADR are already refreshed inside initializeTab(tabId) if wasEmpty.
+        // For others (Earnings, Dynamic iframes), we proceed to refresh.
+        if (wasEmpty && (tabId === ADR_TAB_ID || type === 'overseas_custom' || type === 'exchange_rate')) return;
+
         if (tabId === EARNINGS_TAB_ID) {
             refreshEarningsTab(tabId);
         } else if (type === 'exchange_rate') {
             refreshExchangeRateCharts(tabId);
         } else if (type === 'overseas_custom') {
             refreshOverseasCustomCharts(tabId);
+        } else if (!type && Array.isArray(tabData[tabId])) {
+            refreshDynamicChartsTab(tabId);
         }
     });
 
@@ -2913,7 +3303,23 @@ function parseCustomCharts(input) {
                 // Let's prioritize the new requested format for even lengths > 2.
                 // For length 2 (u1, title), it works for both.
 
-                if (parts.length >= 2 && parts.length % 2 === 0) {
+                if (parts.length >= 3 && parts.length % 3 === 0 &&
+                    (parts[0].includes('http') || parts[0].includes('tradingeconomics'))) {
+                    // Assume TRIPLETS: (url, label, duration)
+                    for (let i = 0; i < parts.length; i += 3) {
+                        series.push({
+                            url: parts[i],
+                            label: parts[i + 1],
+                            duration: parts[i + 2]
+                        });
+                        // For backward compat urls array, we can just push the url.
+                        // However, loadMultiSeriesChart now expects objects if complex.
+                        // But let's keep urls as just urls for now, app logic handles seriesConfig.
+                        urls.push(parts[i]);
+                    }
+                    boxTitle = series.map(s => s.label).join(' / ');
+                    console.log('[Parse] Detected Triplets:', series);
+                } else if (parts.length >= 2 && parts.length % 2 === 0) {
                     // Assume PAIRS
                     for (let i = 0; i < parts.length; i += 2) {
                         series.push({ url: parts[i], label: parts[i + 1] });
@@ -3060,6 +3466,32 @@ function updateConfigString(tabId, index, updates) {
 }
 
 /**
+ * 탭 내의 모든 캔버스 차트를 캐시된 데이터로 다시 그리기 (서버 요청 없음)
+ */
+function redrawTabCharts(tabId) {
+    const content = document.getElementById(tabId);
+    if (!content) return;
+
+    console.log(`🎨 [Redraw] Restoring charts for tab: ${tabId}`);
+
+    // multi-series 차트 복구
+    const multiCanvases = content.querySelectorAll('canvas[data-chart-type="multi-series"]');
+    multiCanvases.forEach(canvas => {
+        if (canvas.chartData && canvas.chartData.allSeries) {
+            drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
+        }
+    });
+
+    // TradingEconomics 단일 차트 복구
+    const teCanvases = content.querySelectorAll('canvas[data-chart-type="te-single"]');
+    teCanvases.forEach(canvas => {
+        if (canvas.chartData && canvas.chartData.data) {
+            drawTradingEconomicsLineChart(canvas, canvas.chartData.data, canvas.chartData.title);
+        }
+    });
+}
+
+/**
  * 주석 구문 강조 (녹색 처리) - 라인 주석(//) 및 블록 주석 지원
  */
 function updateSyntaxHighlighting() {
@@ -3192,7 +3624,8 @@ function refreshOverseasCustomCharts(tabId) {
                         let rawUrls = box.dataset.urls;
                         try { rawUrls = decodeURIComponent(rawUrls); } catch (e) { }
                         const urls = JSON.parse(rawUrls);
-                        seriesConfig = urls.map(u => ({ url: u, label: '' }));
+                        // Pass raw array to allow loadMultiSeriesChart to detect flat format
+                        seriesConfig = urls;
                     }
 
                     if (seriesConfig.length > 0) {
@@ -3665,3 +4098,102 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 });
+
+/**
+ * ===== QUILL MEMO EDITOR INITIALIZATION =====
+ */
+let quillEditor = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize Quill Editor
+    setTimeout(() => {
+        if (document.getElementById('quillEditor')) {
+            quillEditor = new Quill('#quillEditor', {
+                theme: 'snow',
+                modules: {
+                    toolbar: [
+                        ['bold', 'italic', 'underline', 'strike'],
+                        ['blockquote', 'code-block'],
+                        [{ 'header': 1 }, { 'header': 2 }],
+                        [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                        ['link', 'image'],
+                        ['clean']
+                    ]
+                },
+                placeholder: '메모를 작성하세요. 이미지도 붙여넣기로 추가 가능합니다.'
+            });
+
+            // Load saved memo
+            loadMemo();
+
+            // Save memo on input (debounced)
+            let saveTimeout;
+            quillEditor.on('text-change', () => {
+                clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(saveMemoAuto, 1000);
+            });
+
+            // Memo Save Button
+            const memoSaveBtn = document.getElementById('memoSaveBtn');
+            if (memoSaveBtn) {
+                memoSaveBtn.addEventListener('click', () => {
+                    saveMemo();
+                });
+            }
+
+
+            // Memo Tab Button delegation (since button is dynamic)
+            document.addEventListener('click', (e) => {
+                const btn = e.target.closest(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`);
+                if (btn) {
+                    activateTab(MEMO_TAB_ID);
+                }
+            });
+        }
+    }, 500);
+});
+
+function saveMemo() {
+    if (!quillEditor) return;
+    const content = quillEditor.getContents();
+    const html = quillEditor.root.innerHTML;
+
+    localStorage.setItem('memoContent_html', html);
+    localStorage.setItem('memoContent_delta', JSON.stringify(content));
+
+    const status = document.getElementById('memoStatus');
+    if (status) {
+        status.textContent = '✅ 저장됨 (서버 동기화 중...)';
+        setTimeout(() => {
+            status.textContent = '';
+        }, 2000);
+    }
+
+    console.log('💾 메모 로컬 저장 완료 -> 서버 동기화 시작');
+    saveAppData(); // Trigger server sync
+}
+
+function saveMemoAuto() {
+    saveMemo();
+}
+
+function loadMemo() {
+    if (!quillEditor) return;
+
+    const savedDelta = localStorage.getItem('memoContent_delta');
+    const savedHtml = localStorage.getItem('memoContent_html');
+
+    if (savedDelta) {
+        try {
+            const delta = JSON.parse(savedDelta);
+            quillEditor.setContents(delta);
+        } catch (e) {
+            if (savedHtml) {
+                quillEditor.root.innerHTML = savedHtml;
+            }
+        }
+    }
+
+    console.log('📖 메모 로드됨');
+}
+

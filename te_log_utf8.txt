@@ -1,0 +1,12 @@
+﻿
+--- Testing (Japan GDP): https://api.tradingeconomics.com/historical/country/japan/indicator/gdp?c=guest:guest ---
+Error: Request failed with status code 403 (Status: 403)
+
+--- Testing (Japan CPI): https://api.tradingeconomics.com/historical/country/japan/indicator/consumer%20price%20index?c=guest:guest ---
+Error: Request failed with status code 403 (Status: 403)
+
+--- Testing (Japan 5Y Yield): https://api.tradingeconomics.com/historical/country/japan/indicator/government%20bond%205y?c=guest:guest ---
+Error: Request failed with status code 403 (Status: 403)
+
+--- Testing (US Inflation): https://api.tradingeconomics.com/historical/country/united%20states/indicator/inflation%20rate?c=guest:guest ---
+Error: Request failed with status code 403 (Status: 403)

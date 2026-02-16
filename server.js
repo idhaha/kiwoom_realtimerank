@@ -5,6 +5,7 @@ const path = require('path');
 const cors = require('cors');
 const fs = require('fs');
 const { exec } = require('child_process');
+const puppeteer = require('puppeteer');
 
 // 전역 시장구분 캐시 (종목코드: 'K'/'Q') - 429 에러 방지용
 const marketCache = {};
@@ -458,52 +459,261 @@ app.get('/api/finviz-image', async (req, res) => {
  * 환율, 금리 등 경제 지표 데이터 제공
  */
 app.get('/api/trading-economics', async (req, res) => {
-    console.log("🚀 [API START] /api/trading-economics 요청 발생");
+    const originalUrl = req.query.url;
+    const duration = req.query.duration || ''; // e.g., '5년', '10년', 'MAX'
+    if (!originalUrl) return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
+
+    console.log(`📡 [TE Proxy] Request: ${originalUrl}, Duration: ${duration || 'default'}`);
+    fileLog(`📡 TE Proxy Request: ${originalUrl}, Duration: ${duration || 'default'}`);
+
     try {
-        const apiUrl = req.query.url;
-        if (!apiUrl) {
-            return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
-        }
+        // Check if it's a TradingEconomics URL (and not the API itself)
+        if (originalUrl.includes('tradingeconomics.com') && !originalUrl.includes('api.tradingeconomics.com')) {
+            console.log(`   -> Scraping Mode (Puppeteer): ${originalUrl}`);
 
-        // Validate that it's a tradingeconomics.com URL
-        if (!apiUrl.includes('tradingeconomics.com')) {
-            return res.status(400).json({ error: "TradingEconomics URL만 허용됩니다." });
-        }
+            let browser = null;
+            try {
+                browser = await puppeteer.launch({
+                    headless: "new",
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-blink-features=AutomationControlled'
+                    ] // Required for some environments
+                });
+                const page = await browser.newPage();
 
-        fileLog(`📡 Fetching TE: ${apiUrl}`);
-        const response = await axios.get(apiUrl, {
-            timeout: 15000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json'
+                // Block images and fonts to speed up loading
+                await page.setRequestInterception(true);
+                page.on('request', (req) => {
+                    if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                        req.abort();
+                    } else {
+                        req.continue();
+                    }
+                });
+
+                // Set a realistic User-Agent
+                await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+
+                await page.setExtraHTTPHeaders({
+                    'Accept-Language': 'en-US,en;q=0.9,ko;q=0.8',
+                    'Referer': 'https://tradingeconomics.com/'
+                });
+
+                // Capture browser console logs
+                page.on('console', msg => {
+                    const logMsg = `PAGE LOG: ${msg.text()}\n`;
+                    console.log(logMsg.trim());
+                    fs.appendFileSync('puppeteer_debug.log', logMsg);
+                });
+
+                // Navigate to the page
+                await page.goto(originalUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+
+                // Wait for Highcharts to be defined and have data
+                // We assume there is a Highcharts chart on the page with data
+                await page.waitForFunction(() => {
+                    return window.Highcharts && window.Highcharts.charts && window.Highcharts.charts.length > 0;
+                }, { timeout: 30000 });
+
+                // Click the appropriate duration button based on user request
+                try {
+                    // Determine which button to click based on duration parameter
+                    let targetButton = '5Y'; // default
+                    if (duration) {
+                        const yearsMatch = duration.match(/(\d+)\s*년/);
+                        if (yearsMatch) {
+                            const years = parseInt(yearsMatch[1]);
+                            if (years >= 10) targetButton = '10Y';
+                            else if (years >= 5) targetButton = '5Y';
+                            else if (years >= 1) targetButton = '1Y';
+                        } else if (duration.toLowerCase().includes('max') || duration.toLowerCase().includes('전체')) {
+                            targetButton = 'MAX';
+                        }
+                    }
+
+                    console.log(`   🎯 Target button: ${targetButton} (from duration: ${duration || 'default'})`);
+                    fs.appendFileSync('puppeteer_debug.log', `Target button: ${targetButton}\n`);
+
+                    // Get initial data count
+                    const initialCount = await page.evaluate(() => {
+                        const chart = window.Highcharts && window.Highcharts.charts ? window.Highcharts.charts[0] : null;
+                        if (!chart || !chart.series) return 0;
+                        let maxLen = 0;
+                        chart.series.forEach(s => {
+                            if (s.data && s.data.length > maxLen) maxLen = s.data.length;
+                        });
+                        return maxLen;
+                    });
+
+                    console.log(`   📊 Initial data count: ${initialCount}`);
+                    fs.appendFileSync('puppeteer_debug.log', `Initial data count: ${initialCount}\n`);
+
+                    // Try to find and click the target button
+                    const buttonClicked = await page.evaluate((targetBtn) => {
+                        // Try text-based search for target button
+                        const buttons = Array.from(document.querySelectorAll('button, a'));
+                        const targetButton = buttons.find(btn => {
+                            const text = btn.textContent.trim();
+                            return text === targetBtn || text === targetBtn.toLowerCase() || text === targetBtn.replace('Y', ' Y');
+                        });
+
+                        if (targetButton) {
+                            targetButton.click();
+                            return { success: true, method: 'text-search', text: targetButton.textContent };
+                        }
+
+                        // Try Highcharts rangeSelector if available
+                        const chart = window.Highcharts && window.Highcharts.charts ? window.Highcharts.charts[0] : null;
+                        if (chart && chart.rangeSelector && chart.rangeSelector.buttons) {
+                            for (let i = 0; i < chart.rangeSelector.buttons.length; i++) {
+                                const btn = chart.rangeSelector.buttons[i];
+                                if (btn.text === targetBtn || btn.text === targetBtn.toLowerCase()) {
+                                    chart.rangeSelector.clickButton(i);
+                                    return { success: true, method: 'highcharts-api', index: i };
+                                }
+                            }
+                        }
+
+                        return { success: false, message: `${targetBtn} button not found` };
+                    }, targetButton);
+
+                    const clickMsg = `   🖱️  ${targetButton} Button click: ${JSON.stringify(buttonClicked)}\n`;
+                    console.log(clickMsg.trim());
+                    fs.appendFileSync('puppeteer_debug.log', clickMsg);
+
+                    if (buttonClicked.success) {
+                        // Wait for data to reload with polling
+                        let dataChanged = false;
+                        for (let i = 0; i < 10; i++) { // Poll for up to 10 seconds
+                            await new Promise(r => setTimeout(r, 1000));
+
+                            const newCount = await page.evaluate(() => {
+                                const chart = window.Highcharts.charts[0];
+                                if (!chart || !chart.series) return 0;
+                                let maxLen = 0;
+                                chart.series.forEach(s => {
+                                    if (s.data && s.data.length > maxLen) maxLen = s.data.length;
+                                });
+                                return maxLen;
+                            });
+
+                            if (newCount !== initialCount) {
+                                const resultMsg = `   ✅ Data count after 5Y click: ${newCount} (was ${initialCount}) after ${i + 1}s\n`;
+                                console.log(resultMsg.trim());
+                                fs.appendFileSync('puppeteer_debug.log', resultMsg);
+                                dataChanged = true;
+                                break;
+                            }
+                        }
+
+                        if (!dataChanged) {
+                            const noChangeMsg = `   ⚠️ Data count did not change after 10s (still ${initialCount})\n`;
+                            console.warn(noChangeMsg.trim());
+                            fs.appendFileSync('puppeteer_debug.log', noChangeMsg);
+                        }
+                    }
+                } catch (e) {
+                    const errMsg = `   ⚠️ Failed to click 5Y button: ${e.message}\n`;
+                    console.warn(errMsg.trim());
+                    fs.appendFileSync('puppeteer_debug.log', errMsg);
+                }
+
+                await page.waitForFunction(() => {
+                    return window.Highcharts && window.Highcharts.charts && window.Highcharts.charts.length > 0 && window.Highcharts.charts[0].series && window.Highcharts.charts[0].series.length > 0;
+                }, { timeout: 30000 });
+
+                const extractedData = await page.evaluate(() => {
+                    try {
+                        const chart = window.Highcharts.charts[0];
+                        // Find the series with the most data points (likely the main historical series)
+                        let bestSeries = chart.series[0];
+                        for (let i = 1; i < chart.series.length; i++) {
+                            if (chart.series[i].data.length > bestSeries.data.length) {
+                                bestSeries = chart.series[i];
+                            }
+                        }
+
+                        if (!bestSeries || bestSeries.data.length === 0) return null;
+
+                        return bestSeries.data
+                            .filter(p => p.y !== null && p.y !== undefined)
+                            .map(p => ({
+                                DateTime: new Date(p.x).toISOString(),
+                                Value: p.y
+                            }));
+                    } catch (e) {
+                        return null;
+                    }
+                });
+
+                if (extractedData) {
+                    console.log(`   ✅ Extracted ${extractedData.length} points via Puppeteer.`);
+                    res.set('Cache-Control', 'public, max-age=300');
+                    return res.json({ success: true, data: extractedData });
+                } else {
+                    throw new Error("Puppeteer failed to extract data from Highcharts.");
+                }
+
+            } catch (e) {
+                const outerErrMsg = `   ❌ Puppeteer Scraping failed: ${e.message}\n`;
+                console.warn(outerErrMsg.trim());
+                fs.appendFileSync('puppeteer_debug.log', outerErrMsg);
+                // Fallthrough to API logic if scraping fails? Or just error out?
+                // If scraping fails, API likely fails too (403).
+                throw new Error(`Scraping failed: ${e.message}`);
+            } finally {
+                if (browser) await browser.close();
             }
-        });
+        }
 
-        fileLog(`✅ TE Status: ${response.status}`);
-        fileLog(`✅ TE Data Type: ${typeof response.data}`);
-        const sample = JSON.stringify(response.data).substring(0, 500);
-        fileLog(`✅ TE Data Sample: ${sample}`);
+        // --- Fallback to API logic (only if not a main indicator page) ---
+        const fetchWithHeaders = async (url) => {
+            return await axios.get(url, {
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Referer': 'https://tradingeconomics.com/'
+                }
+            });
+        };
 
-        console.log("✅ TradingEconomics Status:", response.status);
-        console.log("✅ TradingEconomics Data Type:", typeof response.data);
-        console.log("✅ TradingEconomics Data Sample:", JSON.stringify(response.data).substring(0, 200));
+        let response = await fetchWithHeaders(originalUrl);
+        let finalData = response.data;
+        const dataType = Array.isArray(finalData) ? 'Array' : typeof finalData;
 
-        console.log("✅ TradingEconomics 데이터 획득 성공 (항목 수:", Array.isArray(response.data) ? response.data.length : 'N/A', ")");
+        console.log(`   ✅ Success: ${targetUrl} (Data Type: ${dataType})`);
+        fileLog(`✅ TE Success: ${targetUrl}, Type: ${dataType}`);
 
-        // Set caching headers
-        res.set('Cache-Control', 'public, max-age=300'); // 5분 캐시
-        res.json({
-            success: true,
-            data: response.data
-        });
+        if (typeof finalData === 'string') {
+            const trimmed = finalData.trim();
+            if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+                try {
+                    finalData = JSON.parse(trimmed);
+                    console.log("   💡 Data was stringified JSON, parsed successfully.");
+                    fileLog("💡 Data was stringified JSON, parsed successfully.");
+                } catch (e) {
+                    console.warn("   ⚠️ Failed to parse string data as JSON:", e.message);
+                }
+            }
+        }
 
+        res.set('Cache-Control', 'public, max-age=300');
+        res.json({ success: true, data: finalData });
     } catch (error) {
-        console.error("❌ TradingEconomics 프록시 에러:", error.message);
-        res.status(500).json({
-            success: false,
-            error: "TradingEconomics 데이터를 가져오는데 실패했습니다.",
-            details: error.message
-        });
+        const status = error.response?.status || 500;
+        let details = error.message;
+        if (status === 403) {
+            details = "접근 거부 (403). TradingEconomics에서 해당 IP 또는 계정의 API 요청을 제한하고 있습니다. 잠시 후 시도하거나 다른 주소를 사용해 보세요.";
+        } else if (error.response?.data) {
+            details += ` (${JSON.stringify(error.response.data).substring(0, 100)}...)`;
+        }
+
+        console.error(`   ❌ Error (${status}): ${details}`);
+        fileLog(`❌ TE Error (${status}): ${details}`);
+        res.status(status).json({ success: false, error: "데이터 획득 실패", details: details });
     }
 });
 
@@ -566,6 +776,7 @@ app.get('/api/fred', (req, res) => {
 const SETTINGS_FILE = path.join(__dirname, 'user_settings.json');
 
 app.get('/api/settings', (req, res) => {
+    console.log("📥 GET /api/settings 요청됨");
     try {
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.set('Pragma', 'no-cache');
@@ -573,8 +784,10 @@ app.get('/api/settings', (req, res) => {
         if (fs.existsSync(SETTINGS_FILE)) {
             const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
             res.json({ success: true, data: JSON.parse(data) });
+            console.log("✅ 설정 불러오기 성공");
         } else {
             res.json({ success: true, data: null });
+            console.log("ℹ️ 설정 파일 없음");
         }
     } catch (error) {
         console.error("❌ 설정 불러오기 에러:", error.message);
@@ -583,6 +796,7 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
+    console.log(`📤 POST /api/settings 요청됨 (Body Size: ${JSON.stringify(req.body).length})`);
     try {
         const settings = req.body;
         fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
@@ -696,7 +910,7 @@ async function getAccessToken(appKey, secretKey) {
 
 app.listen(PORT, () => {
     console.log("\n" + "=".repeat(50));
-    console.log(`🚀 서버 구동 완료!`);
+    console.log(`🚀 서버 구동 완료! (VERSION: SET EXTREMES)`);
     console.log(`링크: http://localhost:${PORT}`);
     console.log(`서버 시작 시간: ${SERVER_START_TIME}`);
     console.log("=".repeat(50) + "\n");

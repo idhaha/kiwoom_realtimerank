@@ -334,7 +334,8 @@ footer {
     padding: 10px 20px;
     background: transparent;
     border: none;
-    color: var(--text-muted);
+    color: var(--text-primary);
+    /* Further brightened for better readability */
     cursor: pointer;
     font-size: 0.9rem;
     font-weight: 500;
@@ -344,14 +345,18 @@ footer {
 }
 
 .tab-btn:hover {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    /* Explicit white */
+    background: rgba(255, 255, 255, 0.1);
+    /* Slightly more background */
 }
 
 .tab-btn.active {
-    color: var(--accent-primary);
+    color: white;
+    /* Active tab text to white */
     border-bottom-color: var(--accent-primary);
-    background: rgba(99, 102, 241, 0.1);
+    background: rgba(99, 102, 241, 0.2);
+    /* Slightly more background */
 }
 
 .add-tab-btn {
@@ -1166,4 +1171,151 @@ iframe {
 .overseas-content-scroll iframe {
     height: 100% !important;
     width: 100% !important;
+}
+
+/* ===== QUILL MEMO EDITOR STYLES ===== */
+#quillEditor {
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+
+.ql-container {
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 14px;
+}
+
+.ql-editor {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 20px;
+    min-height: 500px;
+}
+
+.ql-editor.ql-blank::before {
+    color: var(--text-muted);
+}
+
+.ql-toolbar {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color) !important;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ql-toolbar.ql-snow .ql-formats button,
+.ql-toolbar.ql-snow .ql-formats button:hover,
+.ql-toolbar.ql-snow .ql-formats button.ql-active,
+.ql-toolbar.ql-snow .ql-formats select,
+.ql-toolbar.ql-snow .ql-formats select:hover,
+.ql-toolbar.ql-snow .ql-formats select.ql-active {
+    color: var(--text-secondary);
+}
+
+.ql-toolbar.ql-snow .ql-picker-label {
+    color: var(--text-secondary);
+}
+
+.ql-toolbar.ql-snow .ql-stroke {
+    stroke: var(--text-secondary);
+}
+
+.ql-toolbar.ql-snow .ql-fill,
+.ql-toolbar.ql-snow .ql-stroke.ql-fill {
+    fill: var(--text-secondary);
+}
+
+.ql-toolbar.ql-snow button:hover,
+.ql-toolbar.ql-snow button.ql-active,
+.ql-toolbar.ql-snow select:hover,
+.ql-toolbar.ql-snow select.ql-active {
+    color: var(--accent-primary);
+}
+
+.ql-toolbar.ql-snow button:hover .ql-stroke,
+.ql-toolbar.ql-snow button.ql-active .ql-stroke {
+    stroke: var(--accent-primary);
+}
+
+.memo-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.memo-toolbar button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.memo-toolbar button:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.btn-primary {
+    background: var(--accent-gradient) !important;
+    color: white !important;
+    border: none !important;
+}
+
+.btn-primary:hover {
+    opacity: 0.9;
+}
+
+.btn-secondary {
+    background: var(--bg-card) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+}
+
+.btn-secondary:hover {
+    border-color: var(--accent-primary) !important;
+}
+
+#memoStatus {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: 15px;
+}
+
+/* --- Memo Grid Layout --- */
+.memo-grid {
+    display: grid;
+    grid-template-columns: 7fr 3fr;
+    gap: 15px;
+    width: 100%;
+    margin-top: 5px;
+}
+
+.calendar-section,
+.memo-section {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.calendar-section iframe {
+    flex: 1;
+    border-radius: 4px;
+    background: white;
+    /* Optional: good for keeping calendar clean */
+}
+
+@media (max-width: 1000px) {
+    .memo-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .calendar-section,
+    .memo-section {
+        height: auto;
+    }
 }

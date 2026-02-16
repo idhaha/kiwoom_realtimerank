@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>TradingEconomics Duration Test</title>
+</head>
+
+<body>
+    <h1>TradingEconomics Duration Parameter Test</h1>
+
+    <h2>Test Cases:</h2>
+    <ol>
+        <li>
+            <strong>5년 필터링:</strong>
+            <pre>tradingeconomics('japan/government-bond-yield', '5년')</pre>
+        </li>
+        <li>
+            <strong>3년 필터링:</strong>
+            <pre>tradingeconomics('japan/government-bond-yield', '3년')</pre>
+        </li>
+        <li>
+            <strong>전체 데이터 (필터 없음):</strong>
+            <pre>tradingeconomics('japan/government-bond-yield')</pre>
+        </li>
+        <li>
+            <strong>기존 URL 형식 (하위 호환성):</strong>
+            <pre>https://tradingeconomics.com/japan/government-bond-yield</pre>
+        </li>
+    </ol>
+
+    <h2>Instructions:</h2>
+    <ol>
+        <li>브라우저에서 <code>http://localhost:3000</code> 열기</li>
+        <li>위의 각 테스트 케이스를 종목 입력란에 입력</li>
+        <li>차트가 로드되는지 확인</li>
+        <li>브라우저 콘솔에서 필터링 로그 확인:
+            <ul>
+                <li><code>[MultiSeries] TE Function format detected</code></li>
+                <li><code>[MultiSeries] TE filtering to X years</code></li>
+                <li><code>[MultiSeries] TE filtered: 266 -> Y points</code></li>
+            </ul>
+        </li>
+    </ol>
+
+    <h2>Expected Results:</h2>
+    <table border="1">
+        <tr>
+            <th>Test Case</th>
+            <th>Expected Data Points</th>
+            <th>Date Range</th>
+        </tr>
+        <tr>
+            <td>5년</td>
+            <td>~266 (전체)</td>
+            <td>2021-02 ~ 2026-03</td>
+        </tr>
+        <tr>
+            <td>3년</td>
+            <td>~160</td>
+            <td>2023-02 ~ 2026-03</td>
+        </tr>
+        <tr>
+            <td>필터 없음</td>
+            <td>266</td>
+            <td>2021-02 ~ 2026-03</td>
+        </tr>
+        <tr>
+            <td>URL 형식</td>
+            <td>266</td>
+            <td>2021-02 ~ 2026-03</td>
+        </tr>
+    </table>
+</body>
+
+</html>
