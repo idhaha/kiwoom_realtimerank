@@ -13,6 +13,8 @@
     <!-- Quill Editor -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <!-- FullCalendar -->
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
     <!-- Google Identity Services -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -70,15 +72,16 @@
                         <div class="panel-header"
                             style="display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: rgba(255,255,255,0.05); border-radius: 4px 4px 0 0;">
                             <h2 style="margin: 0; font-size: 1.1rem;">📅 Google Calendar</h2>
-                            <button onclick="window.open('https://calendar.google.com/calendar/r', '_blank')"
-                                class="btn-primary"
-                                style="padding: 6px 12px; font-size: 12px; height: auto; border-radius: 4px; cursor: pointer; white-space: nowrap;">
-                                ➕ 일정 추가/편집
-                            </button>
+                            <div class="calendar-actions">
+                                <button id="syncCalBtn" class="btn-icon" title="달력 동기화">🔄</button>
+                                <button onclick="window.open('https://calendar.google.com/calendar/r', '_blank')"
+                                    class="btn-primary"
+                                    style="padding: 6px 12px; font-size: 12px; height: auto; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                                    ➕ 전체 화면
+                                </button>
+                            </div>
                         </div>
-                        <iframe src="https://calendar.google.com/calendar/embed?src=idhaha%40gmail.com&ctz=Asia%2FSeoul"
-                            style="border: 0; width: 100%; height: 700px;" frameborder="0" scrolling="no">
-                        </iframe>
+                        <div id="calendar" style="height: 700px; padding: 10px;"></div>
                     </div>
 
                     <!-- Right: Memo Editor -->
@@ -244,6 +247,73 @@
             </div>
         </div>
     </div>
+    <!-- Event Registration Modal -->
+    <div id="eventModal" class="modal" style="display: none;">
+        <div class="modal-content"
+            style="max-width: 400px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px;">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding: 15px 20px;">
+                <h2 style="margin: 0; font-size: 1.2rem;">📅 새 일정 등록</h2>
+                <span class="close-modal" id="closeEventModal"
+                    style="cursor: pointer; font-size: 1.5rem;">&times;</span>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">제목</label>
+                    <input type="text" id="eventTitle" placeholder="일정 제목을 입력하세요"
+                        style="width: 100%; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; color: white;">
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">시작
+                        날짜/시간</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="date" id="eventStartDate"
+                            style="flex: 1.5; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; color: white;">
+                        <input type="time" id="eventStartTime"
+                            style="flex: 1; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; color: white;">
+                    </div>
+                </div>
+                <div id="endTimeGroup" class="form-group" style="margin-bottom: 15px; display: none;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">종료
+                        날짜/시간</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="date" id="eventEndDate"
+                            style="flex: 1.5; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; color: white;">
+                        <input type="time" id="eventEndTime"
+                            style="flex: 1; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; color: white;">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="eventAllDay" style="width: 18px; height: 18px; cursor: pointer;">
+                    <label for="eventAllDay" style="margin: 0; cursor: pointer; color: var(--text-primary);">종일
+                        일정</label>
+                </div>
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label
+                        style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 0.9rem;">반복
+                        설정</label>
+                    <select id="eventRecurrence" class="interval-select"
+                        style="width: 100%; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; color: white;">
+                        <option value="">반복 안 함</option>
+                        <option value="DAILY">매일</option>
+                        <option value="WEEKLY">매주</option>
+                        <option value="MONTHLY">매월</option>
+                    </select>
+                </div>
+                <div id="recurrenceDays" style="display: none; font-size: 0.8rem; color: #888; margin-top: -10px;">
+                    * 현재 선택된 날짜의 요일로 매주 반복됩니다.
+                </div>
+            </div>
+            <div class="modal-footer"
+                style="border-top: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button id="cancelEvent" class="btn-secondary" style="padding: 10px 20px;">취소</button>
+                <button id="saveEvent" class="btn-primary" style="padding: 10px 20px;">일정 추가</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js?v=20260216_v1"></script>
 </body>
 

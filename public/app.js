@@ -16,8 +16,14 @@ let targetTabBtn = null;
 let isInitializing = false; // Flag to prevent auto-save during startup
 
 /**
- * ===== GOOGLE AUTHENTICATION & APP LOCK =====
+ * ===== GOOGLE AUTHENTICATION & CALENDAR API =====
  */
+const GOOGLE_CLIENT_ID = "218429663028-l66pfc3i804uec317arj717r1hrf519u.apps.googleusercontent.com";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+let tokenClient;
+let accessToken = null;
+let calendar = null;
+
 window.handleCredentialResponse = function (response) {
     const payload = parseJwt(response.credential);
     console.log("🔓 Login Successful:", payload.email);
@@ -30,7 +36,38 @@ window.handleCredentialResponse = function (response) {
     }));
 
     unlockApp();
+    initTokenClient(); // Initialize token client for API access
 };
+
+function initTokenClient() {
+    if (typeof google === 'undefined') return;
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: CALENDAR_SCOPE,
+        callback: (tokenResponse) => {
+            if (tokenResponse && tokenResponse.access_token) {
+                accessToken = tokenResponse.access_token;
+                console.log("🎟️ Calendar Access Token Acquired");
+                if (calendar) calendar.refetchEvents();
+            }
+        },
+    });
+}
+
+function requestCalendarAccess(callback) {
+    if (accessToken) {
+        if (callback) callback();
+        return;
+    }
+    if (!tokenClient) initTokenClient();
+    tokenClient.callback = (resp) => {
+        if (resp.access_token) {
+            accessToken = resp.access_token;
+            if (callback) callback();
+        }
+    };
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+}
 
 function parseJwt(token) {
     const base64Url = token.split('.')[1];
@@ -59,6 +96,7 @@ function checkLoginSession() {
             const sessionData = JSON.parse(session);
             if (Date.now() < sessionData.expiry) {
                 unlockApp();
+                initTokenClient();
                 return true;
             }
         } catch (e) {
@@ -70,6 +108,164 @@ function checkLoginSession() {
 
 // Check session immediately
 checkLoginSession();
+
+/**
+ * ===== FULLCALENDAR INITIALIZATION =====
+ */
+function initCalendar() {
+    const calendarEl = document.getElementById('calendar');
+    if (!calendarEl || calendar) return;
+
+    calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay'
+        },
+        themeSystem: 'standard',
+        height: '100%',
+        editable: true,
+        selectable: true,
+        events: fetchCalendarEvents,
+        dateClick: function (info) {
+            openEventModal(info.dateStr);
+        },
+        eventClick: function (info) {
+            if (confirm(`일정: ${info.event.title}\n상세 페이지로 이동하시겠습니까?`)) {
+                window.open(info.event.url || 'https://calendar.google.com/calendar/r', '_blank');
+            }
+            info.jsEvent.preventDefault();
+        }
+    });
+
+    calendar.render();
+}
+
+async function fetchCalendarEvents(fetchInfo, successCallback, failureCallback) {
+    if (!accessToken) {
+        successCallback([]); // Return empty if no token yet
+        return;
+    }
+
+    try {
+        const start = fetchInfo.start.toISOString();
+        const end = fetchInfo.end.toISOString();
+        const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&singleEvents=true`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (response.status === 401) {
+            accessToken = null; // Token expired
+            requestCalendarAccess(() => calendar.refetchEvents());
+            return;
+        }
+
+        const data = await response.json();
+        const events = data.items.map(item => ({
+            id: item.id,
+            title: item.summary,
+            start: item.start.dateTime || item.start.date,
+            end: item.end.dateTime || item.end.date,
+            url: item.htmlLink,
+            allDay: !item.start.dateTime
+        }));
+        successCallback(events);
+    } catch (error) {
+        console.error("❌ Calendar fetch error:", error);
+        failureCallback(error);
+    }
+}
+
+/**
+ * ===== EVENT MODAL LOGIC =====
+ */
+function openEventModal(dateStr) {
+    const modal = document.getElementById('eventModal');
+    const startInput = document.getElementById('eventStartDate');
+    const titleInput = document.getElementById('eventTitle');
+
+    if (!modal || !startInput) return;
+
+    titleInput.value = '';
+    startInput.value = dateStr;
+    document.getElementById('eventStartTime').value = '09:00';
+    document.getElementById('eventAllDay').checked = false;
+    document.getElementById('endTimeGroup').style.display = 'none';
+    document.getElementById('eventRecurrence').value = '';
+
+    modal.style.display = 'flex';
+}
+
+function closeEventModal() {
+    const modal = document.getElementById('eventModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveGoogleEvent() {
+    const title = document.getElementById('eventTitle').value;
+    const startDate = document.getElementById('eventStartDate').value;
+    const startTime = document.getElementById('eventStartTime').value;
+    const isAllDay = document.getElementById('eventAllDay').checked;
+    const recurrence = document.getElementById('eventRecurrence').value;
+
+    if (!title) {
+        alert("일정 제목을 입력해주세요.");
+        return;
+    }
+
+    if (!accessToken) {
+        requestCalendarAccess(saveGoogleEvent);
+        return;
+    }
+
+    const event = {
+        summary: title,
+        start: isAllDay ? { date: startDate } : { dateTime: `${startDate}T${startTime}:00`, timeZone: 'Asia/Seoul' },
+        end: isAllDay ? { date: startDate } : { dateTime: `${startDate}T${parseInt(startTime.split(':')[0]) + 1}:00:00`.replace(/:(\d):/, ':0$1:'), timeZone: 'Asia/Seoul' }
+    };
+
+    // Quick end time fix: +1 hour
+    if (!isAllDay) {
+        const [h, m] = startTime.split(':').map(Number);
+        const endH = (h + 1).toString().padStart(2, '0');
+        event.end.dateTime = `${startDate}T${endH}:${m.toString().padStart(2, '0')}:00`;
+    }
+
+    if (recurrence) {
+        if (recurrence === 'WEEKLY') {
+            // Get day of week for RRULE (e.g., TU for Tuesday)
+            const days = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+            const d = new Date(startDate).getDay();
+            event.recurrence = [`RRULE:FREQ=WEEKLY;BYDAY=${days[d]}`];
+        } else {
+            event.recurrence = [`RRULE:FREQ=${recurrence}`];
+        }
+    }
+
+    try {
+        const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(event)
+        });
+
+        if (response.ok) {
+            console.log("✅ Event saved successfully");
+            closeEventModal();
+            if (calendar) calendar.refetchEvents();
+        } else {
+            const err = await response.json();
+            console.error("❌ Save error:", err);
+            alert("일정 저장에 실패했습니다.");
+        }
+    } catch (error) {
+        console.error("❌ Save error:", error);
+    }
+}
 
 // DOM Elements
 
@@ -724,7 +920,8 @@ function activateTab(tabId) {
     if (tabId === ADR_TAB_ID) {
         startAdrAutoRefresh();
     } else if (tabId === MEMO_TAB_ID) {
-        // Memo tab specifics if needed
+        // Initialize FullCalendar when memo tab is active
+        setTimeout(initCalendar, 100);
     } else if (tabId === EARNINGS_TAB_ID || (tabData[tabId] && (tabData[tabId].type === 'overseas_custom' || tabData[tabId].type === 'exchange_rate'))) {
         if (!wasEmpty) {
             redrawTabCharts(tabId);
@@ -4214,6 +4411,33 @@ document.addEventListener('DOMContentLoaded', () => {
                         localStorage.removeItem('user_session');
                         location.reload();
                     }
+                });
+            }
+
+            // Sync Calendar Button
+            const syncCalBtn = document.getElementById('syncCalBtn');
+            if (syncCalBtn) {
+                syncCalBtn.addEventListener('click', () => {
+                    requestCalendarAccess(() => {
+                        if (calendar) calendar.refetchEvents();
+                    });
+                });
+            }
+
+            // Event Modal Buttons
+            const saveEventBtn = document.getElementById('saveEvent');
+            if (saveEventBtn) saveEventBtn.addEventListener('click', saveGoogleEvent);
+
+            const cancelEventBtn = document.getElementById('cancelEvent');
+            if (cancelEventBtn) cancelEventBtn.addEventListener('click', closeEventModal);
+
+            const closeEventModalX = document.getElementById('closeEventModal');
+            if (closeEventModalX) closeEventModalX.addEventListener('click', closeEventModal);
+
+            const allDayCheck = document.getElementById('eventAllDay');
+            if (allDayCheck) {
+                allDayCheck.addEventListener('change', (e) => {
+                    document.getElementById('eventStartTime').disabled = e.target.checked;
                 });
             }
         }
