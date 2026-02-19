@@ -531,7 +531,7 @@ app.get('/api/trading-economics', async (req, res) => {
                 });
 
                 // Navigate to the page
-                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 }); // Reduced from 60s
+                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 }); // Increased for stability
 
                 // Wait for Highcharts to be defined and have data
                 // We assume there is a Highcharts chart on the page with data
