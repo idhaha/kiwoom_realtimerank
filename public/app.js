@@ -2633,7 +2633,14 @@ async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
             loadingEl.textContent = '브라우저 시동 중...';
         }
 
-        const response = await fetch(proxyUrl);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+            console.warn(`[TradingEconomics] Timeout (120s) for ${url}`);
+        }, 120000);
+
+        const response = await fetch(proxyUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
         const result = await response.json();
 
         if (!result.success) {
@@ -3137,11 +3144,11 @@ async function loadMultiSeriesChart(canvas, urls, title) {
 
                     const controller = new AbortController();
                     // Scraping takes time (Puppeteer launch + navigation + click + data load)
-                    // Increased to 45s for reliability (Launch 40s + margin)
+                    // Increased to 120s to allow for sequential queuing on the server
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn(`[MultiSeries] TE Request timed out for ${actualUrl}`);
-                    }, 45000);
+                        console.warn(`[MultiSeries] TE Request timed out (120s) for ${actualUrl}`);
+                    }, 120000);
                     try {
                         // Pass duration to backend so it can click the appropriate button
                         let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
