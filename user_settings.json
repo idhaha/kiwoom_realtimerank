@@ -1,5 +1,5 @@
 {
-  "activeTabId": "tab_memo",
+  "activeTabId": "tab_custom_1771462815745",
   "tabs": [
     {
       "id": "tab_rank",
@@ -11,7 +11,7 @@
     },
     {
       "id": "tab_memo",
-      "name": "📝 메모"
+      "name": "일정"
     },
     {
       "id": "tab_earnings",
@@ -23,31 +23,31 @@
     },
     {
       "id": "tab_custom_1770648933583",
-      "name": "해외시장"
+      "name": "금융"
+    },
+    {
+      "id": "tab_custom_1771462815745",
+      "name": "주요국지수"
     },
     {
       "id": "tab_custom_1770648933964",
       "name": "반도체"
     },
     {
-      "id": "tab_custom_1770648933389",
-      "name": "클라우드"
+      "id": "tab_custom_1771469181683",
+      "name": "AI/클라우드"
     },
     {
-      "id": "tab_custom_1770648933551",
-      "name": "스마트폰/컴퓨터"
+      "id": "tab_custom_1771469182054",
+      "name": "원전/전력"
+    },
+    {
+      "id": "tab_custom_1771469182091",
+      "name": "철강/광물"
     },
     {
       "id": "tab_custom_1770648933776",
       "name": "로봇"
-    },
-    {
-      "id": "tab_custom_1770648933323",
-      "name": "에너지"
-    },
-    {
-      "id": "tab_custom_1770648934073",
-      "name": "신재생"
     },
     {
       "id": "tab_custom_1770648933647",
@@ -58,30 +58,38 @@
       "name": "방산"
     },
     {
+      "id": "tab_custom_1771469182325",
+      "name": "조선"
+    },
+    {
+      "id": "tab_custom_1771469181713",
+      "name": "우주"
+    },
+    {
+      "id": "tab_custom_1771469181933",
+      "name": "코인/STO"
+    },
+    {
+      "id": "tab_custom_1771469181563",
+      "name": "신재생/오일"
+    },
+    {
+      "id": "tab_custom_1770648933551",
+      "name": "스마트폰/컴퓨터"
+    },
+    {
       "id": "tab_custom_1770648933942",
       "name": "바이오"
+    },
+    {
+      "id": "tab_custom_1771469182120",
+      "name": "SW"
     }
   ],
   "contents": {
     "tab_adr": {
       "adr": {
         "kospi": [
-          {
-            "date": 1455462000000,
-            "value": 86.81
-          },
-          {
-            "date": 1455548400000,
-            "value": 97.35
-          },
-          {
-            "date": 1455634800000,
-            "value": 98.46
-          },
-          {
-            "date": 1455721200000,
-            "value": 105.1
-          },
           {
             "date": 1455807600000,
             "value": 110.07
@@ -9893,25 +9901,13 @@
           {
             "date": 1770908400000,
             "value": 122.34
+          },
+          {
+            "date": 1771426800000,
+            "value": 126.91
           }
         ],
         "kosdaq": [
-          {
-            "date": 1455462000000,
-            "value": 77.17
-          },
-          {
-            "date": 1455548400000,
-            "value": 85.58
-          },
-          {
-            "date": 1455634800000,
-            "value": 85.8
-          },
-          {
-            "date": 1455721200000,
-            "value": 93.28
-          },
           {
             "date": 1455807600000,
             "value": 98.9
@@ -19719,54 +19715,43 @@
           {
             "date": 1770908400000,
             "value": 106.89
+          },
+          {
+            "date": 1771426800000,
+            "value": 108.3
           }
         ],
-        "updated": 1771069320223
+        "updated": 1771464901412
       }
     },
     "tab_custom_1770648933891": {
-      "type": "overseas_custom",
-      "config": "< 금리 >\n(\"fred('DGS10','10년')\",\"미국채 10년물\",\"fred('DGS2','10년')\",\"2년물\")\n/*(\"fred('IRLTLT01JPM156N')\",\"일본국채 10년물\")\n(\"fred('IRLTLT01KRM156N')\",\"한국국채 10년물\")*/\n\n(\"https://tradingeconomics.com/japan/government-bond-yield\",\"일본국채 10년물\",\"10년\",\"https://tradingeconomics.com/japan/2-year-note-yield\",\"2년물\",\"10년\")\n/*(\"https://tradingeconomics.com/japan/2-year-note-yield\",\"일본국채 2년물\",\"https://tradingeconomics.com/japan/government-bond-yield\",\"10년물\")*/\n/*(\"tradingeconomics('japan/government-bond-yield', '10년')\",\"일본국채 10년물\", \"tradingeconomics('japan/2-year-note-yield', '10년')\",\"일본국채 2년물\")*/\n\n(\"ecos('010210000','10년')\",\"한국채 10년물\",\"ecos('010195000','10년')\",\"2년물\")\n\n< 환율 >\n(\"https://tradingeconomics.com/south-korea/currency\",\"USD/KRW\",\"10년\")\n(\"https://tradingeconomics.com/china//currency\",\"USD/CNY\",\"10년\")\n(\"https://tradingeconomics.com/japan/currency\",\"USD/JPY\",\"10년\")\n(\"https://tradingeconomics.com/euro-area//currency\",\"EUR/USD\",\"10년\")\n\n",
+      "type": "exchange_rate",
+      "config": "< 금리 >\n(\"fred('DGS10','10년')\",\"미국채 10년물\",\"fred('DGS2','10년')\",\"2년물\")\n/*(\"fred('IRLTLT01JPM156N')\",\"일본국채 10년물\")\n(\"fred('IRLTLT01KRM156N')\",\"한국국채 10년물\")*/\n\n(\"https://tradingeconomics.com/japan/government-bond-yield\",\"일본국채 10년물\",\"10년\",\"https://tradingeconomics.com/japan/2-year-note-yield\",\"2년물\",\"10년\")\n/*(\"https://tradingeconomics.com/japan/2-year-note-yield\",\"일본국채 2년물\",\"https://tradingeconomics.com/japan/government-bond-yield\",\"10년물\")*/\n/*(\"tradingeconomics('japan/government-bond-yield', '10년')\",\"일본국채 10년물\", \"tradingeconomics('japan/2-year-note-yield', '10년')\",\"일본국채 2년물\")*/\n\n(\"ecos('010210000','10년')\",\"한국채 10년물\",\"ecos('010195000','10년')\",\"2년물\")\n\n< 환율 >\n(\"https://tradingeconomics.com/south-korea/currency\",\"USD/KRW\",\"10년\")\n(\"https://tradingeconomics.com/china//currency\",\"USD/CNY\",\"10년\")\n(\"https://tradingeconomics.com/japan/currency\",\"USD/JPY\",\"10년\")\n(\"https://tradingeconomics.com/euro-area//currency\",\"EUR/USD\",\"10년\")\n\n\n",
       "sectorColors": {}
     },
     "tab_custom_1770648933583": {
       "type": "overseas_custom",
-      "config": "< 화폐 가치 >\n(\"https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l\", \"DX – 달러인덱스\")\n(\"https://finviz.com/chart.ashx?t=GOLD&ty=c&ta=1&p=d&s=l\", \"GOLD – 금\")\n(\"https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l\", \"SI – 은\")\n(\"https://finviz.com/chart.ashx?t=HG&ty=c&ta=1&p=d&s=l\", \"HG – 구리\")\n(\"https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l\", \"CL – 크루드오일 WTI\")\n(”https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l\", \"BTC – 비트코인\")\n< 각국 지수 >\n(\"https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l\", \"S&P500 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l\", \"나스닥 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l\", “유로존 대표 50 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l\", “NIKKEI 선물\")\n(\"https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l\", \"FXI – 중국 대형주\")\n(\"https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l\", \"홍콩 항셍 테크 ETF\")\n\n",
+      "config": "< 화폐 가치 >\n(\"https://finviz.com/fut_chart.ashx?t=DX&ty=c&ta=1&p=d&s=l\", \"DX – 달러인덱스\")\n(\"https://finviz.com/chart.ashx?t=GOLD&ty=c&ta=1&p=d&s=l\", \"GOLD – 금\")\n(\"https://finviz.com/fut_chart.ashx?t=SI&ty=c&ta=1&p=d&s=l\", \"SI – 은\")\n(\"https://finviz.com/chart.ashx?t=HG&ty=c&ta=1&p=d&s=l\", \"HG – 구리\")\n(\"https://finviz.com/fut_chart.ashx?t=CL&ty=c&ta=1&p=d&s=l\", \"CL – 크루드오일 WTI\")\n(”https://finviz.com/fut_chart.ashx?t=BTC&ty=c&ta=1&p=d&s=l\", \"BTC – 비트코인\")\n<금융주>\n(\"https://finviz.com/chart.ashx?t=RPAR&ty=c&ta=1&p=d&s=l\", \"자산배분\"),\n(\"https://finviz.com/chart.ashx?t=XLF&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=KRE&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=DVY&ty=c&ta=1&p=d&s=l\", \"배당주\"),\n\n\n",
       "sectorColors": {}
     },
     "tab_custom_1770648933964": {
       "type": "overseas_custom",
-      "config": "<반도체>\n(\"https://finviz.com/chart.ashx?t=SOXX&ty=c&ta=1&p=d&s=l\", \"SOXX – 필라델피아 반도체\"),\n(\"https://finviz.com/chart.ashx?t=NVDA&ty=c&ta=1&p=d&s=l\", \"엔비디아 – 반도체/AI\"),\n(\"https://finviz.com/chart.ashx?t=MU&ty=c&ta=1&p=d&s=l\", \"마이크론 – 메모리/삼성·하이닉스 피어\"),\n(\"https://finviz.com/chart.ashx?t=TSM&ty=c&ta=1&p=d&s=l\", \"TSMC – 파운드리/HPC\"),\n(\"https://finviz.com/chart.ashx?t=AVGO&ty=c&ta=1&p=d&s=l\", \"AVGO – 브로드컴\"),\n(\"https://finviz.com/chart.ashx?t=AMD&ty=c&ta=1&p=d&s=l\", \"AMD – 반도체/CPU·GPU\"),\n(\"https://finviz.com/chart.ashx?t=INTC&ty=c&ta=1&p=d&s=l\", \"인텔 – 반도체/파운드리 전환\"),\n(\"https://finviz.com/chart.ashx?t=QCOM&ty=c&ta=1&p=d&s=l\", \"퀄컴 – 모바일칩/모뎀\"),\n(\"https://finviz.com/chart.ashx?t=ASML&ty=c&ta=1&p=d&s=l\", \"ASML – 노광/EUV\"),\n(\"https://finviz.com/chart.ashx?t=ARM&ty=c&ta=1&p=d&s=l\", \"Arm – IP/모바일·서버\"),\n(\"https://finviz.com/chart.ashx?t=MRVL&ty=c&ta=1&p=d&s=l\", \"마벨 – 팹리스/데이터센터·네트워킹\"),\n<HDD>\n(\"https://finviz.com/chart.ashx?t=WDC&ty=c&ta=1&p=d&s=l\", \"웨스턴디지털 – HDD·NAND\"),\n(\"https://finviz.com/chart.ashx?t=STX&ty=c&ta=1&p=d&s=l\", \"시게이트 – HDD\"),\n(\"https://finviz.com/chart.ashx?t=SNDK&ty=c&ta=1&p=d&s=l\", \"샌디스크 – hdd\"),\n\n\n",
-      "sectorColors": {}
-    },
-    "tab_custom_1770648933389": {
-      "type": "overseas_custom",
-      "config": "<클라우드>\n(\"https://charts2.finviz.com/chart.ashx?t=GOOGL&ty=c&ta=1&p=d&s=l\", \"구글 – 검색·클라우드\"),\n(\"https://finviz.com/chart.ashx?t=ORCL&ty=c&ta=1&p=d&s=l\", \"오라클 – DB·클라우드\"),\n(\"https://finviz.com/chart.ashx?t=PLTR&ty=c&ta=1&p=d&s=l\", \"팔란티어 – 데이터·AI 분석\"),\n(\"https://finviz.com/chart.ashx?t=AMZN&ty=c&ta=1&p=d&s=l\", \"아마존 – 이커머스/AWS\"),\n(\"https://finviz.com/chart.ashx?t=MSFT&ty=c&ta=1&p=d&s=l\", \"마이크로소프트 – 클라우드/오피스/AI\"),\n(\"https://charts2.finviz.com/chart.ashx?t=META&ty=c&ta=1&p=d&s=l\", \"메타 – 소셜/메타버스\"),\n\n\n",
+      "config": "<반도체>\n(\"https://finviz.com/chart.ashx?t=SOXX&ty=c&ta=1&p=d&s=l\", \"SOXX – 필라델피아 반도체\"),\n(\"https://finviz.com/chart.ashx?t=NVDA&ty=c&ta=1&p=d&s=l\", \"엔비디아 – 반도체/AI\"),\n(\"https://finviz.com/chart.ashx?t=MU&ty=c&ta=1&p=d&s=l\", \"마이크론 – 메모리/삼성·하이닉스 피어\"),\n(\"https://finviz.com/chart.ashx?t=TSM&ty=c&ta=1&p=d&s=l\", \"TSMC – 파운드리/HPC\"),\n(\"https://finviz.com/chart.ashx?t=AVGO&ty=c&ta=1&p=d&s=l\", \"AVGO – 브로드컴\"),\n(\"https://finviz.com/chart.ashx?t=AMD&ty=c&ta=1&p=d&s=l\", \"AMD – 반도체/CPU·GPU\"),\n(\"https://finviz.com/chart.ashx?t=INTC&ty=c&ta=1&p=d&s=l\", \"인텔 – 반도체/파운드리 전환\"),\n(\"https://finviz.com/chart.ashx?t=QCOM&ty=c&ta=1&p=d&s=l\", \"퀄컴 – 모바일칩/모뎀\"),\n(\"https://finviz.com/chart.ashx?t=ASML&ty=c&ta=1&p=d&s=l\", \"ASML – 노광/EUV\"),\n(\"https://finviz.com/chart.ashx?t=ARM&ty=c&ta=1&p=d&s=l\", \"Arm – IP/모바일·서버\"),\n(\"https://finviz.com/chart.ashx?t=MRVL&ty=c&ta=1&p=d&s=l\", \"마벨 – 팹리스/데이터센터·네트워킹\"),\n<HDD>\n(\"https://finviz.com/chart.ashx?t=WDC&ty=c&ta=1&p=d&s=l\", \"웨스턴디지털 – HDD·NAND\"),\n(\"https://finviz.com/chart.ashx?t=STX&ty=c&ta=1&p=d&s=l\", \"시게이트 – HDD\"),\n(\"https://finviz.com/chart.ashx?t=SNDK&ty=c&ta=1&p=d&s=l\", \"샌디스크 – hdd\"),\n\n\n\n",
       "sectorColors": {}
     },
     "tab_custom_1770648933551": {
       "type": "overseas_custom",
-      "config": "<스마트폰/컴퓨터>\n(\"https://finviz.com/chart.ashx?t=AAPL&ty=c&ta=1&p=d&s=l\", \"애플 – 하드웨어/아이폰·생태계\"),\n(\"https://finviz.com/chart.ashx?t=DELL&ty=c&ta=1&p=d&s=l\", \"델 – 서버·PC/AI 인프라\"),\n\n",
+      "config": "<스마트폰/컴퓨터>\n(\"https://finviz.com/chart.ashx?t=AAPL&ty=c&ta=1&p=d&s=l\", \"애플 – 하드웨어/아이폰·생태계\"),\n(\"https://finviz.com/chart.ashx?t=DELL&ty=c&ta=1&p=d&s=l\", \"델 – 서버·PC/AI 인프라\"),\n\n\n\n",
       "sectorColors": {}
     },
     "tab_custom_1770648933776": {
       "type": "overseas_custom",
-      "config": "(\"https://finviz.com/chart.ashx?t=ROBO&ty=c&ta=1&p=d&s=l\", \"ROBO – 로봇 ETF\"),\n(\"https://finviz.com/chart.ashx?t=ROBT&ty=c&ta=1&p=d&s=l\", \"ROBT – 로봇 ETF\"),\n(\"https://finviz.com/chart.ashx?t=BOTT&ty=c&ta=1&p=d&s=l\", \"BOTT – 로봇\"),\n(\"https://finviz.com/chart.ashx?t=HUMN&ty=c&ta=1&p=d&s=l\", \"HUMN– 로봇\"),\n\n",
-      "sectorColors": {}
-    },
-    "tab_custom_1770648933323": {
-      "type": "overseas_custom",
-      "config": "(\"https://finviz.com/chart.ashx?t=OKLO&ty=c&ta=1&p=d&s=l\", \"오클로 – 소형원자로/데이터센터\"),\n(\"https://finviz.com/chart.ashx?t=BE&ty=c&ta=1&p=d&s=l\", \"블룸에너지 – 연료전지\"),\n(\"https://finviz.com/chart.ashx?t=SMR&ty=c&ta=1&p=d&s=l\", \"뉴스케일 – SMR\"),\n(\"https://finviz.com/chart.ashx?t=GEV&ty=c&ta=1&p=d&s=l\", \"GE Vernova – 유틸리티/전력설비\"),\n(\"https://finviz.com/chart.ashx?t=FLNC&ty=c&ta=1&p=d&s=l\", \"플루언스 – ESS\"),\n\n",
-      "sectorColors": {}
-    },
-    "tab_custom_1770648934073": {
-      "type": "overseas_custom",
-      "config": "<태양광>\n(\"https://finviz.com/chart.ashx?t=FSLR&ty=c&ta=1&p=d&s=l\", \"FSLR - 태양광\"),\n\n",
+      "config": "(\"https://finviz.com/chart.ashx?t=ROBO&ty=c&ta=1&p=d&s=l\", \"ROBO – 로봇 ETF\"),\n(\"https://finviz.com/chart.ashx?t=ROBT&ty=c&ta=1&p=d&s=l\", \"ROBT – 로봇 ETF\"),\n(\"https://finviz.com/chart.ashx?t=BOTT&ty=c&ta=1&p=d&s=l\", \"BOTT – 로봇\"),\n(\"https://finviz.com/chart.ashx?t=HUMN&ty=c&ta=1&p=d&s=l\", \"HUMN– 로봇\"),\n\n\n\n\n",
       "sectorColors": {}
     },
     "tab_custom_1770648933647": {
       "type": "overseas_custom",
-      "config": "<2차전지>\n(\"https://finviz.com/chart.ashx?t=TSLA&ty=c&ta=1&p=d&s=l\", \"테슬라 – 전기차\"),\n(\"https://finviz.com/chart.ashx?t=RIVN&ty=c&ta=1&p=d&s=l\", \"리비안– 전기차\"),\n<리튬>\n(\"https://finviz.com/chart.ashx?t=ALB&ty=c&ta=1&p=d&s=l\",   \"Albemarle – 리튬·특수화학\"),\n\n",
+      "config": "<2차전지>\n(\"https://finviz.com/chart.ashx?t=TSLA&ty=c&ta=1&p=d&s=l\", \"테슬라 – 전기차\"),\n(\"https://finviz.com/chart.ashx?t=RIVN&ty=c&ta=1&p=d&s=l\", \"리비안– 전기차\"),\n<리튬>\n(\"https://finviz.com/chart.ashx?t=ALB&ty=c&ta=1&p=d&s=l\",   \"Albemarle – 리튬·특수화학\"),\n\n\n",
       "sectorColors": {}
     },
     "tab_custom_1770648933746": {
@@ -19777,6 +19762,51 @@
     "tab_custom_1770648933942": {
       "type": "overseas_custom",
       "config": "<비만/당뇨>\n(\"https://finviz.com/chart.ashx?t=NVO&ty=c&ta=1&p=d&s=l\", \"노보노디스크 – 비만·당뇨\"),\n(\"https://finviz.com/chart.ashx?t=LLY&ty=c&ta=1&p=d&s=l\", \"일라이릴리 – 비만·당뇨\"),\n\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771462815745": {
+      "type": "overseas_custom",
+      "config": "(\"https://finviz.com/chart.ashx?t=VT&ty=c&ta=1&p=d&s=l\", \"전세계 지수\")\n(\"https://finviz.com/fut_chart.ashx?t=VX&ty=c&ta=1&p=d&s=l\", “변동성 지수\")\n< 주요국 지수 >\n(\"https://finviz.com/fut_chart.ashx?t=ES&ty=c&ta=1&p=d&s=l\", \"S&P500 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NQ&ty=c&ta=1&p=d&s=l\", \"나스닥 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=EX&ty=c&ta=1&p=d&s=l\", “유로존 대표 50 선물\")\n(\"https://finviz.com/fut_chart.ashx?t=NKD&ty=c&ta=1&p=d&s=l\", “NIKKEI 선물\")\n(\"https://finviz.com/chart.ashx?t=FXI&ty=c&ta=1&p=d&s=l\", \"FXI – 중국 대형주\")\n(\"https://finviz.com/chart.ashx?t=KWEB&ty=c&ta=1&p=d&s=l\", \"홍콩 항셍 테크 ETF\")\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469181683": {
+      "type": "overseas_custom",
+      "config": "<클라우드>\n(\"https://charts2.finviz.com/chart.ashx?t=GOOGL&ty=c&ta=1&p=d&s=l\", \"구글 – 검색·클라우드\"),\n(\"https://finviz.com/chart.ashx?t=ORCL&ty=c&ta=1&p=d&s=l\", \"오라클 – DB·클라우드\"),\n(\"https://finviz.com/chart.ashx?t=PLTR&ty=c&ta=1&p=d&s=l\", \"팔란티어 – 데이터·AI 분석\"),\n(\"https://finviz.com/chart.ashx?t=AMZN&ty=c&ta=1&p=d&s=l\", \"아마존 – 이커머스/AWS\"),\n(\"https://finviz.com/chart.ashx?t=MSFT&ty=c&ta=1&p=d&s=l\", \"마이크로소프트 – 클라우드/오피스/AI\"),\n(\"https://charts2.finviz.com/chart.ashx?t=META&ty=c&ta=1&p=d&s=l\", \"메타 – 소셜/메타버스\"),\n<데이터센터>\n(\"https://finviz.com/chart.ashx?t=EME&ty=c&ta=1&p=d&s=l\", \"데이터센터 건설\"),\n(\"https://finviz.com/chart.ashx?t=FIX&ty=c&ta=1&p=d&s=l\", \"데이터센터 건설\"),\n(\"https://charts2.finviz.com/chart.ashx?t=STRL&ty=c&ta=1&p=d&s=l\", \"데이터센터 건설\"),\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469182054": {
+      "type": "overseas_custom",
+      "config": "< 원전 >\n(\"https://finviz.com/chart.ashx?t=OKLO&ty=c&ta=1&p=d&s=l\", \"오클로 – 소형원자로/데이터센터\"),\n(\"https://finviz.com/chart.ashx?t=SMR&ty=c&ta=1&p=d&s=l\", \"뉴스케일 – SMR\"),\n(\"https://finviz.com/chart.ashx?t=BE&ty=c&ta=1&p=d&s=l\", \"블룸에너지 – 발전용 연료전지\"),\n< 전력 >\n(\"https://finviz.com/chart.ashx?t=GEV&ty=c&ta=1&p=d&s=l\", \"GE Vernova – 유틸리티/전력설비\"),\n(\"https://finviz.com/chart.ashx?t=PLPC&ty=c&ta=1&p=d&s=l\", \"전력/통신 하드웨어\"),\n(\"https://finviz.com/chart.ashx?t=MYRG&ty=c&ta=1&p=d&s=l\", \"전력/통신 인프라 시공\"),\n(\"https://finviz.com/chart.ashx?t=PWR&ty=c&ta=1&p=d&s=l\", \"변압기, 전력망/파이프라인 인프라 EPC\"),\n(\"https://finviz.com/chart.ashx?t=ETN&ty=c&ta=1&p=d&s=l\", \"변압기\"),\n(\"https://finviz.com/chart.ashx?t=HUBB&ty=c&ta=1&p=d&s=l\", \"변압기\"),\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469182091": {
+      "type": "overseas_custom",
+      "config": "<철강 제조??>\n(\"https://finviz.com/chart.ashx?t=NUE&ty=c&ta=1&p=d&s=l\", \"철강(전기로)\"),\n(\"https://finviz.com/chart.ashx?t=STLD&ty=c&ta=1&p=d&s=l\", \"철강(전기로)\"),\n(\"https://finviz.com/chart.ashx?t=MT&ty=c&ta=1&p=d&s=l\", \"??\"),\n<비철/구리>\n(\"https://finviz.com/chart.ashx?t=AA&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=SCCO&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=FCX&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=HBM&ty=c&ta=1&p=d&s=l\", \"\"),\n<기타>\n(\"https://finviz.com/chart.ashx?t=GDX&ty=c&ta=1&p=d&s=l\", \"금광\"),\n(\"https://finviz.com/chart.ashx?t=URA&ty=c&ta=1&p=d&s=l\", \"우라늄\"),\n\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469182325": {
+      "type": "overseas_custom",
+      "config": "(\"https://finviz.com/chart.ashx?t=HII&ty=c&ta=1&p=d&s=l\", \"\"),\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469181713": {
+      "type": "overseas_custom",
+      "config": "(\"https://finviz.com/chart.ashx?t=RKLB&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=LUNR&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=PL&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=UFO&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=ROKT&ty=c&ta=1&p=d&s=l\", \"\"),\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469181933": {
+      "type": "overseas_custom",
+      "config": "(\"https://finviz.com/chart.ashx?t=MSTR&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=CRCL&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=COIN&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=HODL&ty=c&ta=1&p=d&s=l\", \"\"),\n\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469181563": {
+      "type": "overseas_custom",
+      "config": "< 신재생 >\n(\"https://finviz.com/chart.ashx?t=FLNC&ty=c&ta=1&p=d&s=l\", \"플루언스 – ESS\"),\n(\"https://finviz.com/chart.ashx?t=FSLR&ty=c&ta=1&p=d&s=l\", \"FSLR - 태양광\"),\n< 오일 >\n(\"https://finviz.com/chart.ashx?t=XOM&ty=c&ta=1&p=d&s=l\", \"엑손모빌\"),\n(\"https://finviz.com/chart.ashx?t=CVX&ty=c&ta=1&p=d&s=l\", \"쉐브론\"),\n(\"https://finviz.com/chart.ashx?t=WFRD&ty=c&ta=1&p=d&s=l\", \"유전 서비스/장비\"),\n(\"https://finviz.com/chart.ashx?t=IMO&ty=c&ta=1&p=d&s=l\", \"캐나다 통합 에너지(엑슨 계열)\"),\n\n\n",
+      "sectorColors": {}
+    },
+    "tab_custom_1771469182120": {
+      "type": "overseas_custom",
+      "config": "(\"https://finviz.com/chart.ashx?t=SOCL&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=IGV&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=XLK&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=SOXX&ty=c&ta=1&p=d&s=l\", \"\"),\n(\"https://finviz.com/chart.ashx?t=PSI&ty=c&ta=1&p=d&s=l\", \"\"),\n\n\n\n\n",
       "sectorColors": {}
     }
   },
@@ -19797,5 +19827,5 @@
       }
     ]
   },
-  "updatedAt": 1771220358351
+  "updatedAt": 1771478570799
 }

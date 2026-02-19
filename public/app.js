@@ -1,3 +1,4 @@
+console.log("🚀 [v7-Diagnostic] app.js with deep UI debugging loaded!");
 window.onerror = function (msg, url, line, col, error) {
     alert("⚠️ 자바스크립트 에러 발생:\n" + msg + "\n위치: " + line + ":" + col);
     return false;
@@ -11,9 +12,8 @@ const PERM_TAB_ID = 'tab_rank';
 const ADR_TAB_ID = 'tab_adr';
 const MEMO_TAB_ID = 'tab_memo';
 const EARNINGS_TAB_ID = 'tab_earnings';
-let tabData = {};
-let targetTabBtn = null;
 let isInitializing = false; // Flag to prevent auto-save during startup
+let quillEditor; // Global Quill instance
 
 /**
  * ===== GOOGLE AUTHENTICATION & CALENDAR API =====
@@ -59,10 +59,26 @@ function requestCalendarAccess(callback) {
         if (callback) callback();
         return;
     }
+
+    // Check if library is loaded
+    if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+        console.warn("⏳ Google GIS library not ready, retrying in 500ms...");
+        setTimeout(() => requestCalendarAccess(callback), 500);
+        return;
+    }
+
     if (!tokenClient) initTokenClient();
+
+    // Safety check after init attempt
+    if (!tokenClient) {
+        console.error("❌ Failed to initialize tokenClient");
+        return;
+    }
+
     tokenClient.callback = (resp) => {
         if (resp.access_token) {
             accessToken = resp.access_token;
+            console.log("🎟️ Calendar Access Token Acquired");
             if (callback) callback();
         }
     };
@@ -109,6 +125,32 @@ function checkLoginSession() {
 // Check session immediately
 checkLoginSession();
 
+// Initialize Google Identity Services programmatically
+window.onload = function () {
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+        google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: handleCredentialResponse,
+            auto_select: false,
+            itp_support: true // Improved support for Intelligent Tracking Prevention
+        });
+
+        const loginBtnDiv = document.getElementById("g_id_signin_button");
+        if (loginBtnDiv) {
+            google.accounts.id.renderButton(
+                loginBtnDiv,
+                {
+                    theme: "filled_blue",
+                    size: "large",
+                    shape: "rectangular",
+                    text: "signin_with",
+                    logo_alignment: "left"
+                }
+            );
+        }
+    }
+};
+
 /**
  * ===== FULLCALENDAR INITIALIZATION =====
  */
@@ -121,10 +163,31 @@ function initCalendar() {
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay'
+            right: 'dayGridMonth,timeGridWeek'
         },
+        dayCellClassNames: function (arg) {
+            const dateStr = arg.date.toISOString().split('T')[0];
+            if (window.holidayDates && window.holidayDates.has(dateStr)) {
+                return ['fc-day-holiday'];
+            }
+            return [];
+        },
+        displayEventTime: true,
+        eventTimeFormat: {
+            hour: '2-digit',
+            minute: '2-digit',
+            meridiem: false,
+            hour12: false
+        },
+        locale: 'ko', // Korean orientation
+        firstDay: 1, // Start on Monday
         themeSystem: 'standard',
-        height: '100%',
+        height: 'auto',
+        contentHeight: 'auto',
+        aspectRatio: 1.35,
+        handleWindowResize: true,
+        expandRows: true,
+        stickyHeaderDates: true,
         editable: true,
         selectable: true,
         events: fetchCalendarEvents,
@@ -132,9 +195,7 @@ function initCalendar() {
             openEventModal(info.dateStr);
         },
         eventClick: function (info) {
-            if (confirm(`일정: ${info.event.title}\n상세 페이지로 이동하시겠습니까?`)) {
-                window.open(info.event.url || 'https://calendar.google.com/calendar/r', '_blank');
-            }
+            openEventModal(null, info.event);
             info.jsEvent.preventDefault();
         }
     });
@@ -144,33 +205,67 @@ function initCalendar() {
 
 async function fetchCalendarEvents(fetchInfo, successCallback, failureCallback) {
     if (!accessToken) {
-        successCallback([]); // Return empty if no token yet
+        successCallback([]);
         return;
     }
 
     try {
         const start = fetchInfo.start.toISOString();
         const end = fetchInfo.end.toISOString();
-        const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&singleEvents=true`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
 
-        if (response.status === 401) {
-            accessToken = null; // Token expired
+        // Fetch Primary Events
+        const primaryUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start}&timeMax=${end}&singleEvents=true`;
+        // Fetch Korean Holidays
+        const holidayUrl = `https://www.googleapis.com/calendar/v3/calendars/ko.south_korea%23holiday%40group.v.calendar.google.com/events?timeMin=${start}&timeMax=${end}&singleEvents=true`;
+
+        const [primaryRes, holidayRes] = await Promise.all([
+            fetch(primaryUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } }),
+            fetch(holidayUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } })
+        ]);
+
+        if (primaryRes.status === 401) {
+            accessToken = null;
             requestCalendarAccess(() => calendar.refetchEvents());
             return;
         }
 
-        const data = await response.json();
-        const events = data.items.map(item => ({
+        const [primaryData, holidayData] = await Promise.all([
+            primaryRes.json(),
+            holidayRes.json()
+        ]);
+
+        const primaryEvents = (primaryData.items || []).map(item => ({
             id: item.id,
-            title: item.summary,
+            title: item.summary || '(제목 없음)',
             start: item.start.dateTime || item.start.date,
             end: item.end.dateTime || item.end.date,
             url: item.htmlLink,
-            allDay: !item.start.dateTime
+            extendedProps: { description: item.description || '' },
+            allDay: !item.start.dateTime,
+            editable: true
         }));
-        successCallback(events);
+
+        const holidayEvents = (holidayData.items || []).map(item => {
+            const date = item.start.date;
+            if (!window.holidayDates) window.holidayDates = new Set();
+            window.holidayDates.add(date);
+
+            return {
+                id: item.id,
+                title: `🚩 ${item.summary}`,
+                start: date,
+                end: item.end.date,
+                allDay: true,
+                display: 'block',
+                backgroundColor: '#fee2e2',
+                borderColor: '#ef4444',
+                textColor: '#b91c1c',
+                editable: false,
+                extendedProps: { isHoliday: true }
+            };
+        });
+
+        successCallback([...primaryEvents, ...holidayEvents]);
     } catch (error) {
         console.error("❌ Calendar fetch error:", error);
         failureCallback(error);
@@ -180,34 +275,77 @@ async function fetchCalendarEvents(fetchInfo, successCallback, failureCallback) 
 /**
  * ===== EVENT MODAL LOGIC =====
  */
-function openEventModal(dateStr) {
+function openEventModal(dateStr, event = null) {
     const modal = document.getElementById('eventModal');
     const startInput = document.getElementById('eventStartDate');
     const titleInput = document.getElementById('eventTitle');
+    const deleteBtn = document.getElementById('deleteEvent');
 
     if (!modal || !startInput) return;
 
-    titleInput.value = '';
-    startInput.value = dateStr;
-    document.getElementById('eventStartTime').value = '09:00';
-    document.getElementById('eventAllDay').checked = false;
-    document.getElementById('endTimeGroup').style.display = 'none';
-    document.getElementById('eventRecurrence').value = '';
+    // Reset Modal State
+    modal.dataset.eventId = event ? event.id : '';
+    titleInput.value = event ? event.title : '';
+    document.getElementById('eventDescription').value = event ? (event.extendedProps.description || '') : '';
+
+    if (event) {
+        // Edit Mode
+        const start = event.start;
+        const end = event.end || event.start;
+
+        startInput.value = formatDateForInput(start);
+        document.getElementById('eventStartTime').value = formatTimeForInput(start);
+        document.getElementById('eventEndDate').value = formatDateForInput(end);
+        document.getElementById('eventEndTime').value = formatTimeForInput(end || start);
+        document.getElementById('eventAllDay').checked = event.allDay;
+
+        deleteBtn.style.display = event.extendedProps.isHoliday ? 'none' : 'block';
+        document.getElementById('saveEvent').style.display = event.extendedProps.isHoliday ? 'none' : 'block';
+        document.getElementById('eventTitle').disabled = event.extendedProps.isHoliday;
+    } else {
+        // Create Mode
+        startInput.value = dateStr;
+        document.getElementById('eventStartTime').value = '09:00';
+        document.getElementById('eventAllDay').checked = false;
+        deleteBtn.style.display = 'none';
+        document.getElementById('saveEvent').style.display = 'block';
+        document.getElementById('eventTitle').disabled = false;
+    }
 
     modal.style.display = 'flex';
+    document.body.classList.add('modal-open');
+}
+
+function formatDateForInput(date) {
+    const d = new Date(date);
+    return d.toISOString().split('T')[0];
+}
+
+function formatTimeForInput(date) {
+    const d = new Date(date);
+    return d.toTimeString().split(' ')[0].slice(0, 5);
 }
 
 function closeEventModal() {
     const modal = document.getElementById('eventModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        modal.style.display = 'none';
+        document.body.classList.remove('modal-open');
+    }
 }
 
 async function saveGoogleEvent() {
+    const modal = document.getElementById('eventModal');
+    const eventId = modal.dataset.eventId;
     const title = document.getElementById('eventTitle').value;
+    const description = document.getElementById('eventDescription').value;
     const startDate = document.getElementById('eventStartDate').value;
     const startTime = document.getElementById('eventStartTime').value;
     const isAllDay = document.getElementById('eventAllDay').checked;
-    const recurrence = document.getElementById('eventRecurrence').value;
+
+    // Support for multiple days
+    const endDate = document.getElementById('eventEndDate').value || startDate;
+    const endTime = document.getElementById('eventEndTime').value || startTime;
 
     if (!title) {
         alert("일정 제목을 입력해주세요.");
@@ -219,42 +357,30 @@ async function saveGoogleEvent() {
         return;
     }
 
-    const event = {
+    const eventData = {
         summary: title,
+        description: description,
         start: isAllDay ? { date: startDate } : { dateTime: `${startDate}T${startTime}:00`, timeZone: 'Asia/Seoul' },
-        end: isAllDay ? { date: startDate } : { dateTime: `${startDate}T${parseInt(startTime.split(':')[0]) + 1}:00:00`.replace(/:(\d):/, ':0$1:'), timeZone: 'Asia/Seoul' }
+        end: isAllDay ? { date: endDate } : { dateTime: `${endDate}T${endTime}:00`, timeZone: 'Asia/Seoul' }
     };
 
-    // Quick end time fix: +1 hour
-    if (!isAllDay) {
-        const [h, m] = startTime.split(':').map(Number);
-        const endH = (h + 1).toString().padStart(2, '0');
-        event.end.dateTime = `${startDate}T${endH}:${m.toString().padStart(2, '0')}:00`;
-    }
-
-    if (recurrence) {
-        if (recurrence === 'WEEKLY') {
-            // Get day of week for RRULE (e.g., TU for Tuesday)
-            const days = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-            const d = new Date(startDate).getDay();
-            event.recurrence = [`RRULE:FREQ=WEEKLY;BYDAY=${days[d]}`];
-        } else {
-            event.recurrence = [`RRULE:FREQ=${recurrence}`];
-        }
-    }
-
     try {
-        const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-            method: 'POST',
+        const url = eventId
+            ? `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`
+            : 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+        const method = eventId ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+            method: method,
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(event)
+            body: JSON.stringify(eventData)
         });
 
         if (response.ok) {
-            console.log("✅ Event saved successfully");
+            console.log(`✅ Event ${eventId ? 'updated' : 'created'} successfully`);
             closeEventModal();
             if (calendar) calendar.refetchEvents();
         } else {
@@ -264,6 +390,37 @@ async function saveGoogleEvent() {
         }
     } catch (error) {
         console.error("❌ Save error:", error);
+    }
+}
+
+async function deleteGoogleEvent() {
+    const modal = document.getElementById('eventModal');
+    const eventId = modal.dataset.eventId;
+
+    if (!eventId) return;
+    if (!confirm("이 일정을 삭제하시겠습니까?")) return;
+
+    if (!accessToken) {
+        requestCalendarAccess(deleteGoogleEvent);
+        return;
+    }
+
+    try {
+        const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (response.ok) {
+            console.log("✅ Event deleted successfully");
+            closeEventModal();
+            if (calendar) calendar.refetchEvents();
+        } else {
+            console.error("❌ Delete error");
+            alert("일정 삭제에 실패했습니다.");
+        }
+    } catch (error) {
+        console.error("❌ Delete error:", error);
     }
 }
 
@@ -283,8 +440,13 @@ const transactionBody = document.getElementById('transactionBody');
 const mrktTpSelect = document.getElementById('mrktTp');
 const stexTpSelect = document.getElementById('stexTp');
 
+// --- State Variables ---
+let tabData = {};
+let activeTabId = PERM_TAB_ID;
+
 // --- Tab DOM Elements ---
 const tabContainer = document.getElementById("tabContainer");
+const tabsWrapper = document.getElementById("tabsWrapper"); // New wrapper for isolated scroll
 const tabContents = document.getElementById("tabContents");
 const addTabBtn = document.getElementById("addTabBtn");
 const captureBtn = document.getElementById("captureBtn");
@@ -593,7 +755,9 @@ window.addEventListener('beforeunload', () => {
 // ==========================================================
 
 function ensurePermanentTabs() {
-    // 1. Rank Tab (PERM_TAB_ID)
+    if (!tabsWrapper) return;
+
+    // Rank Tab
     if (!document.querySelector(`.tab-btn[data-tab="${PERM_TAB_ID}"]`)) {
         const btn = document.createElement('button');
         btn.className = 'tab-btn perm-tab';
@@ -603,11 +767,11 @@ function ensurePermanentTabs() {
         btn.dataset.perm = 'true';
         btn.title = '고정 탭 (조회 순위)';
 
-        if (tabContainer.firstChild) tabContainer.insertBefore(btn, tabContainer.firstChild);
-        else tabContainer.appendChild(btn);
+        if (tabsWrapper.firstChild) tabsWrapper.insertBefore(btn, tabsWrapper.firstChild);
+        else tabsWrapper.appendChild(btn);
     }
 
-    // 2. ADR Tab (ADR_TAB_ID)
+    // ADR Tab
     if (!document.querySelector(`.tab-btn[data-tab="${ADR_TAB_ID}"]`)) {
         const btn = document.createElement('button');
         btn.className = 'tab-btn perm-tab';
@@ -618,14 +782,13 @@ function ensurePermanentTabs() {
         btn.title = '고정 탭 (ADR 차트)';
 
         const rankBtn = document.querySelector(`.tab-btn[data-tab="${PERM_TAB_ID}"]`);
-        if (rankBtn && rankBtn.nextSibling) tabContainer.insertBefore(btn, rankBtn.nextSibling);
-        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
-        else tabContainer.appendChild(btn);
+        if (rankBtn && rankBtn.nextSibling) tabsWrapper.insertBefore(btn, rankBtn.nextSibling);
+        else tabsWrapper.appendChild(btn);
 
         createTabContentElement(ADR_TAB_ID);
     }
 
-    // 3. Memo Tab (MEMO_TAB_ID)
+    // Memo Tab
     if (!document.querySelector(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`)) {
         const btn = document.createElement('button');
         btn.className = 'tab-btn perm-tab';
@@ -637,12 +800,13 @@ function ensurePermanentTabs() {
         btn.style.fontWeight = 'bold';
 
         const adrBtn = document.querySelector(`.tab-btn[data-tab="${ADR_TAB_ID}"]`);
-        if (adrBtn && adrBtn.nextSibling) tabContainer.insertBefore(btn, adrBtn.nextSibling);
-        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
-        else tabContainer.appendChild(btn);
+        if (adrBtn && adrBtn.nextSibling) tabsWrapper.insertBefore(btn, adrBtn.nextSibling);
+        else tabsWrapper.appendChild(btn);
+
+        createTabContentElement(MEMO_TAB_ID);
     }
 
-    // 4. Earnings Tab (EARNINGS_TAB_ID)
+    // Earnings Tab
     if (!document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`)) {
         const btn = document.createElement('button');
         btn.className = 'tab-btn perm-tab';
@@ -653,79 +817,66 @@ function ensurePermanentTabs() {
         btn.title = '고정 탭 (실적 발표 캘린더)';
 
         const memoBtn = document.querySelector(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`);
-        if (memoBtn && memoBtn.nextSibling) tabContainer.insertBefore(btn, memoBtn.nextSibling);
-        else if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
-        else tabContainer.appendChild(btn);
+        if (memoBtn && memoBtn.nextSibling) tabsWrapper.insertBefore(btn, memoBtn.nextSibling);
+        else tabsWrapper.appendChild(btn);
 
         createTabContentElement(EARNINGS_TAB_ID);
     }
 }
 
-function saveAppData(overrideTabData = null) {
-    // CRITICAL: Prevent saving if we are in the middle of initialization or if tabData is empty (safety)
-    if (isInitializing) {
-        console.log("⏳ [saveAppData] Skipped: System is still initializing.");
-        return Promise.resolve(false);
-    }
-
-    const activeContent = document.querySelector('.tab-content.active');
-    if (activeContent && activeContent.id !== PERM_TAB_ID && activeContent.id !== ADR_TAB_ID && activeContent.id !== EARNINGS_TAB_ID && activeContent.id !== MEMO_TAB_ID) {
-        saveTabState(activeContent.id);
-    }
-
-    // Clear tabs array and rebuild from DOM to preserve order
+/**
+ * 현재 애플리케이션의 전체 상태를 객체로 반환 (저장 및 내보내기용)
+ */
+function getSerializedState(sourceData = null) {
+    const dataToSerialize = sourceData || tabData;
     const capturedTabs = [];
     document.querySelectorAll('.tab-btn:not(.add-tab-btn)').forEach(btn => {
         capturedTabs.push({ id: btn.dataset.tab, name: btn.textContent });
     });
 
-    // Fallback: If DOM missed some custom tabs, populate from tabData
-    const sourceData = overrideTabData || tabData;
-
-    Object.keys(sourceData).forEach(key => {
-        const type = sourceData[key]?.type;
+    // Fallback/Recover dynamic tabs from tabData
+    Object.keys(dataToSerialize).forEach(key => {
+        const type = dataToSerialize[key]?.type;
         const isDynamic = (type === 'overseas_custom' || type === 'exchange_rate');
-
         if (isDynamic && !capturedTabs.find(t => t.id === key)) {
             const btn = document.querySelector(`.tab-btn[data-tab="${key}"]`);
             const name = btn ? btn.textContent : (type === 'exchange_rate' ? "환율/금리(복구)" : "해외종목(복구)");
             capturedTabs.push({ id: key, name: name });
-            console.warn("[saveAppData] Dynamic tab found in data but not in DOM list (Recovered):", key, name);
         }
     });
 
-    if (capturedTabs.length === 0 && Object.keys(tabData).length > 0) {
-        console.error("🛑 [saveAppData] Refused to save: DOM tabs are empty but data exists. Preventing data loss.");
-        return Promise.resolve(false);
-    }
-
+    const activeContent = document.querySelector('.tab-content.active');
     const activeTabId = activeContent ? activeContent.id : (capturedTabs.length > 0 ? capturedTabs[0].id : PERM_TAB_ID);
 
-    // Capture Memo content if Quill is initialized
     let memoHtml = '';
     let memoDelta = null;
     if (quillEditor) {
         memoHtml = quillEditor.root.innerHTML;
         memoDelta = quillEditor.getContents();
     } else {
-        // Fallback to localStorage if Quill not ready but we are saving
         memoHtml = localStorage.getItem('memoContent_html') || '';
         const savedDelta = localStorage.getItem('memoContent_delta');
         if (savedDelta) memoDelta = JSON.parse(savedDelta);
     }
 
-    const storageData = {
+    return {
         activeTabId: activeTabId,
         tabs: capturedTabs,
-        contents: sourceData,
-        rankInterval: refreshIntervalSelect.value,
+        contents: dataToSerialize,
+        rankInterval: refreshIntervalSelect ? refreshIntervalSelect.value : "2",
         adrInterval: document.getElementById('adrRefreshInterval')?.value,
         memoHtml: memoHtml,
         memoDelta: memoDelta,
-        updatedAt: Date.now() // Version control
+        updatedAt: Date.now()
     };
+}
 
+function saveAppData(overrideTabData = null) {
+    if (isInitializing) return Promise.resolve(false);
+
+    const storageData = getSerializedState(overrideTabData);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
+
     console.log("💾 데이터 로컬 저장 완료. updatedAt:", new Date(storageData.updatedAt).toLocaleString());
 
     // Sync to server (Return promise)
@@ -921,7 +1072,17 @@ function activateTab(tabId) {
         startAdrAutoRefresh();
     } else if (tabId === MEMO_TAB_ID) {
         // Initialize FullCalendar when memo tab is active
-        setTimeout(initCalendar, 100);
+        setTimeout(() => {
+            if (!calendar) initCalendar();
+            else calendar.updateSize();
+
+            // Try to sync calendar proactively if we have a session
+            // [Fix] Removed automatic requestCalendarAccess to prevent browser popup blocking.
+            // Sync now relies on the manual sync button (syncCalBtn) or existing accessToken.
+            if (calendar && accessToken) {
+                calendar.refetchEvents();
+            }
+        }, 100);
     } else if (tabId === EARNINGS_TAB_ID || (tabData[tabId] && (tabData[tabId].type === 'overseas_custom' || tabData[tabId].type === 'exchange_rate'))) {
         if (!wasEmpty) {
             redrawTabCharts(tabId);
@@ -931,50 +1092,62 @@ function activateTab(tabId) {
     }
 }
 
-/**
- * 전 전용 탭들의 레이어 구성 및 이벤트 리스너 통합 초기화
- * @returns {boolean} true if the tab was newly initialized (rendered)
- */
 function initializeTab(tabId) {
     const content = document.getElementById(tabId);
     if (!content) return false;
 
-    const isInitialized = content.innerHTML.trim().length > 0;
+    const isInitialized = content.getAttribute('data-tab-initialized') === 'true';
 
-    // 1. Render layout if empty
-    if (!isInitialized) {
+    // 1. Render layout if truly empty (no innerHTML at all)
+    if (content.innerHTML.trim().length === 0) {
         console.log(`🏗️ [InitTab] Rendering initial layout for ${tabId}`);
         content.innerHTML = createChartGrid(tabId);
     }
 
     // 2. Attach specialized listeners (idempotent checks included)
-    if (tabId === ADR_TAB_ID) {
-        const adrSelect = document.getElementById('adrRefreshInterval');
-        if (adrSelect && lastSavedSettings.adrInterval) {
-            adrSelect.value = lastSavedSettings.adrInterval;
+    if (!isInitialized) {
+        if (tabId === ADR_TAB_ID) {
+            const adrSelect = document.getElementById('adrRefreshInterval');
+            if (adrSelect && lastSavedSettings.adrInterval) {
+                adrSelect.value = lastSavedSettings.adrInterval;
+            }
+        } else if (tabId === EARNINGS_TAB_ID) {
+            const refreshBtn = document.getElementById(`refreshEarnings_${tabId}`);
+            if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
+                refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
+                refreshBtn.setAttribute('data-listener-attached', 'true');
+            }
+        } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+            const prefix = `overseasCustom_${tabId}`;
+            const refreshBtn = document.getElementById(`refreshOverlay_${tabId}`);
+            if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
+                refreshBtn.addEventListener('click', () => refreshOverseasCustomCharts(tabId));
+                refreshBtn.setAttribute('data-listener-attached', 'true');
+            }
+            setupOverseasCursorSync();
+            setupSectorGroupListeners(tabId);
+        } else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
+            const refreshBtn = document.getElementById(`refreshExchangeRate_${tabId}`);
+            if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
+                refreshBtn.addEventListener('click', () => refreshExchangeRateCharts(tabId));
+                refreshBtn.setAttribute('data-listener-attached', 'true');
+            }
+            setupSectorGroupListeners(tabId);
+        } else if (tabId === MEMO_TAB_ID) {
+            // Even if content was in HTML, we need to init Quill and Calendar
+            setTimeout(() => {
+                if (!quillEditor) initMemoEditor();
+                if (!calendar) initCalendar();
+            }, 100);
         }
-    } else if (tabId === EARNINGS_TAB_ID) {
-        const refreshBtn = document.getElementById(`refreshEarnings_${tabId}`);
-        if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
-            refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
-            refreshBtn.setAttribute('data-listener-attached', 'true');
-        }
-    } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
-        const prefix = `overseasCustom_${tabId}`;
-        const refreshBtn = document.getElementById(`refreshOverlay_${tabId}`);
-        if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
-            refreshBtn.addEventListener('click', () => refreshOverseasCustomCharts(tabId));
-            refreshBtn.setAttribute('data-listener-attached', 'true');
-        }
-        setupOverseasCursorSync();
-        setupSectorGroupListeners(tabId);
-    } else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
-        const refreshBtn = document.getElementById(`refreshExchangeRate_${tabId}`);
-        if (refreshBtn && !refreshBtn.hasAttribute('data-listener-attached')) {
-            refreshBtn.addEventListener('click', () => refreshExchangeRateCharts(tabId));
-            refreshBtn.setAttribute('data-listener-attached', 'true');
-        }
-        setupSectorGroupListeners(tabId);
+        content.setAttribute('data-tab-initialized', 'true');
+    }
+    // Already initialized, but might need resizing
+    if (calendar) {
+        setTimeout(() => {
+            calendar.updateSize();
+            console.log("🔄 [activateTab] Calendar size updated");
+        }, 300);
     }
 
     // 3. Trigger initial load if it was empty
@@ -1001,8 +1174,8 @@ function createTabButtonElement(id, name) {
     btn.dataset.tab = id;
     btn.textContent = name;
     btn.draggable = true;
-    if (addTabBtn) tabContainer.insertBefore(btn, addTabBtn);
-    else tabContainer.appendChild(btn);
+    // Always append to tabsWrapper now
+    if (tabsWrapper) tabsWrapper.appendChild(btn);
     return btn;
 }
 
@@ -1071,7 +1244,7 @@ function createChartGrid(tabId) {
                                     <option value="4" data-interval="30000">당일누적</option>
                                 </select>
                             </div>
-                            <button id="adrManualRefresh" class="btn-refresh adr-update-btn" aria-label="조회">조회</button>
+                            <button id="adrManualRefresh" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
                     </div>
                     <div class="status-info">
@@ -1118,7 +1291,7 @@ function createChartGrid(tabId) {
                     <div class="header-single-line">
                         <h1><strong>실적 캘린더</strong></h1>
                         <div class="header-controls">
-                            <button id="refreshEarnings_${tabId}" class="btn-refresh" aria-label="조회">조회</button>
+                            <button id="refreshEarnings_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
                     </div>
                     <div class="status-info">
@@ -1190,7 +1363,7 @@ function createChartGrid(tabId) {
                     <div class="header-single-line">
                         <h1><strong>${titleText}</strong></h1>
                         <div class="header-controls">
-                            <button id="refreshOverlay_${tabId}" class="btn-refresh" aria-label="조회">조회</button>
+                            <button id="refreshOverlay_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
                     </div>
                     <div class="status-info">
@@ -1266,7 +1439,7 @@ function createChartGrid(tabId) {
                     <div class="header-single-line">
                         <h1><strong>${titleText}</strong></h1>
                         <div class="header-controls">
-                            <button id="refreshExchangeRate_${tabId}" class="btn-refresh" aria-label="조회">조회</button>
+                            <button id="refreshExchangeRate_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
                     </div>
                     <div class="status-info">
@@ -2211,23 +2384,23 @@ tabContainer.addEventListener("dblclick", function (e) {
 });
 
 let draggedItem = null;
-tabContainer.addEventListener('dragstart', function (e) {
+tabsWrapper.addEventListener('dragstart', function (e) {
     if (e.target.classList.contains('tab-btn') && !e.target.classList.contains('add-tab-btn') && !e.target.dataset.perm) {
         draggedItem = e.target; e.target.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move';
     } else { e.preventDefault(); }
 });
-tabContainer.addEventListener('dragend', function (e) {
+tabsWrapper.addEventListener('dragend', function (e) {
     if (e.target.classList.contains('tab-btn')) { e.target.classList.remove('dragging'); draggedItem = null; saveAppData(); }
 });
-tabContainer.addEventListener('dragover', function (e) {
+tabsWrapper.addEventListener('dragover', function (e) {
     e.preventDefault(); if (!draggedItem) return;
-    const draggableElements = [...tabContainer.querySelectorAll('.tab-btn:not(.dragging):not(.add-tab-btn):not([data-perm])')];
+    const draggableElements = [...tabsWrapper.querySelectorAll('.tab-btn:not(.dragging):not(.add-tab-btn):not([data-perm])')];
     const afterElement = draggableElements.reduce((closest, child) => {
         const box = child.getBoundingClientRect();
         const offset = e.clientX - box.left - box.width / 2;
         if (offset < 0 && offset > closest.offset) { return { offset: offset, element: child }; } else { return closest; }
     }, { offset: Number.NEGATIVE_INFINITY }).element;
-    if (afterElement == null) { tabContainer.insertBefore(draggedItem, addTabBtn); } else { tabContainer.insertBefore(draggedItem, afterElement); }
+    if (afterElement == null) { tabsWrapper.appendChild(draggedItem); } else { tabsWrapper.insertBefore(draggedItem, afterElement); }
 });
 
 addTabBtn.addEventListener("click", (e) => {
@@ -2427,8 +2600,12 @@ function renderTradingEconomicsChartItem(chart, color = '', tabId, idx) {
 
     const canvasId = `te_chart_${tabId}_${idx}`;
 
+    // Fix: Use series or urls array if top-level url is missing
+    const url = chart.url || (chart.series && chart.series[0] ? chart.series[0].url : (chart.urls ? chart.urls[0] : ''));
+    const duration = (chart.series && chart.series[0]) ? (chart.series[0].duration || '') : '';
+
     return `
-        <div class="finviz-chart-box te-chart-box" style="${style}" data-te-url="${chart.url}" data-te-idx="${idx}">
+        <div class="finviz-chart-box te-chart-box" style="${style}" data-te-url="${url}" data-te-duration="${duration}" data-te-idx="${idx}">
             <div class="finviz-chart-title ${color ? 'colorful' : ''}">${cleanTitle}</div>
             <div class="te-chart-wrapper">
                 <canvas id="${canvasId}" class="te-chart-canvas" width="400" height="200"></canvas>
@@ -2441,14 +2618,16 @@ function renderTradingEconomicsChartItem(chart, color = '', tabId, idx) {
 /**
  * TradingEconomics 차트 데이터 로드 및 렌더링
  */
-async function loadTradingEconomicsChart(canvas, url, title) {
+async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
     const wrapper = canvas.closest('.te-chart-wrapper');
     const loadingEl = wrapper?.querySelector('.te-chart-loading');
 
     if (loadingEl) loadingEl.style.display = 'block';
 
     try {
-        const proxyUrl = `/api/trading-economics?url=${encodeURIComponent(url)}`;
+        let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(url)}`;
+        if (duration) proxyUrl += `&duration=${encodeURIComponent(duration)}`;
+
         const response = await fetch(proxyUrl);
         const result = await response.json();
 
@@ -2522,7 +2701,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Clear
     ctx.clearRect(0, 0, w, h);
 
-    const padding = { top: 20, right: 50, bottom: 30, left: 10 };
+    const padding = { top: 20, right: 50, bottom: 45, left: 10 };
     const chartW = w - padding.left - padding.right;
     const chartH = h - padding.top - padding.bottom;
 
@@ -2545,13 +2724,28 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     const yMin = minVal - buffer;
     const yMax = maxVal + buffer;
 
+    const firstDate = data[0].date.toISOString().slice(0, 10).replace(/-/g, '/');
+    const lastDate = data[data.length - 1].date.toISOString().slice(0, 10).replace(/-/g, '/');
+
     // Font settings
     const axisFont = '11px sans-serif';
     const headerFont = 'bold 12px sans-serif';
     const dateFont = '10px sans-serif';
 
     // Cache data for redraw
-    canvas.chartData = { data, title };
+    canvas.chartData = {
+        data: data,
+        title: title,
+        minDate: data[0].date,
+        maxDate: data[data.length - 1].date,
+        yMin: yMin,
+        yMax: yMax,
+        padding: padding,
+        chartW: chartW,
+        chartH: chartH,
+        w: w,
+        h: h
+    };
     canvas.setAttribute('data-chart-type', 'te-single');
 
     // Draw grid lines
@@ -2602,10 +2796,38 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         });
     }
 
-    ctx.fillText(firstDate, padding.left, h - 5);
-    ctx.fillText(lastDate, w - padding.right, h - 5);
+    // Standardized X-Axis Labels
+    ctx.fillStyle = '#999';
+    ctx.font = axisFont;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
 
-    // Draw latest information in top-right
+    const minDate = data[0].date;
+    const maxDate = data[data.length - 1].date;
+    const dateRange = maxDate - minDate;
+    const daysDiff = dateRange / (1000 * 60 * 60 * 24);
+
+    let numLabels = 5;
+    if (daysDiff > 3650) numLabels = 8;
+    else if (daysDiff > 1825) numLabels = 6;
+
+    for (let i = 0; i <= numLabels; i++) {
+        const ratio = i / numLabels;
+        const date = new Date(minDate.getTime() + dateRange * ratio);
+        const x = padding.left + chartW * ratio;
+
+        let dateLabel;
+        if (daysDiff > 730) {
+            dateLabel = date.getFullYear().toString();
+        } else if (daysDiff > 180) {
+            dateLabel = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+        } else {
+            dateLabel = `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+        ctx.fillText(dateLabel, x, h - 30);
+    }
+
+    // Latest information in top-right
     const latestItem = data[data.length - 1];
     const latestValue = latestItem.value;
     const latestDateStr = latestItem.date.toISOString().slice(0, 10).replace(/-/g, '/');
@@ -2615,6 +2837,161 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Latest Date
     ctx.fillStyle = '#666';
     ctx.font = dateFont;
+    ctx.fillText(latestDateStr, w - padding.right, padding.top - 18);
+
+    // Latest Value
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = headerFont;
+    ctx.fillText(latestValue.toFixed(2), w - padding.right, padding.top - 5);
+
+    // Mouse interactive events
+    if (!canvas.hasInteractiveEvents) {
+        canvas.hasInteractiveEvents = true;
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!canvas.chartData) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const { padding, chartW, minDate, maxDate, data } = canvas.chartData;
+
+            if (mouseX < padding.left || mouseX > padding.left + chartW) return;
+
+            const ratio = (mouseX - padding.left) / chartW;
+            const hoveredDate = new Date(minDate.getTime() + (maxDate - minDate) * ratio);
+
+            // Find closest index
+            const closest = data.reduce((prev, curr) => {
+                return Math.abs(curr.date - hoveredDate) < Math.abs(prev.date - hoveredDate) ? curr : prev;
+            });
+
+            const hoveredValues = [{ label: canvas.chartData.title, value: closest.value, date: closest.date }];
+
+            drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues);
+            syncCursorToOtherCharts(canvas, hoveredDate);
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            if (canvas.chartData) {
+                drawTradingEconomicsLineChart(canvas, canvas.chartData.data, canvas.chartData.title);
+            }
+            clearCursorFromOtherCharts(canvas);
+        });
+    }
+}
+
+/**
+ * 커서와 툴팁이 포함된 TradingEconomics 차트 그리기
+ */
+function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
+    if (!canvas.chartData) return;
+
+    const { data, title, minDate, maxDate, yMin, yMax, padding, chartW, chartH, w, h } = canvas.chartData;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    const axisFont = '11px sans-serif';
+    const headerFont = 'bold 12px sans-serif';
+
+    // 그리드
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (chartH / 5) * i;
+        ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+        const val = yMax - ((yMax - yMin) / 5) * i;
+        ctx.fillStyle = '#666'; ctx.font = axisFont; ctx.textAlign = 'left';
+        ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
+    }
+
+    // 데이터 라인
+    ctx.strokeStyle = '#3498db';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    data.forEach((point, i) => {
+        const x = padding.left + (i / (data.length - 1)) * chartW;
+        const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // X축 라벨 (Standardized)
+    ctx.fillStyle = '#999';
+    ctx.font = axisFont;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const dateRange = maxDate - minDate;
+    const daysDiff = dateRange / (1000 * 60 * 60 * 24);
+    let numLabels = 5;
+    if (daysDiff > 3650) numLabels = 8;
+    else if (daysDiff > 1825) numLabels = 6;
+
+    for (let i = 0; i <= numLabels; i++) {
+        const ratio = i / numLabels;
+        const date = new Date(minDate.getTime() + dateRange * ratio);
+        const x = padding.left + chartW * ratio;
+        let dateLabel;
+        if (daysDiff > 730) dateLabel = date.getFullYear().toString();
+        else if (daysDiff > 180) dateLabel = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+        else dateLabel = `${date.getMonth() + 1}/${date.getDate()}`;
+        ctx.fillText(dateLabel, x, h - 30);
+    }
+
+    // 수직 커서선
+    ctx.strokeStyle = '#ff6b6b';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(mouseX, padding.top);
+    ctx.lineTo(mouseX, padding.top + chartH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 툴팁 및 포인트 마커
+    if (hoveredValues && hoveredValues.length > 0) {
+        const v = hoveredValues[0];
+        const pointX = padding.left + ((v.date - minDate) / (maxDate - minDate)) * chartW;
+        const pointY = padding.top + (1 - (v.value - yMin) / (yMax - yMin)) * chartH;
+
+        // 마커
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(pointX, pointY, 5, 0, 2 * Math.PI); ctx.fill();
+        ctx.fillStyle = '#ff6b6b';
+        ctx.beginPath(); ctx.arc(pointX, pointY, 4, 0, 2 * Math.PI); ctx.fill();
+
+        // 툴팁 박스
+        const tooltipW = 140;
+        const tooltipH = 40;
+        let tx = mouseX + 10;
+        if (tx + tooltipW > w - padding.right) tx = mouseX - tooltipW - 10;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+        ctx.fillRect(tx, padding.top + 10, tooltipW, tooltipH);
+        ctx.strokeRect(tx, padding.top + 10, tooltipW, tooltipH);
+
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const dStr = `${v.date.getFullYear()}/${String(v.date.getMonth() + 1).padStart(2, '0')}/${String(v.date.getDate()).padStart(2, '0')}`;
+        ctx.fillText(dStr, tx + 8, padding.top + 15);
+        ctx.fillText(`${title}: ${v.value.toFixed(2)}`, tx + 8, padding.top + 30);
+    }
+
+    // 제목 및 현재가 (우측 상단 고정 부분 다시 그림)
+    ctx.textAlign = 'right';
+    const latestValue = data[data.length - 1].value;
+    const latestDateStr = data[data.length - 1].date.toISOString().slice(0, 10).replace(/-/g, '/');
+
+    // Latest Date
+    ctx.fillStyle = '#666';
+    ctx.font = '10px sans-serif';
     ctx.fillText(latestDateStr, w - padding.right, padding.top - 18);
 
     // Latest Value
@@ -3180,13 +3557,14 @@ function syncCursorToOtherCharts(sourceCanvas, hoveredDate) {
     const activeContent = document.querySelector('.tab-content.active');
     if (!activeContent) return;
 
-    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"]');
+    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"], canvas[data-chart-type="te-single"]');
 
     allCanvases.forEach(canvas => {
         if (canvas === sourceCanvas) return;
         if (!canvas.chartData) return;
 
-        const { minDate, maxDate, padding, chartW, allSeries } = canvas.chartData;
+        const { minDate, maxDate, padding, chartW } = canvas.chartData;
+        const chartType = canvas.getAttribute('data-chart-type');
 
         // 날짜 범위 내에 있는지 확인
         if (hoveredDate < minDate || hoveredDate > maxDate) return;
@@ -3196,15 +3574,25 @@ function syncCursorToOtherCharts(sourceCanvas, hoveredDate) {
         const mouseX = padding.left + chartW * ratio;
 
         // 해당 위치의 값 찾기
-        const hoveredValues = allSeries.map(s => {
-            if (!s.data || s.data.length === 0) return null;
-            const closest = s.data.reduce((prev, curr) => {
+        let hoveredValues = [];
+        if (chartType === 'multi-series') {
+            const { allSeries } = canvas.chartData;
+            hoveredValues = allSeries.map(s => {
+                if (!s.data || s.data.length === 0) return null;
+                const closest = s.data.reduce((prev, curr) => {
+                    return Math.abs(curr.date - hoveredDate) < Math.abs(prev.date - hoveredDate) ? curr : prev;
+                });
+                return { label: s.label, value: closest.value, date: closest.date };
+            }).filter(v => v !== null);
+            drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues);
+        } else if (chartType === 'te-single') {
+            const { data, title } = canvas.chartData;
+            const closest = data.reduce((prev, curr) => {
                 return Math.abs(curr.date - hoveredDate) < Math.abs(prev.date - hoveredDate) ? curr : prev;
             });
-            return { label: s.label, value: closest.value, date: closest.date };
-        }).filter(v => v !== null);
-
-        drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues);
+            hoveredValues = [{ label: title, value: closest.value, date: closest.date }];
+            drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues);
+        }
     });
 }
 
@@ -3215,13 +3603,18 @@ function clearCursorFromOtherCharts(sourceCanvas) {
     const activeContent = document.querySelector('.tab-content.active');
     if (!activeContent) return;
 
-    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"]');
+    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"], canvas[data-chart-type="te-single"]');
 
     allCanvases.forEach(canvas => {
         if (canvas === sourceCanvas) return;
         if (!canvas.chartData) return;
 
-        drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
+        const chartType = canvas.getAttribute('data-chart-type');
+        if (chartType === 'multi-series') {
+            drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
+        } else if (chartType === 'te-single') {
+            drawTradingEconomicsLineChart(canvas, canvas.chartData.data, canvas.chartData.title);
+        }
     });
 }
 
@@ -3260,13 +3653,14 @@ async function refreshExchangeRateCharts(tabId) {
     // 1. TradingEconomics Charts
     for (const box of chartBoxes) {
         const url = box.dataset.teUrl;
+        const duration = box.dataset.teDuration || '';
         const idx = box.dataset.teIdx;
         const canvas = box.querySelector('.te-chart-canvas');
         const title = box.querySelector('.finviz-chart-title')?.textContent || '';
 
         if (url && canvas) {
             try {
-                await loadTradingEconomicsChart(canvas, url, title);
+                await loadTradingEconomicsChart(canvas, url, title, duration);
             } catch (e) {
                 console.error('[ExchangeRate] Chart load failed:', e);
             }
@@ -3975,15 +4369,34 @@ function bulkExportSettings() {
         return;
     }
 
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bulk_settings_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // 1. TXT Export (Custom Tabs only)
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const txtBlob = new Blob([content], { type: 'text/plain' });
+    const txtUrl = URL.createObjectURL(txtBlob);
+    const aTxt = document.createElement('a');
+    aTxt.href = txtUrl;
+    aTxt.download = `bulk_settings_${dateStr}.txt`;
+    document.body.appendChild(aTxt);
+    aTxt.click();
+    document.body.removeChild(aTxt);
+    URL.revokeObjectURL(txtUrl);
+
+    // 2. JSON Export (Full State)
+    const fullState = getSerializedState();
+    const jsonBlob = new Blob([JSON.stringify(fullState, null, 2)], { type: 'application/json' });
+    const jsonUrl = URL.createObjectURL(jsonBlob);
+    const aJson = document.createElement('a');
+    aJson.href = jsonUrl;
+    aJson.download = `full_backup_${dateStr}.json`;
+    document.body.appendChild(aJson);
+
+    // Slight delay to ensure browsers allow multiple downloads
+    setTimeout(() => {
+        aJson.click();
+        document.body.removeChild(aJson);
+        URL.revokeObjectURL(jsonUrl);
+        console.log("📥 [bulkExportSettings] Dual-format (TXT + JSON) download triggered.");
+    }, 100);
 }
 
 /**
@@ -3997,9 +4410,21 @@ function bulkImportSettings(file) {
     reader.onload = async (e) => {
         // Remove BOM if present (Common in Windows Notepad files)
         const text = e.target.result.replace(/^\uFEFF/, '');
-        console.log("📂 Bulk Import Started. File content length:", text.length);
+        if (text.trim().startsWith('{')) {
+            try {
+                const data = JSON.parse(text);
+                if (data.tabs && data.contents) {
+                    if (confirm("전체 백업 파일(JSON)이 감지되었습니다. 현재의 모든 설정을 지우고 이 시점으로 완벽하게 되돌리시겠습니까?")) {
+                        applyFullStateBackup(data);
+                    }
+                    return;
+                }
+            } catch (err) {
+                console.error("❌ JSON 파싱 실패, TXT로 시도합니다.", err);
+            }
+        }
 
-        if (!confirm("현재의 모든 커스텀 탭 설정이 덮어씌워지거나 추가됩니다. 계속하시겠습니까?")) {
+        if (!confirm("현재의 모든 인쇄물/커스텀 탭 설정이 덮어씌워지거나 추가될 수 있습니다. 계속하시겠습니까? (TXT 형식)")) {
             return;
         }
 
@@ -4180,6 +4605,67 @@ function bulkImportSettings(file) {
     reader.readAsText(file);
 }
 
+/**
+ * JSON 백업 데이터를 사용하여 전체 애플리케이션 상태 복구
+ */
+function applyFullStateBackup(data) {
+    console.log("🔄 [Restore] Full state restoration started...");
+
+    // 1. 데이터 교체 (Contents)
+    tabData = data.contents || {};
+
+    // 2. 기존 커스텀 탭 UI 제거 (영구 탭 제외)
+    const allTabBtns = document.querySelectorAll('.tab-btn:not(.add-tab-btn)');
+    allTabBtns.forEach(btn => {
+        const id = btn.dataset.tab;
+        if (id !== PERM_TAB_ID && id !== ADR_TAB_ID && id !== EARNINGS_TAB_ID && id !== MEMO_TAB_ID) {
+            btn.remove();
+            const content = document.getElementById(id);
+            if (content) content.remove();
+        }
+    });
+
+    // 3. 탭 버튼 및 컨텐츠 재생성 (JSON에 기록된 순서대로)
+    if (data.tabs && Array.isArray(data.tabs)) {
+        data.tabs.forEach(tab => {
+            if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID && tab.id !== MEMO_TAB_ID) {
+                createTabButtonElement(tab.id, tab.name);
+                createTabContentElement(tab.id);
+            }
+        });
+    }
+
+    // 4. 전역 설정 복구
+    if (data.rankInterval && refreshIntervalSelect) {
+        refreshIntervalSelect.value = data.rankInterval;
+    }
+    const adrSelect = document.getElementById('adrRefreshInterval');
+    if (adrSelect && data.adrInterval) {
+        adrSelect.value = data.adrInterval;
+    }
+
+    // 5. 메모 복구
+    if (quillEditor) {
+        if (data.memoDelta) {
+            quillEditor.setContents(data.memoDelta);
+        } else if (data.memoHtml) {
+            quillEditor.root.innerHTML = data.memoHtml;
+        }
+    }
+    if (data.memoHtml) localStorage.setItem('memoContent_html', data.memoHtml);
+    if (data.memoDelta) localStorage.setItem('memoContent_delta', JSON.stringify(data.memoDelta));
+
+    // 6. 데이터 저장 및 서버와 동기화
+    saveAppData();
+
+    // 7. 활성 탭 전환
+    const targetTabId = data.activeTabId || PERM_TAB_ID;
+    activateTab(targetTabId);
+
+    alert("✅ 전체 환경 복구가 완료되었습니다.");
+    console.log("✅ [Restore] Success. Activated tab:", targetTabId);
+}
+
 
 // ==========================================================
 // Initialization
@@ -4355,93 +4841,84 @@ document.addEventListener('DOMContentLoaded', async () => {
 /**
  * ===== QUILL MEMO EDITOR INITIALIZATION =====
  */
-let quillEditor = null;
+function initMemoEditor() {
+    console.log("🖋️ [initMemoEditor] Attempting to initialize Quill...");
+    const editorEl = document.getElementById('quillEditor');
+    if (!editorEl) {
+        console.error("❌ [initMemoEditor] #quillEditor element NOT found in DOM!");
+        return;
+    }
+
+    try {
+        quillEditor = new Quill('#quillEditor', {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                    [{ 'color': [] }, { 'background': [] }],
+                    ['blockquote', 'code-block'],
+                    ['link', 'image'],
+                    ['clean']
+                ]
+            },
+            placeholder: '메모를 작성하세요...'
+        });
+        console.log("✅ [initMemoEditor] Quill successfully initialized");
+        loadMemo();
+
+        let saveTimeout;
+        quillEditor.on('text-change', () => {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(saveMemoAuto, 1000);
+        });
+    } catch (e) {
+        console.error("❌ [initMemoEditor] Quill init failed:", e);
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Initialize Quill Editor
-    setTimeout(() => {
-        if (document.getElementById('quillEditor')) {
-            quillEditor = new Quill('#quillEditor', {
-                theme: 'snow',
-                modules: {
-                    toolbar: [
-                        ['bold', 'italic', 'underline', 'strike'],
-                        ['blockquote', 'code-block'],
-                        [{ 'header': 1 }, { 'header': 2 }],
-                        [{ 'list': 'ordered' }, { 'list': 'bullet' }],
-                        ['link', 'image'],
-                        ['clean']
-                    ]
-                },
-                placeholder: '메모를 작성하세요. 이미지도 붙여넣기로 추가 가능합니다.'
+    // Logout Button
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            if (confirm('로그아웃 하시겠습니까?')) {
+                localStorage.removeItem('user_session');
+                location.reload();
+            }
+        });
+    }
+
+    // Sync Calendar Button
+    document.addEventListener('click', (e) => {
+        if (e.target.id === 'syncCalBtn') {
+            requestCalendarAccess(() => {
+                if (calendar) calendar.refetchEvents();
             });
-
-            // Load saved memo
-            loadMemo();
-
-            // Save memo on input (debounced)
-            let saveTimeout;
-            quillEditor.on('text-change', () => {
-                clearTimeout(saveTimeout);
-                saveTimeout = setTimeout(saveMemoAuto, 1000);
-            });
-
-            // Memo Save Button
-            const memoSaveBtn = document.getElementById('memoSaveBtn');
-            if (memoSaveBtn) {
-                memoSaveBtn.addEventListener('click', () => {
-                    saveMemo();
-                });
-            }
-
-
-            // Memo Tab Button delegation (since button is dynamic)
-            document.addEventListener('click', (e) => {
-                const btn = e.target.closest(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`);
-                if (btn) {
-                    activateTab(MEMO_TAB_ID);
-                }
-            });
-
-            // Logout Button
-            const logoutBtn = document.getElementById('logoutBtn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', () => {
-                    if (confirm('로그아웃 하시겠습니까?')) {
-                        localStorage.removeItem('user_session');
-                        location.reload();
-                    }
-                });
-            }
-
-            // Sync Calendar Button
-            const syncCalBtn = document.getElementById('syncCalBtn');
-            if (syncCalBtn) {
-                syncCalBtn.addEventListener('click', () => {
-                    requestCalendarAccess(() => {
-                        if (calendar) calendar.refetchEvents();
-                    });
-                });
-            }
-
-            // Event Modal Buttons
-            const saveEventBtn = document.getElementById('saveEvent');
-            if (saveEventBtn) saveEventBtn.addEventListener('click', saveGoogleEvent);
-
-            const cancelEventBtn = document.getElementById('cancelEvent');
-            if (cancelEventBtn) cancelEventBtn.addEventListener('click', closeEventModal);
-
-            const closeEventModalX = document.getElementById('closeEventModal');
-            if (closeEventModalX) closeEventModalX.addEventListener('click', closeEventModal);
-
-            const allDayCheck = document.getElementById('eventAllDay');
-            if (allDayCheck) {
-                allDayCheck.addEventListener('change', (e) => {
-                    document.getElementById('eventStartTime').disabled = e.target.checked;
-                });
-            }
         }
-    }, 500);
+    });
+
+    // Event Modal Buttons
+    const saveEventBtn = document.getElementById('saveEvent');
+    if (saveEventBtn) saveEventBtn.addEventListener('click', saveGoogleEvent);
+
+    const cancelEventBtn = document.getElementById('cancelEvent');
+    if (cancelEventBtn) cancelEventBtn.addEventListener('click', closeEventModal);
+
+    const deleteEventBtn = document.getElementById('deleteEvent');
+    if (deleteEventBtn) deleteEventBtn.addEventListener('click', deleteGoogleEvent);
+
+    const closeEventModalX = document.getElementById('closeEventModal');
+    if (closeEventModalX) closeEventModalX.addEventListener('click', closeEventModal);
+
+    const allDayCheck = document.getElementById('eventAllDay');
+    if (allDayCheck) {
+        allDayCheck.addEventListener('change', (e) => {
+            const timeInput = document.getElementById('eventStartTime');
+            if (timeInput) timeInput.disabled = e.target.checked;
+        });
+    }
 });
 
 function saveMemo() {
