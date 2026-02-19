@@ -478,6 +478,8 @@ app.get('/api/trading-economics', async (req, res) => {
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
                         '--disable-blink-features=AutomationControlled'
                     ] // Required for some environments
                 });

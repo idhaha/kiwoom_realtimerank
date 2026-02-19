@@ -2631,13 +2631,16 @@ async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
         const response = await fetch(proxyUrl);
         const result = await response.json();
 
-        if (!result.success || !result.data || !Array.isArray(result.data)) {
-            let errorMsg = result.error || 'Invalid data format';
+        if (!result.success) {
+            throw new Error(result.details || result.error || '서버에서 데이터를 가져오는데 실패했습니다.');
+        }
+
+        if (!result.data || !Array.isArray(result.data)) {
+            let errorMsg = 'Invalid data format';
             if (result.data === null) {
                 errorMsg = '데이터 없음 (Guest 계정 제한 또는 URL 오류)';
-            } else if (!Array.isArray(result.data)) {
+            } else if (result.data !== undefined) {
                 errorMsg = `Invalid data format: Expected array but got ${typeof result.data}`;
-                if (result.data && result.data.Message) errorMsg += ` (${result.data.Message})`;
             }
             throw new Error(errorMsg);
         }
