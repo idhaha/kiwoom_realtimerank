@@ -458,6 +458,7 @@ app.get('/api/finviz-image', async (req, res) => {
  * TradingEconomics API 프록시 (CORS 방지용)
  * 환율, 금리 등 경제 지표 데이터 제공
  */
+let isBrowserLaunching = false; // 가용 자원이 부족한 서버를 위한 락(Lock) 변수
 app.get('/api/trading-economics', async (req, res) => {
     let originalUrl = req.query.url;
     const duration = req.query.duration || ''; // e.g., '5년', '10년', 'MAX'
@@ -477,15 +478,27 @@ app.get('/api/trading-economics', async (req, res) => {
 
             let browser = null;
             try {
+                // [자원 보동] 동시에 여러 브라우저가 실행되지 않도록 락(Lock) 대기
+                let waitCount = 0;
+                while (isBrowserLaunching && waitCount < 15) { // 최대 15초 대기
+                    await new Promise(r => setTimeout(r, 1000));
+                    waitCount++;
+                }
+                isBrowserLaunching = true;
+
                 browser = await puppeteer.launch({
                     headless: "new",
-                    timeout: 40000, // Reduced from 60s
+                    timeout: 45000,
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage',
                         '--disable-gpu',
                         '--no-zygote',
+                        '--single-process', // Use single process for low RAM (Linux only)
+                        '--disable-extensions',
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-site-isolation-trials',
                         '--disable-blink-features=AutomationControlled'
                     ]
                 });
@@ -672,6 +685,7 @@ app.get('/api/trading-economics', async (req, res) => {
                 // If scraping fails, API likely fails too (403).
                 throw new Error(`Scraping failed: ${e.message}`);
             } finally {
+                isBrowserLaunching = false;
                 if (browser) await browser.close();
             }
         }
