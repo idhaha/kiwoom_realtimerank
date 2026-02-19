@@ -2708,10 +2708,16 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
-    // Set canvas size with DPR
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    const targetW = Math.floor(w * dpr);
+    const targetH = Math.floor(h * dpr);
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    } else {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
 
     // Clear
     ctx.clearRect(0, 0, w, h);
@@ -2904,9 +2910,32 @@ function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
 
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    const targetW = Math.floor(w * dpr);
+
+
+    const targetH = Math.floor(h * dpr);
+
+
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+
+
+        canvas.width = targetW;
+
+
+        canvas.height = targetH;
+
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+
+    } else {
+
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+
+    }
     ctx.clearRect(0, 0, w, h);
 
     const axisFont = '11px sans-serif';
@@ -3251,9 +3280,32 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     const legendFont = 'bold 12px sans-serif'; // for legend
     const dateFont = '10px sans-serif'; // for latest date
 
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    const targetW = Math.floor(w * dpr);
+
+
+    const targetH = Math.floor(h * dpr);
+
+
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+
+
+        canvas.width = targetW;
+
+
+        canvas.height = targetH;
+
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+
+    } else {
+
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+
+    }
     ctx.clearRect(0, 0, w, h);
 
     const padding = { top: 50, right: 60, bottom: 50, left: 10 };
@@ -3433,9 +3485,24 @@ function drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues) {
     const dpr = window.devicePixelRatio || 1;
 
     // 캔버스 초기화
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    const targetW = Math.floor(w * dpr);
+
+    const targetH = Math.floor(h * dpr);
+
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+
+        canvas.width = targetW;
+
+        canvas.height = targetH;
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    } else {
+
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    }
     ctx.clearRect(0, 0, w, h);
 
     // Font settings

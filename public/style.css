@@ -1202,7 +1202,8 @@ iframe {
     margin-top: 5px;
 }
 
-.te-chart-canvas {
+.te-chart-canvas,
+.multi-chart-canvas {
     display: block;
     width: 100% !important;
     height: 100% !important;
