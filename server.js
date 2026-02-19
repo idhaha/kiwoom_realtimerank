@@ -459,29 +459,35 @@ app.get('/api/finviz-image', async (req, res) => {
  * 환율, 금리 등 경제 지표 데이터 제공
  */
 app.get('/api/trading-economics', async (req, res) => {
-    const originalUrl = req.query.url;
+    let originalUrl = req.query.url;
     const duration = req.query.duration || ''; // e.g., '5년', '10년', 'MAX'
     if (!originalUrl) return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
+
+    // URL Normalization: Replace double slashes (except after protocol)
+    originalUrl = originalUrl.replace(/([^:]\/)\/+/g, '$1');
 
     console.log(`📡 [TE Proxy] Request: ${originalUrl}, Duration: ${duration || 'default'}`);
     fileLog(`📡 TE Proxy Request: ${originalUrl}, Duration: ${duration || 'default'}`);
 
     try {
         // Check if it's a TradingEconomics URL (and not the API itself)
-        if (originalUrl.includes('tradingeconomics.com') && !originalUrl.includes('api.tradingeconomics.com')) {
+        const targetUrl = originalUrl;
+        if (targetUrl.includes('tradingeconomics.com') && !targetUrl.includes('api.tradingeconomics.com')) {
             console.log(`   -> Scraping Mode (Puppeteer): ${originalUrl}`);
 
             let browser = null;
             try {
                 browser = await puppeteer.launch({
                     headless: "new",
+                    timeout: 40000, // Reduced from 60s
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage',
                         '--disable-gpu',
+                        '--no-zygote',
                         '--disable-blink-features=AutomationControlled'
-                    ] // Required for some environments
+                    ]
                 });
                 const page = await browser.newPage();
 
@@ -511,7 +517,7 @@ app.get('/api/trading-economics', async (req, res) => {
                 });
 
                 // Navigate to the page
-                await page.goto(originalUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 }); // Reduced from 60s
 
                 // Wait for Highcharts to be defined and have data
                 // We assume there is a Highcharts chart on the page with data
@@ -602,7 +608,7 @@ app.get('/api/trading-economics', async (req, res) => {
                             });
 
                             if (newCount !== initialCount) {
-                                const resultMsg = `   ✅ Data count after 5Y click: ${newCount} (was ${initialCount}) after ${i + 1}s\n`;
+                                const resultMsg = `   ✅ Data count after ${targetButton} click: ${newCount} (was ${initialCount}) after ${i + 1}s\n`;
                                 console.log(resultMsg.trim());
                                 fs.appendFileSync('puppeteer_debug.log', resultMsg);
                                 dataChanged = true;

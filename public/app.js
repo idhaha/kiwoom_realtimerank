@@ -2628,6 +2628,11 @@ async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
         let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(url)}`;
         if (duration) proxyUrl += `&duration=${encodeURIComponent(duration)}`;
 
+        if (loadingEl) {
+            loadingEl.style.display = 'block';
+            loadingEl.textContent = '브라우저 시동 중...';
+        }
+
         const response = await fetch(proxyUrl);
         const result = await response.json();
 
@@ -3042,160 +3047,168 @@ async function loadMultiSeriesChart(canvas, urls, title) {
         }
 
         const seriesPromises = seriesConfig.map(async (item) => {
-            let url = item.url;
-            let data = [];
-            let label = item.label || "";
+            try {
+                let url = item.url;
+                let data = [];
+                let label = item.label || "";
 
-            let dataSource = '';
-            const lowerUrl = url.toLowerCase().trim();
-            if (lowerUrl.indexOf('fred') !== -1) dataSource = 'fred';
-            else if (lowerUrl.indexOf('ecos') !== -1) dataSource = 'ecos';
-            else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
+                let dataSource = '';
+                const lowerUrl = url.toLowerCase().trim();
+                if (lowerUrl.indexOf('fred') !== -1) dataSource = 'fred';
+                else if (lowerUrl.indexOf('ecos') !== -1) dataSource = 'ecos';
+                else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
 
-            console.log(`[MultiSeries] Final check - URL: "${url}", Source: "${dataSource}"`);
+                console.log(`[MultiSeries] Final check - URL: "${url}", Source: "${dataSource}"`);
 
-            if (dataSource === 'fred') {
-                // ... (existing FRED logic) ...
-                const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
-                if (fredMatch) {
-                    const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
-                    const sid = cleanArg(fredMatch[1]);
-                    const per = cleanArg(fredMatch[2]) || '1년';
-                    if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
-                    if (!label) label = sid;
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s for reliability
-                    try {
-                        const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(per)}`, { signal: controller.signal });
-                        clearTimeout(timeoutId);
-                        if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
-                        const resJson = await resp.json();
-                        if (resJson.success) {
-                            if (!resJson.data || resJson.data.length === 0) throw new Error('데이터가 비어있습니다.');
-                            data = resJson.data.map(d => ({ date: new Date(d.date), value: d.value }));
-                        } else throw new Error(resJson.error || 'Unknown FRED Error');
-                    } catch (fetchErr) {
-                        clearTimeout(timeoutId);
-                        throw fetchErr;
-                    }
-                } else throw new Error(`Invalid FRED format: ${url}`);
-            } else if (dataSource === 'ecos') {
-                // ... (existing ECOS logic) ...
-                const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
-                if (innerResult) {
-                    const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
-                    let table = '817Y002';
-                    let itemCode = '';
-                    let period = '';
-                    if (args.length === 3) { table = args[0]; itemCode = args[1]; period = args[2]; }
-                    else if (args.length === 2) { itemCode = args[0]; period = args[1]; }
-                    else throw new Error(`Invalid ECOS format: ${url}`);
-                    if (!label) label = itemCode;
-                    const now = new Date();
-                    const formatYMD = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
-                    const endDate = formatYMD(now);
-                    let startDateObj = new Date(now);
-                    if (period.includes('년')) startDateObj.setFullYear(now.getFullYear() - (parseInt(period) || 1));
-                    else if (period.includes('개월')) startDateObj.setMonth(now.getMonth() - (parseInt(period) || 1));
-                    else startDateObj.setFullYear(now.getFullYear() - 1);
-                    const startDate = formatYMD(startDateObj);
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 10000);
-                    try {
-                        const resp = await fetch(`/api/ecos?table=${encodeURIComponent(table)}&item=${encodeURIComponent(itemCode)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
-                        clearTimeout(timeoutId);
-                        if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
-                        const resJson = await resp.json();
-                        if (resJson.success && resJson.data) {
-                            data = resJson.data.map(r => {
-                                const dStr = r.TIME;
-                                if (dStr.length === 8) return { date: new Date(`${dStr.substring(0, 4)}-${dStr.substring(4, 6)}-${dStr.substring(6, 8)}`), value: parseFloat(r.DATA_VALUE) };
-                                return null;
-                            }).filter(x => x !== null).sort((a, b) => a.date - b.date);
-                        } else throw new Error(resJson.error || 'ECOS API returned no data');
-                    } catch (fetchErr) {
-                        clearTimeout(timeoutId);
-                        throw fetchErr;
-                    }
-                } else throw new Error(`Invalid ECOS format: ${url}`);
-            } else if (dataSource === 'te') {
-                // TradingEconomics logic - supports both URL and function formats
-                // Function format: tradingeconomics('path', 'duration')
-                // URL format: https://tradingeconomics.com/path
-
-                let actualUrl = url;
-                let period = item.duration || ''; // Duration from item object (e.g., '5년', '10년')
-
-                // No function parsing - duration comes from item.duration
-                console.log(`[MultiSeries] TE detected - URL: ${actualUrl}, Label: ${label || 'auto'}, Period: ${period || 'default'}`);
-
-                const controller = new AbortController();
-                // Scraping takes time (Puppeteer launch + navigation + click + data load)
-                // Increased to 60s to prevent premature timeout
-                const timeoutId = setTimeout(() => controller.abort(), 60000);
-                try {
-                    // Pass duration to backend so it can click the appropriate button
-                    let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
-                    if (period) {
-                        proxyUrl += `&duration=${encodeURIComponent(period)}`;
-                    }
-                    const resp = await fetch(proxyUrl, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    if (!resp.ok) {
-                        const errorData = await resp.json().catch(() => ({}));
-                        throw new Error(`서버 오류 (${resp.status}): ${errorData.details || errorData.error || 'TradingEconomics 접근 금지 (403)'}`);
-                    }
-                    const resJson = await resp.json();
-                    let rawData = resJson.data;
-
-                    // 이중 방어: 문자열인 경우 JSON 파싱 시도
-                    if (typeof rawData === 'string' && rawData.trim().startsWith('[')) {
+                if (dataSource === 'fred') {
+                    // ... (existing FRED logic) ...
+                    const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
+                    if (fredMatch) {
+                        const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
+                        const sid = cleanArg(fredMatch[1]);
+                        const per = cleanArg(fredMatch[2]) || '1년';
+                        if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
+                        if (!label) label = sid;
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s for reliability
                         try {
-                            const parsed = JSON.parse(rawData.trim());
-                            if (Array.isArray(parsed)) rawData = parsed;
-                        } catch (e) {
-                            console.warn("[MultiSeries] TE String parse failed:", e);
+                            const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(per)}`, { signal: controller.signal });
+                            clearTimeout(timeoutId);
+                            if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
+                            const resJson = await resp.json();
+                            if (resJson.success) {
+                                if (!resJson.data || resJson.data.length === 0) throw new Error('데이터가 비어있습니다.');
+                                data = resJson.data.map(d => ({ date: new Date(d.date), value: d.value }));
+                            } else throw new Error(resJson.error || 'Unknown FRED Error');
+                        } catch (fetchErr) {
+                            clearTimeout(timeoutId);
+                            throw fetchErr;
                         }
-                    }
-
-                    if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
-                        data = rawData.map(item => {
-                            const dateStr = item.DateTime || item.Date || item.date || item.last_update;
-                            const val = item.Value !== undefined ? item.Value :
-                                (item.Close !== undefined ? item.Close :
-                                    (item.Actual !== undefined ? item.Actual :
-                                        (item.actual !== undefined ? item.actual :
-                                            (item.LatestValue !== undefined ? item.LatestValue :
-                                                (item.latest_value !== undefined ? item.latest_value :
-                                                    (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
-                            return { date: new Date(dateStr), value: parseFloat(val) };
-                        }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
-                            .sort((a, b) => a.date - b.date);
-
-                        // Note: Duration filtering is handled by backend via button clicks (1Y/5Y/10Y/MAX)
-                        // No need for client-side filtering
-
-                        if (!label) label = actualUrl.split('/').pop().split('?')[0];
-                    }
-
-                    if (!Array.isArray(data) || data.length === 0) {
-                        let errorMsg = resJson.error || 'Invalid TE data format';
-                        const diagVal = (typeof rawData === 'string') ? rawData.toLowerCase() : (typeof resJson.data === 'string' ? resJson.data.toLowerCase() : '');
-                        if (diagVal.includes('<!doctype html>') || diagVal.includes('<html')) {
-                            errorMsg = 'TradingEconomics 브라우저 주소를 API가 거부했습니다. API 주소를 사용하거나 잠시 후 다시 시도해 주세요.';
-                        } else {
-                            errorMsg = `데이터 형식이 올바르지 않거나 비어있습니다. (Type: ${Array.isArray(rawData) ? 'Array' : typeof rawData})`;
+                    } else throw new Error(`Invalid FRED format: ${url}`);
+                } else if (dataSource === 'ecos') {
+                    // ... (existing ECOS logic) ...
+                    const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
+                    if (innerResult) {
+                        const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
+                        let table = '817Y002';
+                        let itemCode = '';
+                        let period = '';
+                        if (args.length === 3) { table = args[0]; itemCode = args[1]; period = args[2]; }
+                        else if (args.length === 2) { itemCode = args[0]; period = args[1]; }
+                        else throw new Error(`Invalid ECOS format: ${url}`);
+                        if (!label) label = itemCode;
+                        const now = new Date();
+                        const formatYMD = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+                        const endDate = formatYMD(now);
+                        let startDateObj = new Date(now);
+                        if (period.includes('년')) startDateObj.setFullYear(now.getFullYear() - (parseInt(period) || 1));
+                        else if (period.includes('개월')) startDateObj.setMonth(now.getMonth() - (parseInt(period) || 1));
+                        else startDateObj.setFullYear(now.getFullYear() - 1);
+                        const startDate = formatYMD(startDateObj);
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 10000);
+                        try {
+                            const resp = await fetch(`/api/ecos?table=${encodeURIComponent(table)}&item=${encodeURIComponent(itemCode)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
+                            clearTimeout(timeoutId);
+                            if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
+                            const resJson = await resp.json();
+                            if (resJson.success && resJson.data) {
+                                data = resJson.data.map(r => {
+                                    const dStr = r.TIME;
+                                    if (dStr.length === 8) return { date: new Date(`${dStr.substring(0, 4)}-${dStr.substring(4, 6)}-${dStr.substring(6, 8)}`), value: parseFloat(r.DATA_VALUE) };
+                                    return null;
+                                }).filter(x => x !== null).sort((a, b) => a.date - b.date);
+                            } else throw new Error(resJson.error || 'ECOS API returned no data');
+                        } catch (fetchErr) {
+                            clearTimeout(timeoutId);
+                            throw fetchErr;
                         }
-                        throw new Error(errorMsg);
+                    } else throw new Error(`Invalid ECOS format: ${url}`);
+                } else if (dataSource === 'te') {
+                    // TradingEconomics logic - supports both URL and function formats
+                    // Function format: tradingeconomics('path', 'duration')
+                    // URL format: https://tradingeconomics.com/path
+
+                    let actualUrl = url;
+                    let period = item.duration || ''; // Duration from item object (e.g., '5년', '10년')
+
+                    // No function parsing - duration comes from item.duration
+                    console.log(`[MultiSeries] TE detected - URL: ${actualUrl}, Label: ${label || 'auto'}, Period: ${period || 'default'}`);
+
+                    const controller = new AbortController();
+                    // Scraping takes time (Puppeteer launch + navigation + click + data load)
+                    // Increased to 45s for reliability (Launch 40s + margin)
+                    const timeoutId = setTimeout(() => {
+                        controller.abort();
+                        console.warn(`[MultiSeries] TE Request timed out for ${actualUrl}`);
+                    }, 45000);
+                    try {
+                        // Pass duration to backend so it can click the appropriate button
+                        let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
+                        if (period) {
+                            proxyUrl += `&duration=${encodeURIComponent(period)}`;
+                        }
+                        const resp = await fetch(proxyUrl, { signal: controller.signal });
+                        clearTimeout(timeoutId);
+                        if (!resp.ok) {
+                            const errorData = await resp.json().catch(() => ({}));
+                            throw new Error(`서버 오류 (${resp.status}): ${errorData.details || errorData.error || 'TradingEconomics 접근 금지 (403)'}`);
+                        }
+                        const resJson = await resp.json();
+                        let rawData = resJson.data;
+
+                        // 이중 방어: 문자열인 경우 JSON 파싱 시도
+                        if (typeof rawData === 'string' && rawData.trim().startsWith('[')) {
+                            try {
+                                const parsed = JSON.parse(rawData.trim());
+                                if (Array.isArray(parsed)) rawData = parsed;
+                            } catch (e) {
+                                console.warn("[MultiSeries] TE String parse failed:", e);
+                            }
+                        }
+
+                        if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
+                            data = rawData.map(item => {
+                                const dateStr = item.DateTime || item.Date || item.date || item.last_update;
+                                const val = item.Value !== undefined ? item.Value :
+                                    (item.Close !== undefined ? item.Close :
+                                        (item.Actual !== undefined ? item.Actual :
+                                            (item.actual !== undefined ? item.actual :
+                                                (item.LatestValue !== undefined ? item.LatestValue :
+                                                    (item.latest_value !== undefined ? item.latest_value :
+                                                        (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
+                                return { date: new Date(dateStr), value: parseFloat(val) };
+                            }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
+                                .sort((a, b) => a.date - b.date);
+
+                            // Note: Duration filtering is handled by backend via button clicks (1Y/5Y/10Y/MAX)
+                            // No need for client-side filtering
+
+                            if (!label) label = actualUrl.split('/').pop().split('?')[0];
+                        }
+
+                        if (!Array.isArray(data) || data.length === 0) {
+                            let errorMsg = resJson.error || 'Invalid TE data format';
+                            const diagVal = (typeof rawData === 'string') ? rawData.toLowerCase() : (typeof resJson.data === 'string' ? resJson.data.toLowerCase() : '');
+                            if (diagVal.includes('<!doctype html>') || diagVal.includes('<html')) {
+                                errorMsg = 'TradingEconomics 브라우저 주소를 API가 거부했습니다. API 주소를 사용하거나 잠시 후 다시 시도해 주세요.';
+                            } else {
+                                errorMsg = `데이터 형식이 올바르지 않거나 비어있습니다. (Type: ${Array.isArray(rawData) ? 'Array' : typeof rawData})`;
+                            }
+                            throw new Error(errorMsg);
+                        }
+                    } catch (fetchErr) {
+                        clearTimeout(timeoutId);
+                        throw fetchErr;
                     }
-                } catch (fetchErr) {
-                    clearTimeout(timeoutId);
-                    throw fetchErr;
+                } else {
+                    throw new Error(`지원하지 않는 데이터 소스입니다. (Detected: ${dataSource || 'None'}, URL: ${url})`);
                 }
-            } else {
-                throw new Error(`지원하지 않는 데이터 소스입니다. (Detected: ${dataSource || 'None'}, URL: ${url})`);
+                return { label, data, color: '' };
+            } catch (err) {
+                console.warn("[MultiSeries] Failed to load individual series:", err);
+                return null;
             }
-            return { label, data, color: '' };
         });
 
         const results = await Promise.all(seriesPromises);
