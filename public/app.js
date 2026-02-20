@@ -172,6 +172,9 @@ function initCalendar() {
             }
             return [];
         },
+        dayCellContent: function (e) {
+            return e.dayNumberText.replace('일', '');
+        },
         displayEventTime: true,
         eventTimeFormat: {
             hour: '2-digit',
@@ -450,6 +453,9 @@ const tabsWrapper = document.getElementById("tabsWrapper"); // New wrapper for i
 const tabContents = document.getElementById("tabContents");
 const addTabBtn = document.getElementById("addTabBtn");
 const captureBtn = document.getElementById("captureBtn");
+if (captureBtn) {
+    captureBtn.addEventListener('click', captureActiveTab);
+}
 const contextMenu = document.getElementById("contextMenu");
 const addTabMenu = document.getElementById("addTabMenu");
 
@@ -2452,24 +2458,7 @@ document.getElementById('addChartTab').addEventListener('click', () => {
 });
 
 
-captureBtn.addEventListener('click', async () => {
-    try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false, preferCurrentTab: true });
-        const track = stream.getVideoTracks()[0];
-        const imageCapture = new ImageCapture(track);
-        const bitmap = await imageCapture.grabFrame();
-        const canvas = document.createElement('canvas');
-        canvas.width = bitmap.width; canvas.height = bitmap.height;
-        const ctx = canvas.getContext('2d'); ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
-        canvas.toBlob(blob => {
-            const item = new ClipboardItem({ "image/png": blob });
-            navigator.clipboard.write([item]).then(() => {
-                const originalHTML = captureBtn.innerHTML; captureBtn.innerHTML = "✅"; setTimeout(() => captureBtn.innerHTML = originalHTML, 1000);
-            }).catch(err => console.error(err));
-        });
-        track.stop();
-    } catch (err) { console.error(err); }
-});
+
 
 // ==========================================================
 // Overseas Tab Refresh Function
@@ -4940,18 +4929,71 @@ function initMemoEditor() {
     }
 
     try {
+        // Custom 'Today' Button Logic
+        // Custom 'Today' Button Logic
+        const todayHandler = function () {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const dateStr = `[${year}-${month}-${day}]`;
+
+            const range = this.quill.getSelection(true); // true = focus if needed
+            let index = range ? range.index : this.quill.getLength();
+
+            // 1. Insert Newline before (if not at start) to ensure it's on a new line
+            if (index > 0) {
+                this.quill.insertText(index, '\n', Quill.sources.USER);
+                index++;
+            }
+
+            // 2. Insert Date with BOLD
+            this.quill.insertText(index, dateStr, { 'bold': true }, Quill.sources.USER);
+            index += dateStr.length;
+
+            // 3. Insert Newline after (Normal text)
+            this.quill.insertText(index, '\n', { 'bold': false }, Quill.sources.USER);
+            index++;
+
+            // 4. Move cursor to the new empty line
+            this.quill.setSelection(index, Quill.sources.USER);
+        };
+
+        // Inject custom style for the button (simplest way without touching style.css)
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .ql-today:after {
+                content: "Today";
+                font-size: 11px;
+                padding-top: 2px;
+                font-weight: bold;
+            }
+            .ql-today {
+                width: auto !important;
+                padding-left: 5px !important; 
+                padding-right: 5px !important;
+            }
+        `;
+        document.head.appendChild(style);
+
         quillEditor = new Quill('#quillEditor', {
             theme: 'snow',
             modules: {
-                toolbar: [
-                    [{ 'header': [1, 2, 3, false] }],
-                    ['bold', 'italic', 'underline', 'strike'],
-                    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
-                    [{ 'color': [] }, { 'background': [] }],
-                    ['blockquote', 'code-block'],
-                    ['link', 'image'],
-                    ['clean']
-                ]
+                toolbar: {
+                    container: [
+                        [{ 'header': [1, 2, 3, false] }],
+                        ['bold', 'italic', 'underline', 'strike'],
+                        [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                        [{ 'color': [] }, { 'background': [] }],
+                        ['blockquote', 'code-block'],
+                        ['link', 'image'],
+                        ['clean'],
+                        ['today'] // Custom button
+                    ],
+                    handlers: {
+                        'today': todayHandler
+                    }
+                }
             },
             placeholder: '메모를 작성하세요...'
         });
@@ -5053,5 +5095,101 @@ function loadMemo() {
     }
 
     console.log('📖 메모 로드됨');
+}
+
+/**
+ * 현재 활성화된 탭 전체 캡처 (스크롤 영역 포함)
+ */
+async function captureActiveTab() {
+    const activeContent = document.querySelector('.tab-content.active');
+    if (!activeContent) return;
+
+    // 1. 캡처 대상 컨테이너 식별 (헤더 포함 전체)
+    // 보통 .container 또는 .overseas-container 클래스를 가짐
+    let target = activeContent.querySelector('.container');
+    if (!target) target = activeContent;
+
+    console.log("📸 [Capture] Target:", target);
+
+    // 2. 스크롤 영역 강제 확장 (전체 내용이 보이도록)
+    // .overseas-content-scroll, .table-wrapper tbody 등이 스크롤을 가짐
+    const scrollableElements = [];
+    // [Update] ADR 탭(.adr-chart-container), 메모 탭(#quillEditor), 차트 그리드(.chart-grid) 등 다양한 탭 지원 추가
+    const scrollTargets = target.querySelectorAll('.overseas-content-scroll, .table-wrapper, .table-wrapper tbody, .grid-container, .adr-chart-container, #quillEditor, .chart-grid');
+
+    // 스타일 백업 및 변경 적용
+    scrollTargets.forEach(el => {
+        // 현재 스타일 저장
+        scrollableElements.push({
+            element: el,
+            originalStyles: {
+                height: el.style.height,
+                maxHeight: el.style.maxHeight,
+                overflow: el.style.overflow,
+                overflowY: el.style.overflowY
+            }
+        });
+
+        // 캡처를 위해 전체 높이로 확장
+        el.style.height = 'auto';
+        el.style.maxHeight = 'none';
+        el.style.overflow = 'visible';
+        el.style.overflowY = 'visible';
+    });
+
+    // Grid Container도 확장 필요할 수 있음 (모바일 등)
+    if (activeContent.querySelector('.grid-container')) {
+        activeContent.querySelector('.grid-container').style.height = 'auto';
+    }
+
+
+    try {
+        // 잠시 렌더링 대기 (스타일 적용 시간 확보)
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // 3. html2canvas로 캡처
+        const canvas = await html2canvas(target, {
+            scale: 2, // 고해상도
+            useCORS: true, // 크로스 도메인 이미지 허용
+            logging: false,
+            allowTaint: true,
+            backgroundColor: '#ffffff', // 투명 배경 방지
+            windowHeight: target.scrollHeight + 100 // 전체 높이 확보
+        });
+
+        // 4. 이미지 다운로드
+        const image = canvas.toDataURL("image/png");
+        const link = document.createElement('a');
+
+        // 파일명 생성: 탭 이름 + 시간
+        const activeBtn = document.querySelector('.tab-btn.active');
+        const tabName = activeBtn ? activeBtn.textContent.trim() : 'capture';
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+        link.href = image;
+        link.download = `${tabName}_${timestamp}.png`;
+        link.click();
+
+        console.log("✅ [Capture] Completed successfully");
+
+    } catch (err) {
+        console.error("❌ [Capture] Failed:", err);
+        alert("캡처 중 오류가 발생했습니다: " + err.message);
+    } finally {
+        // 5. 스타일 원복 (Cleanup)
+        scrollableElements.forEach(item => {
+            const el = item.element;
+            const style = item.originalStyles;
+            el.style.height = style.height;
+            el.style.maxHeight = style.maxHeight;
+            el.style.overflow = style.overflow;
+            el.style.overflowY = style.overflowY;
+        });
+
+        // Grid Container 원복
+        if (activeContent.querySelector('.grid-container')) {
+            activeContent.querySelector('.grid-container').style.height = '';
+        }
+    }
 }
 

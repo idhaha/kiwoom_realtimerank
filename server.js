@@ -24,7 +24,7 @@ function fileLog(message) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const SERVER_START_TIME = new Date().toLocaleString();
 
 // 미들웨어 설정
