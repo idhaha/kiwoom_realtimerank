@@ -459,7 +459,7 @@ app.get('/api/finviz-image', async (req, res) => {
  * 환율, 금리 등 경제 지표 데이터 제공
  */
 let activeBrowsers = 0; // 동시에 실행 중인 브라우저 수
-const MAX_BROWSERS = 2; // 오라클 서버 메모리(1GB) 고려 시 2개가 안정적
+const MAX_BROWSERS = 1; // 오라클 서버 메모리(1GB) 고려 시 1개가 안정적
 app.get('/api/trading-economics', async (req, res) => {
     let originalUrl = req.query.url;
     const duration = req.query.duration || ''; // e.g., '5년', '10년', 'MAX'
@@ -505,15 +505,15 @@ app.get('/api/trading-economics', async (req, res) => {
                 });
                 const page = await browser.newPage();
 
-                // Block images and fonts to speed up loading
-                await page.setRequestInterception(true);
-                page.on('request', (req) => {
-                    if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
-                        req.abort();
-                    } else {
-                        req.continue();
-                    }
-                });
+                // [Stability Fix] Request Interception 가끔 Frame Detached 에러 유발하므로 비활성화
+                // await page.setRequestInterception(true);
+                // page.on('request', (req) => {
+                //     if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                //         req.abort();
+                //     } else {
+                //         req.continue();
+                //     }
+                // });
 
                 // Set a realistic User-Agent
                 await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
