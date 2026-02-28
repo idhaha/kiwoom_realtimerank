@@ -531,7 +531,14 @@ app.get('/api/trading-economics', async (req, res) => {
                 });
 
                 // Navigate to the page
-                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 }); // Increased for stability
+                // [Stability Fix] networkidle2 can crash if background ads/analytics fail or get detached
+                await page.goto(targetUrl, {
+                    waitUntil: ['load', 'domcontentloaded'],
+                    timeout: 60000
+                });
+
+                // Extra safety wait for dynamic charts to start rendering
+                await new Promise(r => setTimeout(r, 2000));
 
                 // Wait for Highcharts to be defined and have data
                 // We assume there is a Highcharts chart on the page with data

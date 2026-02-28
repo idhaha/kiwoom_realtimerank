@@ -452,9 +452,9 @@ const tabContainer = document.getElementById("tabContainer");
 const tabsWrapper = document.getElementById("tabsWrapper"); // New wrapper for isolated scroll
 const tabContents = document.getElementById("tabContents");
 const addTabBtn = document.getElementById("addTabBtn");
-const captureAllBtn = document.getElementById("captureAllBtn");
-if (captureAllBtn) {
-    captureAllBtn.addEventListener('click', captureAllTabs);
+const captureBtn = document.getElementById("captureBtn");
+if (captureBtn) {
+    captureBtn.addEventListener('click', captureActiveTab);
 }
 const contextMenu = document.getElementById("contextMenu");
 const addTabMenu = document.getElementById("addTabMenu");
@@ -2547,11 +2547,10 @@ function renderFinvizChartItem(chart, color = '') {
 function renderCustomChartItem(item, color = '', tabId, idx) {
     const isMulti = item.urls && item.urls.length > 1;
     const isFred = item.urls && item.urls.some(url => url.toLowerCase().includes('fred('));
-    const isEcos = item.urls && item.urls.some(url => url.toLowerCase().includes('ecos('));
     // Also treat single TradingEconomics URL as canvas chart, not image
     const isTE = item.urls && item.urls.some(url => url.toLowerCase().includes('tradingeconomics.com'));
 
-    if (isMulti || isFred || isEcos || isTE) {
+    if (isMulti || isFred || isTE) {
         const cleanTitle = (item.title || '').replace(/^[ "'“‘”’]+|[ "'“‘”’]+$/g, '').trim();
         let style = '';
         if (color) {
@@ -2719,9 +2718,8 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Calculate min/max values
     // Filter out NaN/null values and future dummy data
     const now = new Date();
-    // Use Tomorrow end to avoid timezone/late-update truncation issues
-    const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 59, 999);
-    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= tomorrowEnd);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayEnd);
     if (validData.length === 0) return;
 
     // Update local data reference to filtered version
@@ -3142,12 +3140,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             if (resJson.success && resJson.data) {
                                 data = resJson.data.map(r => {
                                     const dStr = r.TIME;
-                                    if (dStr.length === 8) {
-                                        const year = parseInt(dStr.substring(0, 4));
-                                        const month = parseInt(dStr.substring(4, 6)) - 1;
-                                        const day = parseInt(dStr.substring(6, 8));
-                                        return { date: new Date(year, month, day), value: parseFloat(r.DATA_VALUE) };
-                                    }
+                                    if (dStr.length === 8) return { date: new Date(`${dStr.substring(0, 4)}-${dStr.substring(4, 6)}-${dStr.substring(6, 8)}`), value: parseFloat(r.DATA_VALUE) };
                                     return null;
                                 }).filter(x => x !== null).sort((a, b) => a.date - b.date);
                             } else throw new Error(resJson.error || 'ECOS API returned no data');
@@ -3236,7 +3229,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                 } else {
                     throw new Error(`지원하지 않는 데이터 소스입니다. (Detected: ${dataSource || 'None'}, URL: ${url})`);
                 }
-                return { label, data, color: '', dataSource };
+                return { label, data, color: '' };
             } catch (err) {
                 console.warn("[MultiSeries] Failed to load individual series:", err);
                 return null;
@@ -3316,9 +3309,8 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     allSeries.forEach(s => {
         // Filter out NaN/null values and future data before processing
         const now = new Date();
-        // Use Tomorrow end to avoid timezone/late-update truncation issues
-        const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 59, 999);
-        s.data = s.data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= tomorrowEnd);
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        s.data = s.data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayEnd);
 
         s.data.forEach(d => {
             allValues.push(d.value);
@@ -3369,9 +3361,6 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
 
     allSeries.forEach((s, sIdx) => {
         const color = colors[sIdx % colors.length];
-        const dataSource = s.dataSource || '';
-        const tzLabel = (dataSource === 'ecos') ? ' (KST)' : (dataSource === 'fred' ? ' (EST)' : '');
-
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -3390,7 +3379,7 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
         ctx.textBaseline = 'top';
         const lastItem = s.data[s.data.length - 1];
         const dateStr = lastItem.date.toISOString().slice(5, 10).replace(/-/g, '/'); // MM/DD
-        ctx.fillText(`${s.label} (${dateStr}${tzLabel}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15)); // increased spacing
+        ctx.fillText(`${s.label} (${dateStr}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15)); // increased spacing
     });
 
     // X축 라벨 (여러 개의 중간 날짜 표시)
@@ -5109,72 +5098,141 @@ function loadMemo() {
 }
 
 /**
- * 캔버스 하단 공백(배경색만 있는 행) 제거
+ * 현재 활성화된 탭 전체 캡처 (스크롤 영역 포함)
  */
-function trimCanvasBottom(canvas) {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    const imageData = ctx.getImageData(0, 0, w, h);
-    const data = imageData.data;
+async function captureActiveTab() {
+    const activeContent = document.querySelector('.tab-content.active');
+    if (!activeContent) return;
 
-    // 하단부터 위로 스캔하며 배경색(白)이 아닌 행을 찾음
-    let bottomY = h;
-    for (let y = h - 1; y >= 0; y--) {
-        let isBlank = true;
-        for (let x = 0; x < w; x += 4) { // 4px 간격으로 샘플링 (성능)
-            const idx = (y * w + x) * 4;
-            const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-            // 흰색(255,255,255) 또는 거의 흰색이 아닌 픽셀 발견
-            if (r < 250 || g < 250 || b < 250) {
-                isBlank = false;
-                break;
-            }
-        }
-        if (!isBlank) {
-            bottomY = Math.min(h, y + 20); // 약간의 여백(20px) 추가
-            break;
-        }
-    }
+    // 1. 캡처 대상 컨테이너 식별 (헤더 포함 전체)
+    // 보통 .container 또는 .overseas-container 클래스를 가짐
+    let target = activeContent.querySelector('.container');
+    if (!target) target = activeContent;
 
-    if (bottomY >= h) return canvas; // 잘라낼 것 없음
+    console.log("📸 [Capture] Target:", target);
 
-    const trimmed = document.createElement('canvas');
-    trimmed.width = w;
-    trimmed.height = bottomY;
-    const tctx = trimmed.getContext('2d');
-    tctx.drawImage(canvas, 0, 0, w, bottomY, 0, 0, w, bottomY);
-    return trimmed;
-}
+    // 2. 스크롤 영역 강제 확장 (전체 내용이 보이도록)
+    // .overseas-content-scroll, .table-wrapper tbody 등이 스크롤을 가짐
+    const scrollableElements = [];
+    // [Update] ADR 탭(.adr-chart-container), 메모 탭(#quillEditor), 차트 그리드(.chart-grid) 등 다양한 탭 지원 추가
+    const scrollTargets = target.querySelectorAll('.overseas-content-scroll, .table-wrapper, .table-wrapper tbody, .grid-container, .adr-chart-container, #quillEditor, .chart-grid');
 
-/**
- * 탭별 캡처 함수 (스크롤 영역 확장 포함)
- */
-async function captureTabContent(tabContent, tabName) {
-    if (!tabContent) return;
-    tabName = tabName || 'Capture';
-
-    // 캡처 대상: .container 또는 탭 전체
-    const target = tabContent.querySelector('.container') ||
-        tabContent.querySelector('.overseas-container') ||
-        tabContent;
-
-    // 스크롤 영역 확장
-    const scrollSelectors = '.overseas-content-scroll, .table-wrapper, .table-wrapper tbody, .grid-container, .adr-chart-container, #quillEditor, .chart-grid';
-    const scrollTargets = target.querySelectorAll(scrollSelectors);
-    const saved = [];
+    // 스타일 백업 및 변경 적용
     scrollTargets.forEach(el => {
-        saved.push({ el, h: el.style.height, mh: el.style.maxHeight, ov: el.style.overflow, ovy: el.style.overflowY });
+        // 현재 스타일 저장
+        scrollableElements.push({
+            element: el,
+            originalStyles: {
+                height: el.style.height,
+                maxHeight: el.style.maxHeight,
+                overflow: el.style.overflow,
+                overflowY: el.style.overflowY
+            }
+        });
+
+        // 캡처를 위해 전체 높이로 확장
         el.style.height = 'auto';
         el.style.maxHeight = 'none';
         el.style.overflow = 'visible';
         el.style.overflowY = 'visible';
     });
 
-    try {
-        await new Promise(r => setTimeout(r, 200));
+    // Grid Container도 확장 필요할 수 있음 (모바일 등)
+    if (activeContent.querySelector('.grid-container')) {
+        activeContent.querySelector('.grid-container').style.height = 'auto';
+    }
 
-        const rawCanvas = await html2canvas(target, {
+
+    try {
+        // 잠시 렌더링 대기 (스타일 적용 시간 확보)
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // 3. html2canvas로 캡처
+        const canvas = await html2canvas(target, {
+            scale: 2, // 고해상도
+            useCORS: true, // 크로스 도메인 이미지 허용
+            logging: false,
+            allowTaint: true,
+            backgroundColor: '#ffffff', // 투명 배경 방지
+            windowHeight: target.scrollHeight + 100 // 전체 높이 확보
+        });
+
+        // 4. 이미지 다운로드
+        const image = canvas.toDataURL("image/png");
+        const link = document.createElement('a');
+
+        // 파일명 생성: 탭 이름 + 시간
+        const activeBtn = document.querySelector('.tab-btn.active');
+        const tabName = activeBtn ? activeBtn.textContent.trim() : 'capture';
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+        link.href = image;
+        link.download = `${tabName}_${timestamp}.png`;
+        link.click();
+
+        console.log("✅ [Capture] Completed successfully");
+
+    } catch (err) {
+        console.error("❌ [Capture] Failed:", err);
+        alert("캡처 중 오류가 발생했습니다: " + err.message);
+    } finally {
+        // 5. 스타일 원복 (Cleanup)
+        scrollableElements.forEach(item => {
+            const el = item.element;
+            const style = item.originalStyles;
+            el.style.height = style.height;
+            el.style.maxHeight = style.maxHeight;
+            el.style.overflow = style.overflow;
+            el.style.overflowY = style.overflowY;
+        });
+
+        // Grid Container 원복
+        if (activeContent.querySelector('.grid-container')) {
+            activeContent.querySelector('.grid-container').style.height = '';
+        }
+    }
+}
+
+
+// ==========================================================
+// NEW CAPTURE LOGIC (APPENDED)
+// ==========================================================
+
+// 1. Capture Specific Tab
+async function captureTargetTab(targetContent, tabName = 'Capture') {
+    if (!targetContent) return;
+
+    // Identify capture target container
+    let target = targetContent.querySelector('.container') || targetContent.querySelector('.overseas-container') || targetContent;
+
+    // Temporary Styles for Scroll Expansion
+    const scrollTargets = target.querySelectorAll('.overseas-content-scroll, .table-wrapper, .table-wrapper tbody, .grid-container, .adr-chart-container, #quillEditor, .chart-grid');
+    const scrollableElements = [];
+
+    scrollTargets.forEach(el => {
+        scrollableElements.push({
+            element: el,
+            originalStyles: {
+                height: el.style.height,
+                maxHeight: el.style.maxHeight,
+                overflow: el.style.overflow,
+                overflowY: el.style.overflowY
+            }
+        });
+        el.style.height = 'auto';
+        el.style.maxHeight = 'none';
+        el.style.overflow = 'visible';
+        el.style.overflowY = 'visible';
+    });
+
+    if (targetContent.querySelector('.grid-container')) {
+        targetContent.querySelector('.grid-container').style.height = 'auto';
+    }
+
+    try {
+        await new Promise(resolve => setTimeout(resolve, 200)); // Wait for render
+
+        const canvas = await html2canvas(target, {
             scale: 2,
             useCORS: true,
             logging: false,
@@ -5183,112 +5241,75 @@ async function captureTabContent(tabContent, tabName) {
             windowHeight: target.scrollHeight + 100
         });
 
-        // 하단 공백 제거: 실제 콘텐츠 영역만 잘라냄
-        const trimmed = trimCanvasBottom(rawCanvas);
-
-        const image = trimmed.toDataURL('image/png');
+        const image = canvas.toDataURL("image/png");
         const link = document.createElement('a');
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         link.href = image;
         link.download = `${tabName}_${timestamp}.png`;
-        document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
-        console.log(`✅ [Capture] ${tabName} done.`);
 
     } catch (err) {
-        console.error('❌ [Capture] Failed:', err);
+        console.error("❌ [Capture] Failed:", err);
         alert(`캡처 실패 (${tabName}): ` + err.message);
     } finally {
-        // 스타일 복원
-        saved.forEach(s => {
-            s.el.style.height = s.h;
-            s.el.style.maxHeight = s.mh;
-            s.el.style.overflow = s.ov;
-            s.el.style.overflowY = s.ovy;
+        // Restore Styles
+        scrollableElements.forEach(item => {
+            const el = item.element;
+            const style = item.originalStyles;
+            el.style.height = style.height;
+            el.style.maxHeight = style.maxHeight;
+            el.style.overflow = style.overflow;
+            el.style.overflowY = style.overflowY;
         });
+        if (targetContent.querySelector('.grid-container')) {
+            targetContent.querySelector('.grid-container').style.height = '';
+        }
     }
 }
 
-/**
- * 전체 탭 순차 캡처
- */
+// 2. Capture All Tabs (Iterative)
 async function captureAllTabs() {
-    console.log('📸 [CaptureAll] Starting...');
-    const originalActiveBtn = document.querySelector('.tab-btn.active');
-    const allTabBtns = Array.from(document.querySelectorAll('.tab-btn:not(.add-tab-btn)'));
-    if (!allTabBtns.length) return;
+    console.log("📸 [Capture All] Starting batch capture...");
+    const originalActiveTab = document.querySelector('.tab-btn.active');
+    const allTabs = Array.from(document.querySelectorAll('.tab-btn:not(.add-tab-btn)'));
 
-    const btn = document.getElementById('captureAllBtn');
-    if (btn) btn.disabled = true;
+    if (allTabs.length === 0) return;
 
     try {
-        for (const tabBtn of allTabBtns) {
+        for (const tabBtn of allTabs) {
             const tabId = tabBtn.dataset.tab;
             const tabName = tabBtn.textContent.trim();
+
+            // Activate Tab
             activateTab(tabId);
-            await new Promise(r => setTimeout(r, 1000));
+
+            // Wait for potential rendering (charts, grids)
+            await new Promise(resolve => setTimeout(resolve, 800));
+
             const content = document.getElementById(tabId);
-            if (content) await captureTabContent(content, tabName);
-            await new Promise(r => setTimeout(r, 500));
+            if (content) {
+                await captureTargetTab(content, tabName);
+            }
+
+            // Short pause between captures
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
     } catch (e) {
-        console.error('❌ [CaptureAll] Error:', e);
+        console.error("❌ [Capture All] Error during batch capture:", e);
     } finally {
-        if (originalActiveBtn) activateTab(originalActiveBtn.dataset.tab);
-        if (btn) btn.disabled = false;
-        alert('전체 탭 캡처 완료');
+        // Restore original state
+        if (originalActiveTab) {
+            activateTab(originalActiveTab.dataset.tab);
+        }
+        alert("전체 탭 캡처가 완료되었습니다.");
     }
 }
 
-/**
- * 탭 헤더 .header-controls에 📸 캡처 버튼 삽입
- */
-function injectCaptureButtons() {
-    const captureSVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
-
-    document.querySelectorAll('.tab-content').forEach(tabContent => {
-        const headerControls = tabContent.querySelector('.header-controls');
-        if (!headerControls) return;
-        if (headerControls.querySelector('.capture-btn-small')) return;
-
-        const btn = document.createElement('button');
-        btn.className = 'capture-btn-small';
-        btn.title = '이 탭 캡처';
-        btn.innerHTML = captureSVG;
-        headerControls.insertBefore(btn, headerControls.firstChild);
-    });
+// Event Listener for Global Capture All Button
+const captureAllBtn = document.getElementById('captureAllBtn');
+if (captureAllBtn) {
+    captureAllBtn.addEventListener('click', captureAllTabs);
 }
 
-// 위임 이벤트: .capture-btn-small 클릭 시 해당 탭 캡처
-const _captureSVGIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
-
-document.body.addEventListener('click', function (e) {
-    const btn = e.target.closest('.capture-btn-small');
-    if (!btn) return;
-    const tabContent = btn.closest('.tab-content');
-    if (!tabContent) return;
-    const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabContent.id}"]`);
-    const tabName = tabBtn ? tabBtn.textContent.trim() : 'Capture';
-    btn.innerHTML = '⏳';
-    captureTabContent(tabContent, tabName).then(() => {
-        btn.innerHTML = '✅';
-        setTimeout(() => { btn.innerHTML = _captureSVGIcon; }, 1000);
-    }).catch(() => {
-        btn.innerHTML = _captureSVGIcon;
-    });
-});
-
-// activateTab 래핑: 탭 전환 후 캡처 버튼 자동 주입
-(function () {
-    const _origActivate = activateTab;
-    activateTab = function () {
-        _origActivate.apply(this, arguments);
-        setTimeout(injectCaptureButtons, 300);
-    };
-})();
-
-// 초기 로드 시 주입
-document.addEventListener('DOMContentLoaded', () => setTimeout(injectCaptureButtons, 1000));
-setTimeout(injectCaptureButtons, 2000); // defer 로드 fallback
-
+// Expose to window for inline onclick handlers
+window.captureTargetTab = captureTargetTab;

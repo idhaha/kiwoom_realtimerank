@@ -1740,3 +1740,32 @@ body.modal-open {
         transform: translateY(0);
     }
 }
+
+/* Per-tab capture button */
+.capture-btn-small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 5px;
+    color: var(--text-muted, #64748b);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 14px;
+    height: 32px;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    margin-right: 4px;
+}
+
+.capture-btn-small:hover {
+    background: var(--bg-panel, #f1f5f9);
+    color: var(--text-primary, #0f172a);
+    border-color: var(--accent-secondary, #334155);
+}
+
+.capture-btn-small:active {
+    background: var(--accent-primary, #0f172a);
+    color: #ffffff;
+}
