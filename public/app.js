@@ -2722,9 +2722,9 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Calculate min/max values
     // Filter out NaN/null values and future dummy data
     const now = new Date();
-    // Use Tomorrow end to avoid timezone/late-update truncation issues
-    const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 59, 999);
-    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= tomorrowEnd);
+    // v16: Use Today end to avoid future placeholder points
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayEnd);
     if (validData.length === 0) return;
 
     // Update local data reference to filtered version
@@ -3021,20 +3021,18 @@ function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
         ctx.fillText(`${title}: ${v.value.toFixed(2)}`, tx + 8, padding.top + 30);
     }
 
-    // 제목 및 현재가 (우측 상단 고정 부분 다시 그림)
+    // Standardized Legend (Single Line top-right) - v16: match idle state
+    const latestItem = data[data.length - 1];
+    const mm = String(latestItem.date.getMonth() + 1).padStart(2, '0');
+    const dd = String(latestItem.date.getDate()).padStart(2, '0');
+    const dateStr = `${mm}/${dd}`;
+    const tzLabel = getTimezoneForUrl(canvas.dataset.chartUrl || '', 'te');
+
     ctx.textAlign = 'right';
-    const latestValue = data[data.length - 1].value;
-    const latestDateStr = data[data.length - 1].date.toISOString().slice(0, 10).replace(/-/g, '/');
-
-    // Latest Date
-    ctx.fillStyle = '#666';
-    ctx.font = '10px sans-serif';
-    ctx.fillText(latestDateStr, w - padding.right, padding.top - 18);
-
-    // Latest Value
+    ctx.textBaseline = 'top';
     ctx.fillStyle = '#2c3e50';
-    ctx.font = headerFont;
-    ctx.fillText(latestValue.toFixed(2), w - padding.right, padding.top - 5);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText(`${title} (${dateStr}${tzLabel}): ${latestItem.value.toFixed(2)}`, w - padding.right, 10);
 }
 
 /**
@@ -3163,90 +3161,63 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         }
                     } else throw new Error(`Invalid ECOS format: ${url}`);
                 } else if (dataSource === 'te') {
-                    // TradingEconomics logic - supports both URL and function formats
-                    // Function format: tradingeconomics('path', 'duration')
-                    // URL format: https://tradingeconomics.com/path
-
-                    let actualUrl = url;
-                    let period = item.duration || ''; // Duration from item object (e.g., '5년', '10년')
-
-                    // No function parsing - duration comes from item.duration
-                    console.log(`[MultiSeries] TE detected - URL: ${actualUrl}, Label: ${label || 'auto'}, Period: ${period || 'default'}`);
-
+                    const actualUrl = url;
+                    const period = item.duration || '';
                     const controller = new AbortController();
-                    // Scraping takes time (Puppeteer launch + navigation + click + data load)
-                    // Increased to 120s to allow for sequential queuing on the server
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn(`[MultiSeries] TE Request timed out (120s) for ${actualUrl}`);
                     }, 120000);
+
                     try {
-                        // Pass duration to backend so it can click the appropriate button
                         let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
-                        if (period) {
-                            proxyUrl += `&duration=${encodeURIComponent(period)}`;
-                        }
+                        if (period) proxyUrl += `&duration=${encodeURIComponent(period)}`;
+
                         const resp = await fetch(proxyUrl, { signal: controller.signal });
                         clearTimeout(timeoutId);
-                        if (!resp.ok) {
-                            const errorData = await resp.json().catch(() => ({}));
-                            throw new Error(`서버 오류 (${resp.status}): ${errorData.details || errorData.error || 'TradingEconomics 접근 금지 (403)'}`);
-                        }
+                        if (!resp.ok) throw new Error(`서버 오류 (${resp.status})`);
+
                         const resJson = await resp.json();
                         let rawData = resJson.data;
 
-                        // 이중 방어: 문자열인 경우 JSON 파싱 시도
-                        if (typeof rawData === 'string' && rawData.trim().startsWith('[')) {
-                            try {
-                                const parsed = JSON.parse(rawData.trim());
-                                if (Array.isArray(parsed)) rawData = parsed;
-                            } catch (e) {
-                                console.warn("[MultiSeries] TE String parse failed:", e);
-                            }
-                        }
-
                         if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
-                            data = rawData.map(item => {
-                                const dateStr = item.DateTime || item.Date || item.date || item.last_update;
-                                const val = item.Value !== undefined ? item.Value :
-                                    (item.Close !== undefined ? item.Close :
-                                        (item.Actual !== undefined ? item.Actual :
-                                            (item.actual !== undefined ? item.actual :
-                                                (item.LatestValue !== undefined ? item.LatestValue :
-                                                    (item.latest_value !== undefined ? item.latest_value :
-                                                        (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
+                            const now = new Date();
+                            const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-                                const dt = new Date(dateStr);
-                                // For TE, dates are often UTC or specific. Standardize to local midnight for sync.
-                                const localDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-                                return { date: localDate, value: parseFloat(val) };
-                            }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
+                            const validData = rawData.map(item => {
+                                const dStr = item.DateTime || item.Date || item.date || item.last_update;
+                                const val = item.Value !== undefined ? item.Value : (item.Close !== undefined ? item.Close : (item.Actual !== undefined ? item.Actual : item.actual));
+                                return { date: new Date(dStr), value: parseFloat(val) };
+                            }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayEnd)
                                 .sort((a, b) => a.date - b.date);
 
-                            // Note: Duration filtering is handled by backend via button clicks (1Y/5Y/10Y/MAX)
-                            // No need for client-side filtering
+                            if (validData.length === 0) return null;
 
-                            if (!label) label = actualUrl.split('/').pop().split('?')[0];
-                        }
+                            const finalData = validData.map(d => ({
+                                date: new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate()),
+                                value: d.value
+                            }));
 
-                        if (!Array.isArray(data) || data.length === 0) {
-                            let errorMsg = resJson.error || 'Invalid TE data format';
-                            const diagVal = (typeof rawData === 'string') ? rawData.toLowerCase() : (typeof resJson.data === 'string' ? resJson.data.toLowerCase() : '');
-                            if (diagVal.includes('<!doctype html>') || diagVal.includes('<html')) {
-                                errorMsg = 'TradingEconomics 브라우저 주소를 API가 거부했습니다. API 주소를 사용하거나 잠시 후 다시 시도해 주세요.';
-                            } else {
-                                errorMsg = `데이터 형식이 올바르지 않거나 비어있습니다. (Type: ${Array.isArray(rawData) ? 'Array' : typeof rawData})`;
-                            }
-                            throw new Error(errorMsg);
+                            let finalSource = dataSource || 'te';
+                            if (actualUrl.includes('stlouisfed.org') || actualUrl.includes('fred')) finalSource = 'fred';
+                            if (actualUrl.includes('ecos.bok')) finalSource = 'ecos';
+
+                            return {
+                                url: actualUrl,
+                                label: label || actualUrl.split('/').pop().split('?')[0],
+                                dataSource: finalSource,
+                                data: finalData
+                            };
+                        } else {
+                            throw new Error(resJson.error || '데이터 형식이 올바르지 않습니다.');
                         }
                     } catch (fetchErr) {
                         clearTimeout(timeoutId);
                         throw fetchErr;
                     }
                 } else {
-                    throw new Error(`지원하지 않는 데이터 소스입니다. (Detected: ${dataSource || 'None'}, URL: ${url})`);
+                    throw new Error(`지원하지 않는 데이터 소스입니다: ${dataSource}`);
                 }
-                return { label, data, color: '', dataSource };
+                return null;
             } catch (err) {
                 console.warn("[MultiSeries] Failed to load individual series:", err);
                 return null;
@@ -3278,17 +3249,18 @@ async function loadMultiSeriesChart(canvas, urls, title) {
 function getTimezoneForUrl(url, dataSource) {
     const lowerUrl = (url || '').toLowerCase();
 
-    // Country detection should come FIRST even for TE
-    if (lowerUrl.includes('south-korea') || lowerUrl.includes('/korea/')) return ' (KST)';
-    if (lowerUrl.includes('japan')) return ' (JST)';
-    if (lowerUrl.includes('euro-area') || lowerUrl.includes('/germany/')) return ' (CET)';
-    if (lowerUrl.includes('united-kingdom') || lowerUrl.includes('/uk/')) return ' (GMT)';
+    // Country detection should come FIRST
+    if (lowerUrl.includes('south-korea') || lowerUrl.includes('/korea/') || lowerUrl.includes('krw')) return ' (KST)';
+    if (lowerUrl.includes('japan') || lowerUrl.includes('/jpy')) return ' (JST)';
+    if (lowerUrl.includes('china') || lowerUrl.includes('/cny') || lowerUrl.includes('/cnh') || lowerUrl.includes('rmb')) return ' (CST)';
+    if (lowerUrl.includes('euro-area') || lowerUrl.includes('/germany/') || lowerUrl.includes('eur')) return ' (CET)';
+    if (lowerUrl.includes('united-kingdom') || lowerUrl.includes('/uk/') || lowerUrl.includes('gbp')) return ' (GMT)';
 
     if (dataSource === 'ecos') return ' (KST)';
-    if (dataSource === 'fred') return ' (EST)';
+    if (dataSource === 'fred' || lowerUrl.includes('fred') || lowerUrl.includes('stlouisfed')) return ' (EST)';
 
-    // General TE or other
-    if (dataSource === 'te' || lowerUrl.includes('tradingeconomics.com')) return ' (Local)';
+    // Default TE or generic
+    if (dataSource === 'te' || lowerUrl.includes('tradingeconomics')) return ' (Local)';
     return '';
 }
 
@@ -3583,14 +3555,17 @@ function drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues) {
         });
         ctx.stroke();
 
-        // 범례 표시
+        // v16: Standardized Legend (Single Line top-right)
         ctx.fillStyle = color;
         ctx.font = legendFont;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'top';
         const lastItem = s.data[s.data.length - 1];
-        const dateStr = lastItem.date.toISOString().slice(5, 10).replace(/-/g, '/');
-        ctx.fillText(`${s.label} (${dateStr}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15));
+        const mm = String(lastItem.date.getMonth() + 1).padStart(2, '0');
+        const dd = String(lastItem.date.getDate()).padStart(2, '0');
+        const dateStr = `${mm}/${dd}`;
+        const tzLabel = getTimezoneForUrl(s.url || '', s.dataSource || '');
+        ctx.fillText(`${s.label} (${dateStr}${tzLabel}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15));
     });
 
     // X축 라벨
