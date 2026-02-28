@@ -2663,12 +2663,15 @@ async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
                                 (item.latest_value !== undefined ? item.latest_value :
                                     (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
 
-            return {
-                date: new Date(dateStr),
-                value: parseFloat(val)
-            };
+            const dt = new Date(dateStr);
+            // v15: Standardize to local midnight to match MultiSeries logic
+            const localDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+            return { date: localDate, value: parseFloat(val) };
         }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
             .sort((a, b) => a.date - b.date);
+
+        // Save URL for timezone detection in draw function
+        canvas.dataset.chartUrl = url;
 
         if (chartData.length === 0) {
             const keys = rawData.length > 0 ? Object.keys(rawData[0]).join(', ') : 'none';
@@ -2743,6 +2746,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     const axisFont = '11px sans-serif';
     const headerFont = 'bold 12px sans-serif';
     const dateFont = '10px sans-serif';
+    const legendFont = 'bold 12px sans-serif'; // v15: Fix ReferenceError
 
     // Cache data for redraw
     canvas.chartData = {
@@ -3272,17 +3276,19 @@ async function loadMultiSeriesChart(canvas, urls, title) {
  * URL이나 데이터 소스에 따른 시간대(Timezone) 표시 반환
  */
 function getTimezoneForUrl(url, dataSource) {
+    const lowerUrl = (url || '').toLowerCase();
+
+    // Country detection should come FIRST even for TE
+    if (lowerUrl.includes('south-korea') || lowerUrl.includes('/korea/')) return ' (KST)';
+    if (lowerUrl.includes('japan')) return ' (JST)';
+    if (lowerUrl.includes('euro-area') || lowerUrl.includes('/germany/')) return ' (CET)';
+    if (lowerUrl.includes('united-kingdom') || lowerUrl.includes('/uk/')) return ' (GMT)';
+
     if (dataSource === 'ecos') return ' (KST)';
     if (dataSource === 'fred') return ' (EST)';
 
-    const lowerUrl = url.toLowerCase();
-    if (lowerUrl.includes('south-korea')) return ' (KST)';
-    if (lowerUrl.includes('japan')) return ' (JST)';
-    if (lowerUrl.includes('euro-area') || lowerUrl.includes('/germany/')) return ' (CET)';
-    if (lowerUrl.includes('united-kingdom')) return ' (GMT)';
-
-    // 일반적인 환율이나 글로벌 지표는 무표시 혹은 (TE) 등 기본값 처리
-    if (dataSource === 'te') return ' (Local)';
+    // General TE or other
+    if (dataSource === 'te' || lowerUrl.includes('tradingeconomics.com')) return ' (Local)';
     return '';
 }
 
