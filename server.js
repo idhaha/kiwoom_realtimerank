@@ -481,7 +481,7 @@ app.get('/api/trading-economics', async (req, res) => {
             try {
                 // [자원 보호] 동시에 너무 많은 브라우저가 실행되지 않도록 세마포어(Semaphore) 대기
                 let waitCount = 0;
-                while (activeBrowsers >= MAX_BROWSERS && waitCount < 30) { // 최대 30초 대기
+                while (activeBrowsers >= MAX_BROWSERS && waitCount < 90) { // 최대 90초 대기 (오라클 서버 부하 고려)
                     await new Promise(r => setTimeout(r, 1000));
                     waitCount++;
                 }

@@ -3105,7 +3105,11 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             const resJson = await resp.json();
                             if (resJson.success) {
                                 if (!resJson.data || resJson.data.length === 0) throw new Error('데이터가 비어있습니다.');
-                                data = resJson.data.map(d => ({ date: new Date(d.date), value: d.value }));
+                                data = resJson.data.map(d => {
+                                    const dt = new Date(d.date); // 'YYYY-MM-DD' usually UTC
+                                    // Standardize to local 00:00:00 to match ECOS
+                                    return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
+                                });
                             } else throw new Error(resJson.error || 'Unknown FRED Error');
                         } catch (fetchErr) {
                             clearTimeout(timeoutId);
@@ -3209,7 +3213,11 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                                                 (item.LatestValue !== undefined ? item.LatestValue :
                                                     (item.latest_value !== undefined ? item.latest_value :
                                                         (item.PreviousValue !== undefined ? item.PreviousValue : item.previous_value))))));
-                                return { date: new Date(dateStr), value: parseFloat(val) };
+
+                                const dt = new Date(dateStr);
+                                // For TE, dates are often UTC or specific. Standardize to local midnight for sync.
+                                const localDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+                                return { date: localDate, value: parseFloat(val) };
                             }).filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && !isNaN(d.value))
                                 .sort((a, b) => a.date - b.date);
 
@@ -3260,6 +3268,24 @@ async function loadMultiSeriesChart(canvas, urls, title) {
             loadingEl.style.color = '#e74c3c';
         }
     }
+}
+
+/**
+ * URL이나 데이터 소스에 따른 시간대(Timezone) 표시 반환
+ */
+function getTimezoneForUrl(url, dataSource) {
+    if (dataSource === 'ecos') return ' (KST)';
+    if (dataSource === 'fred') return ' (EST)';
+
+    const lowerUrl = url.toLowerCase();
+    if (lowerUrl.includes('south-korea')) return ' (KST)';
+    if (lowerUrl.includes('japan')) return ' (JST)';
+    if (lowerUrl.includes('euro-area') || lowerUrl.includes('/germany/')) return ' (CET)';
+    if (lowerUrl.includes('united-kingdom')) return ' (GMT)';
+
+    // 일반적인 환율이나 글로벌 지표는 무표시 혹은 (TE) 등 기본값 처리
+    if (dataSource === 'te') return ' (Local)';
+    return '';
 }
 
 /**
@@ -3370,7 +3396,8 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     allSeries.forEach((s, sIdx) => {
         const color = colors[sIdx % colors.length];
         const dataSource = s.dataSource || '';
-        const tzLabel = (dataSource === 'ecos') ? ' (KST)' : (dataSource === 'fred' ? ' (EST)' : '');
+        // Use helper to get correct timezone label
+        const tzLabel = getTimezoneForUrl(s.url || '', dataSource);
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
@@ -3389,7 +3416,10 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
         ctx.textAlign = 'right';
         ctx.textBaseline = 'top';
         const lastItem = s.data[s.data.length - 1];
-        const dateStr = lastItem.date.toISOString().slice(5, 10).replace(/-/g, '/'); // MM/DD
+        // Use local date methods to avoid UTC shift in legend
+        const mm = String(lastItem.date.getMonth() + 1).padStart(2, '0');
+        const dd = String(lastItem.date.getDate()).padStart(2, '0');
+        const dateStr = `${mm}/${dd}`;
         ctx.fillText(`${s.label} (${dateStr}${tzLabel}): ${lastItem.value.toFixed(2)}`, w - padding.right, 10 + (sIdx * 15)); // increased spacing
     });
 
