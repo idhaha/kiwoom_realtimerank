@@ -2839,22 +2839,20 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         ctx.fillText(dateLabel, x, h - 30);
     }
 
-    // Latest information in top-right
+    // Standardized Legend (Single Line top-right)
     const latestItem = data[data.length - 1];
-    const latestValue = latestItem.value;
-    const latestDateStr = latestItem.date.toISOString().slice(0, 10).replace(/-/g, '/');
+    const mm = String(latestItem.date.getMonth() + 1).padStart(2, '0');
+    const dd = String(latestItem.date.getDate()).padStart(2, '0');
+    const dateStr = `${mm}/${dd}`;
+
+    // Get timezone label from URL (this is te-single, so dataSource='te')
+    const tzLabel = getTimezoneForUrl(canvas.dataset.chartUrl || '', 'te');
 
     ctx.textAlign = 'right';
-
-    // Latest Date
-    ctx.fillStyle = '#666';
-    ctx.font = dateFont;
-    ctx.fillText(latestDateStr, w - padding.right, padding.top - 18);
-
-    // Latest Value
+    ctx.textBaseline = 'top';
     ctx.fillStyle = '#2c3e50';
-    ctx.font = headerFont;
-    ctx.fillText(latestValue.toFixed(2), w - padding.right, padding.top - 5);
+    ctx.font = legendFont;
+    ctx.fillText(`${title} (${dateStr}${tzLabel}): ${latestItem.value.toFixed(2)}`, w - padding.right, 10);
 
     // Mouse interactive events
     if (!canvas.hasInteractiveEvents) {
@@ -3430,16 +3428,29 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     ctx.textBaseline = 'top';
 
     // 날짜 범위에 따라 적절한 간격으로 레이블 표시
-    const dateRange = maxDate - minDate;
+    let minDateOverall = null;
+    let maxDateOverall = null;
+    allSeries.forEach(s => {
+        if (s.data && s.data.length > 0) {
+            const sMin = s.data[0].date;
+            const sMax = s.data[s.data.length - 1].date;
+            if (minDateOverall === null || sMin < minDateOverall) minDateOverall = sMin;
+            if (maxDateOverall === null || sMax > maxDateOverall) maxDateOverall = sMax;
+        }
+    });
+
+    if (!minDateOverall || !maxDateOverall) return;
+
+    const dateRange = maxDateOverall - minDateOverall;
     const daysDiff = dateRange / (1000 * 60 * 60 * 24);
 
-    let numLabels = 5; // 기본 5개 레이블
-    if (daysDiff > 3650) numLabels = 8; // 10년 이상이면 8개
-    else if (daysDiff > 1825) numLabels = 6; // 5년 이상이면 6개
+    let numLabels = 5;
+    if (daysDiff > 3650) numLabels = 8;
+    else if (daysDiff > 1825) numLabels = 6;
 
     for (let i = 0; i <= numLabels; i++) {
         const ratio = i / numLabels;
-        const date = new Date(minDate.getTime() + dateRange * ratio);
+        const date = new Date(minDateOverall.getTime() + dateRange * ratio);
         const x = padding.left + chartW * ratio;
 
         // 날짜 포맷 (년도만 또는 년-월)
