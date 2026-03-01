@@ -651,9 +651,26 @@ app.get('/api/trading-economics', async (req, res) => {
                     if (!window.Highcharts || !window.Highcharts.charts) return null;
                     window.Highcharts.charts.forEach(chart => {
                         if (!chart || !chart.series) return;
-                        chart.series.forEach(s => {
-                            if (!s.data || s.data.length === 0) return;
-                            s.data.forEach(p => {
+                        chart.series.forEach(series => {
+                            if (!series.data || series.data.length === 0) return;
+                            
+                            // Projection detection: horizontal lines at the end
+                            // We ignore series that have exactly the same value for the last 5+ points of future-looking data
+                            const points = series.data;
+                            let isProjection = false;
+                            if (points.length > 5) {
+                                let sameValueCount = 0;
+                                const lastVal = points[points.length-1].y || (Array.isArray(points[points.length-1]) ? points[points.length-1][1] : null);
+                                for (let i = points.length - 2; i >= Math.max(0, points.length - 10); i--) {
+                                    const val = points[i].y || (Array.isArray(points[i]) ? points[i][1] : null);
+                                    if (val === lastVal) sameValueCount++;
+                                    else break;
+                                }
+                                if (sameValueCount >= 5) isProjection = true;
+                            }
+                            if (isProjection && points.length < 50) return; // Skip small projection series
+
+                            points.forEach(p => {
                                 let x, y;
                                 if (Array.isArray(p)) { x = p[0]; y = p[1]; }
                                 else if (p && typeof p === 'object') { x = p.x; y = p.y; }
@@ -666,12 +683,18 @@ app.get('/api/trading-economics', async (req, res) => {
                     return Array.from(dataMap.entries()).map(([x, y]) => ({ x, y }));
                 };
 
-                // Stage 1: Initial Capture (usually contains recent daily data)
+                // Stage 0: Extra wait for full chart initialization
+                await new Promise(r => setTimeout(r, 4000));
+
+                // Stage 1: Initial Capture (Daily data)
                 let allPointsMap = new Map();
                 const initialPoints = await page.evaluate(extractData);
-                if (initialPoints) initialPoints.forEach(p => allPointsMap.set(p.x, p.y));
+                if (initialPoints) {
+                    console.log(`   📊 Stage 1 (Daily) captured ${initialPoints.length} points.`);
+                    initialPoints.forEach(p => allPointsMap.set(p.x, p.y));
+                }
 
-                // Click the appropriate duration button based on user request
+                // Click the appropriate duration button
                 try {
                     let targetButton = '5Y';
                     if (duration) {
@@ -686,36 +709,38 @@ app.get('/api/trading-economics', async (req, res) => {
                         }
                     }
 
-                    const buttonResult = await page.evaluate((targetBtn) => {
-                        const buttons = Array.from(document.querySelectorAll('button, a'));
-                        const targetButton = buttons.find(btn => {
-                            const text = btn.textContent.trim();
-                            return text === targetBtn || text === targetBtn.toLowerCase() || text === targetBtn.replace('Y', ' Y');
-                        });
-                        if (targetButton) { targetButton.click(); return { success: true }; }
-                        const chart = window.Highcharts && window.Highcharts.charts ? window.Highcharts.charts[0] : null;
-                        if (chart && chart.rangeSelector && chart.rangeSelector.buttons) {
-                            for (let i = 0; i < chart.rangeSelector.buttons.length; i++) {
-                                const btn = chart.rangeSelector.buttons[i];
-                                if (btn.text === targetBtn || btn.text === targetBtn.toLowerCase()) {
-                                    chart.rangeSelector.clickButton(i); return { success: true };
-                                }
+                    if (targetButton !== '1Y') {
+                        console.log(`   🎯 Clicking ${targetButton} for historical data...`);
+                        const buttonResult = await page.evaluate((targetBtn) => {
+                            const buttons = Array.from(document.querySelectorAll('button, a'));
+                            const targetButton = buttons.find(btn => {
+                                const text = btn.textContent.trim();
+                                return text === targetBtn || text === targetBtn.toLowerCase() || text === targetBtn.replace('Y', ' Y');
+                            });
+                            if (targetButton) { targetButton.click(); return { success: true }; }
+                            return { success: false };
+                        }, targetButton);
+
+                        if (buttonResult.success) {
+                            await new Promise(r => setTimeout(r, 5000)); // Wait longer for reload
+                            const postPoints = await page.evaluate(extractData);
+                            if (postPoints) {
+                                console.log(`   📊 Stage 2 (Historical) captured ${postPoints.length} points.`);
+                                postPoints.forEach(p => {
+                                    // Merge strategy: only overwrite if Stage 1 didn't have this point
+                                    // Actually, for daily/weekly blend, we just keep all unique timestamps.
+                                    if (!allPointsMap.has(p.x)) {
+                                        allPointsMap.set(p.x, p.y);
+                                    }
+                                });
                             }
                         }
-                        return { success: false };
-                    }, targetButton);
-
-                    if (buttonResult.success) {
-                        await new Promise(r => setTimeout(r, 3000));
-                        // Stage 2: Post-Click Capture (contains historical data)
-                        const postPoints = await page.evaluate(extractData);
-                        if (postPoints) postPoints.forEach(p => allPointsMap.set(p.x, p.y));
                     }
                 } catch (e) {
-                    console.error('[Puppeteer] Click/Extract error:', e.message);
+                    console.error('[Puppeteer] Navigation/Merge error:', e.message);
                 }
 
-                if (allPointsMap.size === 0) throw new Error('데이터 추출 실패 (Highcharts not found or empty)');
+                if (allPointsMap.size === 0) throw new Error('데이터 추출 실패');
 
                 const finalData = Array.from(allPointsMap.entries())
                     .sort((a, b) => a[0] - b[0])
@@ -724,7 +749,7 @@ app.get('/api/trading-economics', async (req, res) => {
                         Value: y
                     }));
 
-                console.log(`   ✅ Extracted ${finalData.length} points via Dual-Stage Puppeteer.`);
+                console.log(`   ✅ Final Dataset: ${finalData.length} points (merged).`);
                 res.set('Cache-Control', 'public, max-age=300');
                 return res.json({ success: true, data: finalData });
 
