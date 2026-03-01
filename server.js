@@ -532,10 +532,7 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 // Navigate to the page
                 // [Stability Fix] networkidle2 can crash if background ads/analytics fail or get detached
-                await page.goto(targetUrl, {
-                    waitUntil: ['load', 'domcontentloaded'],
-                    timeout: 60000
-                });
+                let retryCount = 0; while (retryCount < 2) { try { await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 90000 }); break; } catch (e) { if (e.message.includes('detached') || e.message.includes('navigation')) { retryCount++; await new Promise(r => setTimeout(r, 2000)); } else throw e; } } await new Promise(r => setTimeout(r, 2000));
 
                 // Extra safety wait for dynamic charts to start rendering
                 await new Promise(r => setTimeout(r, 2000));
@@ -658,13 +655,19 @@ app.get('/api/trading-economics', async (req, res) => {
                         const chart = window.Highcharts && window.Highcharts.charts && window.Highcharts.charts[0];
                         if (!chart || !chart.series) return null;
 
-                        // v20 Improved Series Selection: Merge all available series to get history + latest
+                        // v22 Improved Extraction: Handle both {x,y} and [x,y] formats
                         const dataMap = new Map();
                         chart.series.forEach(s => {
                             if (!s.data || s.data.length === 0) return;
                             s.data.forEach(p => {
-                                if (p.x !== undefined && p.y !== null && p.y !== undefined) {
-                                    dataMap.set(p.x, p.y);
+                                let x, y;
+                                if (Array.isArray(p)) {
+                                    x = p[0]; y = p[1];
+                                } else if (p && typeof p === 'object') {
+                                    x = p.x; y = p.y;
+                                }
+                                if (x !== undefined && y !== null && y !== undefined) {
+                                    dataMap.set(x, y);
                                 }
                             });
                         });
