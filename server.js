@@ -655,22 +655,27 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 const extractedData = await page.evaluate(() => {
                     try {
-                        const chart = window.Highcharts.charts[0];
-                        // Find the series with the most data points (likely the main historical series)
-                        let bestSeries = chart.series[0];
-                        for (let i = 1; i < chart.series.length; i++) {
-                            if (chart.series[i].data.length > bestSeries.data.length) {
-                                bestSeries = chart.series[i];
-                            }
-                        }
+                        const chart = window.Highcharts && window.Highcharts.charts && window.Highcharts.charts[0];
+                        if (!chart || !chart.series) return null;
 
-                        if (!bestSeries || bestSeries.data.length === 0) return null;
+                        // v20 Improved Series Selection: Merge all available series to get history + latest
+                        const dataMap = new Map();
+                        chart.series.forEach(s => {
+                            if (!s.data || s.data.length === 0) return;
+                            s.data.forEach(p => {
+                                if (p.x !== undefined && p.y !== null && p.y !== undefined) {
+                                    dataMap.set(p.x, p.y);
+                                }
+                            });
+                        });
 
-                        return bestSeries.data
-                            .filter(p => p.y !== null && p.y !== undefined)
-                            .map(p => ({
-                                DateTime: new Date(p.x).toISOString(),
-                                Value: p.y
+                        if (dataMap.size === 0) return null;
+                        
+                        return Array.from(dataMap.entries())
+                            .sort((a, b) => a[0] - b[0])
+                            .map(([x, y]) => ({
+                                DateTime: new Date(x).toISOString(),
+                                Value: y
                             }));
                     } catch (e) {
                         return null;

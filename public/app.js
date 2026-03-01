@@ -2720,15 +2720,24 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     const chartH = h - padding.top - padding.bottom;
 
     // Calculate min/max values
-    // Filter out NaN/null values and future dummy data
+    // v18: Use source-aware filter limit (36h buffer to allow international 'today')
     const now = new Date();
-    // v16: Use Today end to avoid future placeholder points
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayEnd);
+    const todayFilterLimit = new Date(now.getTime() + 36 * 3600000);
+    const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayFilterLimit);
     if (validData.length === 0) return;
 
-    // Update local data reference to filtered version
-    data = validData;
+    // v18: Deduplicate by date (take last point per day for daily charts)
+    const dailyMap = new Map();
+    validData.forEach(d => {
+        const key = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
+        dailyMap.set(key, d);
+    });
+
+    // Sort and re-standardize to local midnight
+    data = Array.from(dailyMap.values()).map(d => ({
+        date: new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate()),
+        value: d.value
+    })).sort((a, b) => a.date - b.date);
 
     const values = data.map(d => d.value);
     const minVal = Math.min(...values);
@@ -3128,14 +3137,21 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         else if (args.length === 2) { itemCode = args[0]; period = args[1]; }
                         else throw new Error(`Invalid ECOS format: ${url}`);
                         if (!label) label = itemCode;
-                        const now = new Date();
-                        const formatYMD = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
-                        const endDate = formatYMD(now);
-                        let startDateObj = new Date(now);
-                        if (period.includes('년')) startDateObj.setFullYear(now.getFullYear() - (parseInt(period) || 1));
-                        else if (period.includes('개월')) startDateObj.setMonth(now.getMonth() - (parseInt(period) || 1));
-                        else startDateObj.setFullYear(now.getFullYear() - 1);
-                        const startDate = formatYMD(startDateObj);
+                        // v18: Use local date components for YYYYMMDD to avoid UTC 9-hour gap
+                        const localNow = new Date();
+                        const formatLocalYMD = (d) => {
+                            const y = d.getFullYear();
+                            const m = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            return `${y}${m}${day}`;
+                        };
+                        const endDate = formatLocalYMD(localNow);
+
+                        let startDateObj = new Date(localNow);
+                        if (period.includes('년')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(period) || 1));
+                        else if (period.includes('개월')) startDateObj.setMonth(localNow.getMonth() - (parseInt(period) || 1));
+                        else startDateObj.setFullYear(localNow.getFullYear() - 1);
+                        const startDate = formatLocalYMD(startDateObj);
                         const controller = new AbortController();
                         const timeoutId = setTimeout(() => controller.abort(), 10000);
                         try {
@@ -3180,22 +3196,30 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         let rawData = resJson.data;
 
                         if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
+                            // v18: Source-aware filter (36h buffer) and Daily Deduplication
                             const now = new Date();
-                            const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                            const todayFilterLimit = new Date(now.getTime() + 36 * 3600000);
 
                             const validData = rawData.map(item => {
                                 const dStr = item.DateTime || item.Date || item.date || item.last_update;
                                 const val = item.Value !== undefined ? item.Value : (item.Close !== undefined ? item.Close : (item.Actual !== undefined ? item.Actual : item.actual));
                                 return { date: new Date(dStr), value: parseFloat(val) };
-                            }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayEnd)
+                            }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayFilterLimit)
                                 .sort((a, b) => a.date - b.date);
 
                             if (validData.length === 0) return null;
 
-                            const finalData = validData.map(d => ({
+                            // v18: Group by date and take last point per day
+                            const dailyMap = new Map();
+                            validData.forEach(d => {
+                                const key = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
+                                dailyMap.set(key, d);
+                            });
+
+                            const finalData = Array.from(dailyMap.values()).map(d => ({
                                 date: new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate()),
                                 value: d.value
-                            }));
+                            })).sort((a, b) => a.date - b.date);
 
                             let finalSource = dataSource || 'te';
                             if (actualUrl.includes('stlouisfed.org') || actualUrl.includes('fred')) finalSource = 'fred';
@@ -3250,11 +3274,11 @@ function getTimezoneForUrl(url, dataSource) {
     const lowerUrl = (url || '').toLowerCase();
 
     // Country detection should come FIRST
-    if (lowerUrl.includes('south-korea') || lowerUrl.includes('/korea/') || lowerUrl.includes('krw')) return ' (KST)';
-    if (lowerUrl.includes('japan') || lowerUrl.includes('/jpy')) return ' (JST)';
-    if (lowerUrl.includes('china') || lowerUrl.includes('/cny') || lowerUrl.includes('/cnh') || lowerUrl.includes('rmb')) return ' (CST)';
-    if (lowerUrl.includes('euro-area') || lowerUrl.includes('/germany/') || lowerUrl.includes('eur')) return ' (CET)';
-    if (lowerUrl.includes('united-kingdom') || lowerUrl.includes('/uk/') || lowerUrl.includes('gbp')) return ' (GMT)';
+    if (lowerUrl.includes('south-korea') || lowerUrl.includes('korea') || lowerUrl.includes('krw')) return ' (KST)';
+    if (lowerUrl.includes('japan') || lowerUrl.includes('jpy')) return ' (JST)';
+    if (lowerUrl.includes('china') || lowerUrl.includes('cny') || lowerUrl.includes('cnh') || lowerUrl.includes('rmb')) return ' (CST)';
+    if (lowerUrl.includes('euro-area') || lowerUrl.includes('germany') || lowerUrl.includes('eur')) return ' (CET)';
+    if (lowerUrl.includes('united-kingdom') || lowerUrl.includes('uk/') || lowerUrl.includes('gbp')) return ' (GMT)';
 
     if (dataSource === 'ecos') return ' (KST)';
     if (dataSource === 'fred' || lowerUrl.includes('fred') || lowerUrl.includes('stlouisfed')) return ' (EST)';
