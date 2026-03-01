@@ -460,28 +460,25 @@ app.get('/api/finviz-image', async (req, res) => {
  */
 let activeBrowsers = 0; // 동시에 실행 중인 브라우저 수
 const MAX_BROWSERS = 1; // 오라클 서버 메모리(1GB) 고려 시 1개가 안정적
+
 app.get('/api/trading-economics', async (req, res) => {
     let originalUrl = req.query.url;
-    const duration = req.query.duration || ''; // e.g., '5년', '10년', 'MAX'
+    const duration = req.query.duration || ''; // e.g., '10년'
     if (!originalUrl) return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
 
-    // URL Normalization: Replace double slashes (except after protocol)
     originalUrl = originalUrl.replace(/([^:]\/)\/+/g, '$1');
-
     console.log(`📡 [TE Proxy] Request: ${originalUrl}, Duration: ${duration || 'default'}`);
-    fileLog(`📡 TE Proxy Request: ${originalUrl}, Duration: ${duration || 'default'}`);
 
     try {
-        // Check if it's a TradingEconomics URL (and not the API itself)
         const targetUrl = originalUrl;
         if (targetUrl.includes('tradingeconomics.com') && !targetUrl.includes('api.tradingeconomics.com')) {
-            console.log(`   -> Scraping Mode (Puppeteer): ${originalUrl}`);
+            console.log(`   -> Scraping Mode (v28): ${originalUrl}`);
 
             let browser = null;
             try {
-                // [자원 보호] 동시에 너무 많은 브라우저가 실행되지 않도록 세마포어(Semaphore) 대기
+                // Semaphore for active browsers
                 let waitCount = 0;
-                while (activeBrowsers >= MAX_BROWSERS && waitCount < 90) { // 최대 90초 대기 (오라클 서버 부하 고려)
+                while (activeBrowsers >= MAX_BROWSERS && waitCount < 90) {
                     await new Promise(r => setTimeout(r, 1000));
                     waitCount++;
                 }
@@ -489,329 +486,169 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 browser = await puppeteer.launch({
                     headless: "new",
-                    timeout: 45000,
+                    timeout: 60000,
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage',
                         '--disable-gpu',
-                        '--no-zygote',
-                        '--single-process', // Use single process for low RAM (Linux only)
-                        '--disable-extensions',
-                        '--disable-features=IsolateOrigins,site-per-process',
-                        '--disable-site-isolation-trials',
-                        '--disable-blink-features=AutomationControlled'
+                        '--disable-blink-features=AutomationControlled',
+                        '--window-size=1920,1080'
                     ]
                 });
+
                 const page = await browser.newPage();
+                await page.setViewport({ width: 1920, height: 1080 });
 
-                // [Stability Fix] Request Interception 가끔 Frame Detached 에러 유발하므로 비활성화
-                // await page.setRequestInterception(true);
-                // page.on('request', (req) => {
-                //     if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
-                //         req.abort();
-                //     } else {
-                //         req.continue();
-                //     }
-                // });
+                // Stealth
+                await page.evaluateOnNewDocument(() => {
+                    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                });
 
-                // Set a realistic User-Agent
                 await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
-                await page.setExtraHTTPHeaders({
-                    'Accept-Language': 'en-US,en;q=0.9,ko;q=0.8',
-                    'Referer': 'https://tradingeconomics.com/'
-                });
-
-                // Capture browser console logs
-                page.on('console', msg => {
-                    const logMsg = `PAGE LOG: ${msg.text()}\n`;
-                    console.log(logMsg.trim());
-                    fs.appendFileSync('puppeteer_debug.log', logMsg);
-                });
-
-                // Navigate to the page
-                // [Stability Fix] networkidle2 can crash if background ads/analytics fail or get detached
-                let retryCount = 0; while (retryCount < 2) { try { await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 90000 }); break; } catch (e) { if (e.message.includes('detached') || e.message.includes('navigation')) { retryCount++; await new Promise(r => setTimeout(r, 2000)); } else throw e; } } await new Promise(r => setTimeout(r, 2000));
-
-                // Extra safety wait for dynamic charts to start rendering
-                await new Promise(r => setTimeout(r, 2000));
-
-                // Wait for Highcharts to be defined and have data
-                // We assume there is a Highcharts chart on the page with data
-                await page.waitForFunction(() => {
-                    return window.Highcharts && window.Highcharts.charts && window.Highcharts.charts.length > 0;
-                }, { timeout: 30000 });
-
-                // Click the appropriate duration button based on user request
-                try {
-                    // Determine which button to click based on duration parameter
-                    let targetButton = '5Y'; // default
-                    if (duration) {
-                        const yearsMatch = duration.match(/(\d+)\s*년/);
-                        if (yearsMatch) {
-                            const years = parseInt(yearsMatch[1]);
-                            if (years >= 10) targetButton = '10Y';
-                            else if (years >= 5) targetButton = '5Y';
-                            else if (years >= 1) targetButton = '1Y';
-                        } else if (duration.toLowerCase().includes('max') || duration.toLowerCase().includes('전체')) {
-                            targetButton = 'MAX';
-                        }
-                    }
-
-                    console.log(`   🎯 Target button: ${targetButton} (from duration: ${duration || 'default'})`);
-                    fs.appendFileSync('puppeteer_debug.log', `Target button: ${targetButton}\n`);
-
-                    // Get initial data count
-                    const initialCount = await page.evaluate(() => {
-                        const chart = window.Highcharts && window.Highcharts.charts ? window.Highcharts.charts[0] : null;
-                        if (!chart || !chart.series) return 0;
-                        let maxLen = 0;
-                        chart.series.forEach(s => {
-                            if (s.data && s.data.length > maxLen) maxLen = s.data.length;
-                        });
-                        return maxLen;
-                    });
-
-                    console.log(`   📊 Initial data count: ${initialCount}`);
-                    fs.appendFileSync('puppeteer_debug.log', `Initial data count: ${initialCount}\n`);
-
-                    // Try to find and click the target button
-                    const buttonClicked = await page.evaluate((targetBtn) => {
-                        // Try text-based search for target button
-                        const buttons = Array.from(document.querySelectorAll('button, a'));
-                        const targetButton = buttons.find(btn => {
-                            const text = btn.textContent.trim();
-                            return text === targetBtn || text === targetBtn.toLowerCase() || text === targetBtn.replace('Y', ' Y');
+                // 1. Initial Load with FORCE logic
+                let retryCount = 0;
+                while (retryCount < 2) {
+                    try {
+                        console.log(`   🌐 Force Navigating... (Attempt ${retryCount + 1})`);
+                        // Use domcontentloaded but catch and ignore timeout/detachment
+                        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 40000 }).catch(e => {
+                            console.warn(`   ⚠️ Initial goto had error (ignoring): ${e.message}`);
                         });
 
-                        if (targetButton) {
-                            targetButton.click();
-                            return { success: true, method: 'text-search', text: targetButton.textContent };
-                        }
-
-                        // Try Highcharts rangeSelector if available
-                        const chart = window.Highcharts && window.Highcharts.charts ? window.Highcharts.charts[0] : null;
-                        if (chart && chart.rangeSelector && chart.rangeSelector.buttons) {
-                            for (let i = 0; i < chart.rangeSelector.buttons.length; i++) {
-                                const btn = chart.rangeSelector.buttons[i];
-                                if (btn.text === targetBtn || btn.text === targetBtn.toLowerCase()) {
-                                    chart.rangeSelector.clickButton(i);
-                                    return { success: true, method: 'highcharts-api', index: i };
-                                }
-                            }
-                        }
-
-                        return { success: false, message: `${targetBtn} button not found` };
-                    }, targetButton);
-
-                    const clickMsg = `   🖱️  ${targetButton} Button click: ${JSON.stringify(buttonClicked)}\n`;
-                    console.log(clickMsg.trim());
-                    fs.appendFileSync('puppeteer_debug.log', clickMsg);
-
-                    if (buttonClicked.success) {
-                        // Wait for data to reload with polling
-                        let dataChanged = false;
-                        for (let i = 0; i < 10; i++) { // Poll for up to 10 seconds
+                        // Wait for any kind of chart content to appear (max 20s)
+                        let found = false;
+                        for (let i = 0; i < 20; i++) {
                             await new Promise(r => setTimeout(r, 1000));
-
-                            const newCount = await page.evaluate(() => {
-                                const chart = window.Highcharts.charts[0];
-                                if (!chart || !chart.series) return 0;
-                                let maxLen = 0;
-                                chart.series.forEach(s => {
-                                    if (s.data && s.data.length > maxLen) maxLen = s.data.length;
-                                });
-                                return maxLen;
-                            });
-
-                            if (newCount !== initialCount) {
-                                const resultMsg = `   ✅ Data count after ${targetButton} click: ${newCount} (was ${initialCount}) after ${i + 1}s\n`;
-                                console.log(resultMsg.trim());
-                                fs.appendFileSync('puppeteer_debug.log', resultMsg);
-                                dataChanged = true;
-                                break;
-                            }
+                            const exists = await page.evaluate(() => !!document.querySelector('.highcharts-container, #chart')).catch(() => false);
+                            if (exists) { found = true; break; }
                         }
-
-                        if (!dataChanged) {
-                            const noChangeMsg = `   ⚠️ Data count did not change after 10s (still ${initialCount})\n`;
-                            console.warn(noChangeMsg.trim());
-                            fs.appendFileSync('puppeteer_debug.log', noChangeMsg);
-                        }
+                        if (found) break;
+                        throw new Error('Chart container never appeared');
+                    } catch (e) {
+                        retryCount++;
+                        if (retryCount >= 2) throw e;
+                        await new Promise(r => setTimeout(r, 5000));
                     }
-                } catch (e) {
-                    const errMsg = `   ⚠️ Failed to click 5Y button: ${e.message}\n`;
-                    console.warn(errMsg.trim());
-                    fs.appendFileSync('puppeteer_debug.log', errMsg);
                 }
 
-                const extractData = () => {
-                    const dataMap = new Map();
+                // 2. Extract and Filter
+                const extractPoints = () => {
+                    const map = new Map();
                     if (!window.Highcharts || !window.Highcharts.charts) return null;
+                    const now = Date.now();
+                    const tomorrow = now + 86400000; // Allow 1 day buffer for TZs
+
                     window.Highcharts.charts.forEach(chart => {
                         if (!chart || !chart.series) return;
                         chart.series.forEach(series => {
                             if (!series.data || series.data.length === 0) return;
-                            
-                            // Projection detection: horizontal lines at the end
-                            // We ignore series that have exactly the same value for the last 5+ points of future-looking data
-                            const points = series.data;
-                            let isProjection = false;
-                            if (points.length > 5) {
-                                let sameValueCount = 0;
-                                const lastVal = points[points.length-1].y || (Array.isArray(points[points.length-1]) ? points[points.length-1][1] : null);
-                                for (let i = points.length - 2; i >= Math.max(0, points.length - 10); i--) {
-                                    const val = points[i].y || (Array.isArray(points[i]) ? points[i][1] : null);
-                                    if (val === lastVal) sameValueCount++;
-                                    else break;
-                                }
-                                if (sameValueCount >= 5) isProjection = true;
-                            }
-                            if (isProjection && points.length < 50) return; // Skip small projection series
 
-                            points.forEach(p => {
+                            // Projection filtering: If it's a projection series (horizontal or future)
+                            const data = series.data;
+                            data.forEach(p => {
                                 let x, y;
                                 if (Array.isArray(p)) { x = p[0]; y = p[1]; }
                                 else if (p && typeof p === 'object') { x = p.x; y = p.y; }
+
                                 if (x !== undefined && y !== null && y !== undefined) {
-                                    dataMap.set(x, y);
+                                    // CRITICAL: Skip any data points in the future (> now + 1 day)
+                                    if (x > tomorrow) return;
+                                    map.set(x, y);
                                 }
                             });
                         });
                     });
-                    return Array.from(dataMap.entries()).map(([x, y]) => ({ x, y }));
+                    return Array.from(map.entries()).map(([x, y]) => ({ x, y }));
                 };
 
-                // Stage 0: Extra wait for full chart initialization
-                await new Promise(r => setTimeout(r, 4000));
+                let masterMap = new Map();
 
-                // Stage 1: Initial Capture (Daily data)
-                let allPointsMap = new Map();
-                const initialPoints = await page.evaluate(extractData);
-                if (initialPoints) {
-                    console.log(`   📊 Stage 1 (Daily) captured ${initialPoints.length} points.`);
-                    initialPoints.forEach(p => allPointsMap.set(p.x, p.y));
+                // 3. Stage 1: Force Daily (1Y) to get Feb 27
+                console.log('   📡 Forcing Daily resolution (1Y)...');
+                const has1Y = await page.evaluate(() => {
+                    const btn = Array.from(document.querySelectorAll('button, a')).find(el => el.textContent.trim() === '1Y');
+                    if (btn) { btn.click(); return true; }
+                    return false;
+                });
+                if (has1Y) await new Promise(r => setTimeout(r, 4000));
+
+                const daily = await page.evaluate(extractPoints);
+                if (daily) {
+                    console.log(`   📊 Captured ${daily.length} points (Daily)`);
+                    daily.forEach(p => masterMap.set(p.x, p.y));
                 }
 
-                // Click the appropriate duration button
-                try {
-                    let targetButton = '5Y';
-                    if (duration) {
-                        const yearsMatch = duration.match(/(\d+)\s*년/);
-                        if (yearsMatch) {
-                            const years = parseInt(yearsMatch[1]);
-                            if (years >= 10) targetButton = '10Y';
-                            else if (years >= 5) targetButton = '5Y';
-                            else if (years >= 1) targetButton = '1Y';
-                        } else if (duration.toLowerCase().includes('max') || duration.toLowerCase().includes('전체')) {
-                            targetButton = 'MAX';
-                        }
+                // 4. Stage 2: Historical Duration (e.g. 10Y)
+                if (duration && !duration.includes('1년')) {
+                    let targetBtn = '5Y';
+                    const yMatch = duration.match(/(\d+)\s*년/);
+                    if (yMatch) {
+                        const count = parseInt(yMatch[1]);
+                        if (count >= 10) targetBtn = '10Y';
+                        else if (count >= 5) targetBtn = '5Y';
+                    } else if (duration.toLowerCase().includes('max') || duration.toLowerCase().includes('전체')) {
+                        targetBtn = 'MAX';
                     }
 
-                    if (targetButton !== '1Y') {
-                        console.log(`   🎯 Clicking ${targetButton} for historical data...`);
-                        const buttonResult = await page.evaluate((targetBtn) => {
-                            const buttons = Array.from(document.querySelectorAll('button, a'));
-                            const targetButton = buttons.find(btn => {
-                                const text = btn.textContent.trim();
-                                return text === targetBtn || text === targetBtn.toLowerCase() || text === targetBtn.replace('Y', ' Y');
-                            });
-                            if (targetButton) { targetButton.click(); return { success: true }; }
-                            return { success: false };
-                        }, targetButton);
+                    console.log(`   🎯 Clicking ${targetBtn} for history...`);
+                    const clicked = await page.evaluate((t) => {
+                        const btn = Array.from(document.querySelectorAll('button, a')).find(el =>
+                            el.textContent.trim() === t || el.textContent.trim() === t.replace('Y', ' Y')
+                        );
+                        if (btn) { btn.click(); return true; }
+                        return false;
+                    }, targetBtn);
 
-                        if (buttonResult.success) {
-                            await new Promise(r => setTimeout(r, 5000)); // Wait longer for reload
-                            const postPoints = await page.evaluate(extractData);
-                            if (postPoints) {
-                                console.log(`   📊 Stage 2 (Historical) captured ${postPoints.length} points.`);
-                                postPoints.forEach(p => {
-                                    // Merge strategy: only overwrite if Stage 1 didn't have this point
-                                    // Actually, for daily/weekly blend, we just keep all unique timestamps.
-                                    if (!allPointsMap.has(p.x)) {
-                                        allPointsMap.set(p.x, p.y);
-                                    }
-                                });
-                            }
+                    if (clicked) {
+                        await new Promise(r => setTimeout(r, 6000));
+                        const history = await page.evaluate(extractPoints);
+                        if (history) {
+                            console.log(`   📊 Captured ${history.length} points (History)`);
+                            history.forEach(p => { if (!masterMap.has(p.x)) masterMap.set(p.x, p.y); });
                         }
                     }
-                } catch (e) {
-                    console.error('[Puppeteer] Navigation/Merge error:', e.message);
                 }
 
-                if (allPointsMap.size === 0) throw new Error('데이터 추출 실패');
+                if (masterMap.size === 0) throw new Error('데이터 획득 실패');
 
-                const finalData = Array.from(allPointsMap.entries())
+                const finalData = Array.from(masterMap.entries())
                     .sort((a, b) => a[0] - b[0])
-                    .map(([x, y]) => ({
-                        DateTime: new Date(x).toISOString(),
-                        Value: y
-                    }));
+                    .map(([x, y]) => ({ DateTime: new Date(x).toISOString(), Value: y }));
 
-                console.log(`   ✅ Final Dataset: ${finalData.length} points (merged).`);
+                console.log(`   ✅ Success: Merged total ${masterMap.size} points.`);
                 res.set('Cache-Control', 'public, max-age=300');
                 return res.json({ success: true, data: finalData });
 
             } catch (e) {
-                const outerErrMsg = `   ❌ Puppeteer Scraping failed: ${e.message}\n`;
-                console.warn(outerErrMsg.trim());
-                fs.appendFileSync('puppeteer_debug.log', outerErrMsg);
-                // Fallthrough to API logic if scraping fails? Or just error out?
-                // If scraping fails, API likely fails too (403).
-                throw new Error(`Scraping failed: ${e.message}`);
+                console.error(`   ❌ Scraping error: ${e.message}`);
+                fs.appendFileSync('puppeteer_debug.log', `   ❌ ${e.message}\n`);
+                throw e;
             } finally {
                 activeBrowsers = Math.max(0, activeBrowsers - 1);
-                if (browser) await browser.close();
+                if (browser) await browser.close().catch(() => { });
             }
         }
 
-        // --- Fallback to API logic (only if not a main indicator page) ---
-        const fetchWithHeaders = async (url) => {
-            return await axios.get(url, {
-                timeout: 10000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                    'Accept': 'application/json, text/plain, */*',
-                    'Referer': 'https://tradingeconomics.com/'
-                }
-            });
-        };
-
-        let response = await fetchWithHeaders(originalUrl);
-        let finalData = response.data;
-        const dataType = Array.isArray(finalData) ? 'Array' : typeof finalData;
-
-        console.log(`   ✅ Success: ${targetUrl} (Data Type: ${dataType})`);
-        fileLog(`✅ TE Success: ${targetUrl}, Type: ${dataType}`);
-
-        if (typeof finalData === 'string') {
-            const trimmed = finalData.trim();
-            if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
-                try {
-                    finalData = JSON.parse(trimmed);
-                    console.log("   💡 Data was stringified JSON, parsed successfully.");
-                    fileLog("💡 Data was stringified JSON, parsed successfully.");
-                } catch (e) {
-                    console.warn("   ⚠️ Failed to parse string data as JSON:", e.message);
-                }
+        // --- Fallback (API Mode) ---
+        const response = await axios.get(originalUrl, {
+            timeout: 15000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Referer': 'https://tradingeconomics.com/'
             }
+        });
+        let data = response.data;
+        if (typeof data === 'string') {
+            try { data = JSON.parse(data.trim()); } catch (e) { }
         }
-
         res.set('Cache-Control', 'public, max-age=300');
-        res.json({ success: true, data: finalData });
-    } catch (error) {
-        const status = error.response?.status || 500;
-        let details = error.message;
-        if (status === 403) {
-            details = "접근 거부 (403). TradingEconomics에서 해당 IP 또는 계정의 API 요청을 제한하고 있습니다. 잠시 후 시도하거나 다른 주소를 사용해 보세요.";
-        } else if (error.response?.data) {
-            details += ` (${JSON.stringify(error.response.data).substring(0, 100)}...)`;
-        }
+        res.json({ success: true, data: data });
 
-        console.error(`   ❌ Error (${status}): ${details}`);
-        fileLog(`❌ TE Error (${status}): ${details}`);
-        res.status(status).json({ success: false, error: "데이터 획득 실패", details: details });
+    } catch (error) {
+        console.error(`   ❌ TE Proxy Error: ${error.message}`);
+        res.status(500).json({ success: false, error: "데이터 획득 실패", details: error.message });
     }
 });
 
