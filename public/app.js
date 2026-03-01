@@ -2722,7 +2722,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Calculate min/max values
     // v18: Use source-aware filter limit (36h buffer to allow international 'today')
     const now = new Date();
-    const todayFilterLimit = new Date(now.getTime() + 6 * 3600000);
+    const todayFilterLimit = new Date(now.getTime() + 12 * 3600000);
     const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayFilterLimit);
     if (validData.length === 0) return;
 
@@ -3198,7 +3198,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
                             // v18: Source-aware filter (36h buffer) and Daily Deduplication
                             const now = new Date();
-                            const todayFilterLimit = new Date(now.getTime() + 6 * 3600000);
+                            const todayFilterLimit = new Date(now.getTime() + 12 * 3600000);
 
                             const validData = rawData.map(item => {
                                 const dStr = item.DateTime || item.Date || item.date || item.last_update;

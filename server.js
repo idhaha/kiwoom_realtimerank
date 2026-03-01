@@ -646,52 +646,87 @@ app.get('/api/trading-economics', async (req, res) => {
                     fs.appendFileSync('puppeteer_debug.log', errMsg);
                 }
 
-                await page.waitForFunction(() => {
-                    return window.Highcharts && window.Highcharts.charts && window.Highcharts.charts.length > 0 && window.Highcharts.charts[0].series && window.Highcharts.charts[0].series.length > 0;
-                }, { timeout: 30000 });
-
-                const extractedData = await page.evaluate(() => {
-                    try {
-                        const chart = window.Highcharts && window.Highcharts.charts && window.Highcharts.charts[0];
-                        if (!chart || !chart.series) return null;
-
-                        // v22 Improved Extraction: Handle both {x,y} and [x,y] formats
-                        const dataMap = new Map();
+                const extractData = () => {
+                    const dataMap = new Map();
+                    if (!window.Highcharts || !window.Highcharts.charts) return null;
+                    window.Highcharts.charts.forEach(chart => {
+                        if (!chart || !chart.series) return;
                         chart.series.forEach(s => {
                             if (!s.data || s.data.length === 0) return;
                             s.data.forEach(p => {
                                 let x, y;
-                                if (Array.isArray(p)) {
-                                    x = p[0]; y = p[1];
-                                } else if (p && typeof p === 'object') {
-                                    x = p.x; y = p.y;
-                                }
+                                if (Array.isArray(p)) { x = p[0]; y = p[1]; }
+                                else if (p && typeof p === 'object') { x = p.x; y = p.y; }
                                 if (x !== undefined && y !== null && y !== undefined) {
                                     dataMap.set(x, y);
                                 }
                             });
                         });
+                    });
+                    return Array.from(dataMap.entries()).map(([x, y]) => ({ x, y }));
+                };
 
-                        if (dataMap.size === 0) return null;
-                        
-                        return Array.from(dataMap.entries())
-                            .sort((a, b) => a[0] - b[0])
-                            .map(([x, y]) => ({
-                                DateTime: new Date(x).toISOString(),
-                                Value: y
-                            }));
-                    } catch (e) {
-                        return null;
+                // Stage 1: Initial Capture (usually contains recent daily data)
+                let allPointsMap = new Map();
+                const initialPoints = await page.evaluate(extractData);
+                if (initialPoints) initialPoints.forEach(p => allPointsMap.set(p.x, p.y));
+
+                // Click the appropriate duration button based on user request
+                try {
+                    let targetButton = '5Y';
+                    if (duration) {
+                        const yearsMatch = duration.match(/(\d+)\s*년/);
+                        if (yearsMatch) {
+                            const years = parseInt(yearsMatch[1]);
+                            if (years >= 10) targetButton = '10Y';
+                            else if (years >= 5) targetButton = '5Y';
+                            else if (years >= 1) targetButton = '1Y';
+                        } else if (duration.toLowerCase().includes('max') || duration.toLowerCase().includes('전체')) {
+                            targetButton = 'MAX';
+                        }
                     }
-                });
 
-                if (extractedData) {
-                    console.log(`   ✅ Extracted ${extractedData.length} points via Puppeteer.`);
-                    res.set('Cache-Control', 'public, max-age=300');
-                    return res.json({ success: true, data: extractedData });
-                } else {
-                    throw new Error("Puppeteer failed to extract data from Highcharts.");
+                    const buttonResult = await page.evaluate((targetBtn) => {
+                        const buttons = Array.from(document.querySelectorAll('button, a'));
+                        const targetButton = buttons.find(btn => {
+                            const text = btn.textContent.trim();
+                            return text === targetBtn || text === targetBtn.toLowerCase() || text === targetBtn.replace('Y', ' Y');
+                        });
+                        if (targetButton) { targetButton.click(); return { success: true }; }
+                        const chart = window.Highcharts && window.Highcharts.charts ? window.Highcharts.charts[0] : null;
+                        if (chart && chart.rangeSelector && chart.rangeSelector.buttons) {
+                            for (let i = 0; i < chart.rangeSelector.buttons.length; i++) {
+                                const btn = chart.rangeSelector.buttons[i];
+                                if (btn.text === targetBtn || btn.text === targetBtn.toLowerCase()) {
+                                    chart.rangeSelector.clickButton(i); return { success: true };
+                                }
+                            }
+                        }
+                        return { success: false };
+                    }, targetButton);
+
+                    if (buttonResult.success) {
+                        await new Promise(r => setTimeout(r, 3000));
+                        // Stage 2: Post-Click Capture (contains historical data)
+                        const postPoints = await page.evaluate(extractData);
+                        if (postPoints) postPoints.forEach(p => allPointsMap.set(p.x, p.y));
+                    }
+                } catch (e) {
+                    console.error('[Puppeteer] Click/Extract error:', e.message);
                 }
+
+                if (allPointsMap.size === 0) throw new Error('데이터 추출 실패 (Highcharts not found or empty)');
+
+                const finalData = Array.from(allPointsMap.entries())
+                    .sort((a, b) => a[0] - b[0])
+                    .map(([x, y]) => ({
+                        DateTime: new Date(x).toISOString(),
+                        Value: y
+                    }));
+
+                console.log(`   ✅ Extracted ${finalData.length} points via Dual-Stage Puppeteer.`);
+                res.set('Cache-Control', 'public, max-age=300');
+                return res.json({ success: true, data: finalData });
 
             } catch (e) {
                 const outerErrMsg = `   ❌ Puppeteer Scraping failed: ${e.message}\n`;
