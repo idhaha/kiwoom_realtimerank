@@ -507,53 +507,50 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
-                // 1. Initial Load with FORCE logic
+                // 0. Block Ads and Analytics for stability
+                await page.setRequestInterception(true);
+                page.on('request', (request) => {
+                    const url = request.url();
+                    if (url.includes('google-analytics') || url.includes('googletagmanager') || url.includes('doubleclick') || url.includes('ads') || url.includes('tracker')) {
+                        request.abort();
+                    } else {
+                        request.continue();
+                    }
+                });
+
+                // 1. Initial Load (Use 'commit' for speed and resilience to frame detachment)
                 let retryCount = 0;
                 while (retryCount < 2) {
                     try {
-                        console.log(`   🌐 Force Navigating... (Attempt ${retryCount + 1})`);
-                        // Use domcontentloaded but catch and ignore timeout/detachment
-                        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 40000 }).catch(e => {
-                            console.warn(`   ⚠️ Initial goto had error (ignoring): ${e.message}`);
-                        });
-
-                        // Wait for any kind of chart content to appear (max 20s)
-                        let found = false;
-                        for (let i = 0; i < 20; i++) {
-                            await new Promise(r => setTimeout(r, 1000));
-                            const exists = await page.evaluate(() => !!document.querySelector('.highcharts-container, #chart')).catch(() => false);
-                            if (exists) { found = true; break; }
-                        }
-                        if (found) break;
-                        throw new Error('Chart container never appeared');
+                        console.log(`   🌐 Navigating... (Attempt ${retryCount + 1})`);
+                        await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
+                        break;
                     } catch (e) {
                         retryCount++;
                         if (retryCount >= 2) throw e;
-                        await new Promise(r => setTimeout(r, 5000));
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
 
-                // 2. Extract and Filter
+                // 2. Wait for chart container
+                await page.waitForSelector('.highcharts-container', { timeout: 30000 });
+                await new Promise(r => setTimeout(r, 2000));
+
                 const extractPoints = () => {
                     const map = new Map();
-                    if (!window.Highcharts || !window.Highcharts.charts) return null;
-                    const now = Date.now();
-                    const tomorrow = now + 86400000; // Allow 1 day buffer for TZs
+                    if (!window.Highcharts || !window.Highcharts.charts || window.Highcharts.charts.length === 0) return null;
+                    const tomorrow = Date.now() + 86400000 * 2; // Allow 2-day buffer for projections
 
                     window.Highcharts.charts.forEach(chart => {
-                        if (!chart || !chart.series) return;
+                        if (!chart.series) return;
                         chart.series.forEach(series => {
-                            if (!series.data || series.data.length === 0) return;
-
-                            // Projection filtering: If it's a projection series (horizontal or future)
-                            const data = series.data;
-                            data.forEach(p => {
+                            if (!series.data) return;
+                            series.data.forEach(p => {
                                 let x, y;
                                 if (Array.isArray(p)) { x = p[0]; y = p[1]; }
                                 else if (p && typeof p === 'object') { x = p.x; y = p.y; }
 
                                 if (x !== undefined && y !== null && y !== undefined) {
-                                    // CRITICAL: Skip any data points in the future (> now + 1 day)
                                     if (x > tomorrow) return;
                                     map.set(x, y);
                                 }
@@ -565,22 +562,30 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 let masterMap = new Map();
 
-                // 3. Stage 1: Force Daily (1Y) to get Feb 27
-                console.log('   📡 Forcing Daily resolution (1Y)...');
-                const has1Y = await page.evaluate(() => {
-                    const btn = Array.from(document.querySelectorAll('button, a')).find(el => el.textContent.trim() === '1Y');
-                    if (btn) { btn.click(); return true; }
-                    return false;
+                // 3. Stage 1: Force Daily (1Y) and Disable DataGrouping
+                console.log('   📡 Attempting to maximize resolution...');
+                await page.evaluate(() => {
+                    // Try to click 1Y to get daily data
+                    const btn1Y = Array.from(document.querySelectorAll('button, a')).find(el => el.textContent.trim() === '1Y');
+                    if (btn1Y) btn1Y.click();
+
+                    // Force Highcharts to disable data grouping (shows every single point even in 10Y)
+                    if (window.Highcharts && window.Highcharts.charts) {
+                        window.Highcharts.charts.forEach(c => {
+                            if (c.series) c.series.forEach(s => s.update({ dataGrouping: { enabled: false } }, false));
+                            c.redraw();
+                        });
+                    }
                 });
-                if (has1Y) await new Promise(r => setTimeout(r, 4000));
+                await new Promise(r => setTimeout(r, 5000)); // Wait for update
 
                 const daily = await page.evaluate(extractPoints);
                 if (daily) {
-                    console.log(`   📊 Captured ${daily.length} points (Daily)`);
+                    console.log(`   📊 Captured ${daily.length} points (High-Res Stage)`);
                     daily.forEach(p => masterMap.set(p.x, p.y));
                 }
 
-                // 4. Stage 2: Historical Duration (e.g. 10Y)
+                // 4. Stage 2: Click requested duration to ensure range
                 if (duration && !duration.includes('1년')) {
                     let targetBtn = '5Y';
                     const yMatch = duration.match(/(\d+)\s*년/);
@@ -602,11 +607,11 @@ app.get('/api/trading-economics', async (req, res) => {
                     }, targetBtn);
 
                     if (clicked) {
-                        await new Promise(r => setTimeout(r, 6000));
+                        await new Promise(r => setTimeout(r, 5000));
                         const history = await page.evaluate(extractPoints);
                         if (history) {
-                            console.log(`   📊 Captured ${history.length} points (History)`);
-                            history.forEach(p => { if (!masterMap.has(p.x)) masterMap.set(p.x, p.y); });
+                            console.log(`   📊 Captured ${history.length} points (History Stage)`);
+                            history.forEach(p => masterMap.set(p.x, p.y));
                         }
                     }
                 }

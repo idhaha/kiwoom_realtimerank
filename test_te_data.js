@@ -1,6 +1,6 @@
 const http = require('http');
 
-const url = 'https://tradingeconomics.com/japan/government-bond-yield';
+const url = 'https://tradingeconomics.com/japan/currency'; // JPY
 const proxyPath = `/api/trading-economics?url=${encodeURIComponent(url)}&duration=${encodeURIComponent('10년')}`;
 
 const options = {
