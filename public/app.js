@@ -2723,7 +2723,15 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // v18: Use source-aware filter limit (36h buffer to allow international 'today')
     const now = new Date();
     const todayFilterLimit = new Date(now.getTime() + 48 * 3600000); // v29: 48h buffer for TZs and projections
+
+    // v30.7: Diagnostic Log
+    console.log(`[Diagnostic] drawTradingEconomicsLineChart RAW (${canvas.dataset.chartUrl || 'unknown'}): Array length = ${data.length}, Last Items =`, data.slice(-5).map(d => ({ date: d.date.toISOString(), value: d.value })));
+
     const validData = data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= todayFilterLimit);
+
+    // v30.7: Diagnostic Log
+    console.log(`[Diagnostic] drawTradingEconomicsLineChart VALID (${canvas.dataset.chartUrl || 'unknown'}): Filter Limit = ${todayFilterLimit.toISOString()}, Array length = ${validData.length}, Last Items =`, validData.slice(-5).map(d => ({ date: d.date.toISOString(), value: d.value })));
+
     if (validData.length === 0) return;
 
     // v18: Deduplicate by date (take last point per day for daily charts)
@@ -3196,6 +3204,9 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         let rawData = resJson.data;
 
                         if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
+                            // v30.7: Diagnostic Log
+                            console.log(`[Diagnostic] loadMultiSeriesChart RAW (${actualUrl}): Array length = ${rawData.length}, Last Items =`, rawData.slice(-5));
+
                             // v18: Source-aware filter (36h buffer) and Daily Deduplication
                             const now = new Date();
                             const todayFilterLimit = new Date(now.getTime() + 48 * 3600000); // v29: 48h buffer for TZs and projections
@@ -3206,6 +3217,9 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                                 return { date: new Date(dStr), value: parseFloat(val) };
                             }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayFilterLimit)
                                 .sort((a, b) => a.date - b.date);
+
+                            // v30.7: Diagnostic Log
+                            console.log(`[Diagnostic] loadMultiSeriesChart VALID (${actualUrl}): Filter Limit = ${todayFilterLimit.toISOString()}, Array length = ${validData.length}, Last Items =`, validData.slice(-5).map(d => ({ date: d.date.toISOString(), value: d.value })));
 
                             if (validData.length === 0) return null;
 
@@ -3340,17 +3354,26 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     let maxDate = new Date(-8640000000000000);
 
     allSeries.forEach(s => {
-        // Filter out NaN/null values and future data before processing
-        const now = new Date();
-        // Use Tomorrow end to avoid timezone/late-update truncation issues
-        const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 59, 999);
-        s.data = s.data.filter(d => d.value !== null && !isNaN(d.value) && d.date <= tomorrowEnd);
+        if (!s.data || s.data.length === 0) return;
 
+        // v30.9.2: Data is already filtered in loadMultiSeriesChart.
+        // Re-filtering here with strict local 'tomorrowEnd' can truncate 
+        // valid data from other timezones (like EST or recent updates crossing midnight).
         s.data.forEach(d => {
+            if (d.value === null || isNaN(d.value)) return;
             allValues.push(d.value);
             if (d.date < minDate) minDate = d.date;
+            // Ensure maxDate strictly captures the absolute latest point across ALL series
             if (d.date > maxDate) maxDate = d.date;
         });
+    });
+
+    // v30.8: Diagnostic Log
+    console.log(`[Diagnostic] drawMultiSeriesLineChart START: minDate = ${minDate.toISOString()}, maxDate = ${maxDate.toISOString()}`);
+    allSeries.forEach(s => {
+        if (s.data && s.data.length > 0) {
+            console.log(`[Diagnostic] Series ${s.label || s.url} Final Items:`, s.data.slice(-3).map(d => ({ date: d.date.toISOString(), value: d.value })));
+        }
     });
 
     if (allValues.length === 0) return;

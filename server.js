@@ -544,7 +544,16 @@ app.get('/api/trading-economics', async (req, res) => {
                     window.Highcharts.charts.forEach(chart => {
                         if (!chart.series) return;
                         chart.series.forEach(series => {
+                            // v30.2: CRITICAL - Only extract 'Actual' historical series. 
+                            // Skip forecast/projection series (usually end with ':cur' or have 'Projection' in name)
+                            const sid = series.options.id || '';
+                            const isForecast = sid.toLowerCase().endsWith(':cur') ||
+                                (series.name && series.name.toLowerCase().includes('projection')) ||
+                                (series.options.dashStyle && series.options.dashStyle !== 'Solid');
+
+                            if (isForecast) return;
                             if (!series.data) return;
+
                             series.data.forEach(p => {
                                 let x, y;
                                 if (Array.isArray(p)) { x = p[0]; y = p[1]; }
@@ -562,30 +571,7 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 let masterMap = new Map();
 
-                // 3. Stage 1: Force Daily (1Y) and Disable DataGrouping
-                console.log('   📡 Attempting to maximize resolution...');
-                await page.evaluate(() => {
-                    // Try to click 1Y to get daily data
-                    const btn1Y = Array.from(document.querySelectorAll('button, a')).find(el => el.textContent.trim() === '1Y');
-                    if (btn1Y) btn1Y.click();
-
-                    // Force Highcharts to disable data grouping (shows every single point even in 10Y)
-                    if (window.Highcharts && window.Highcharts.charts) {
-                        window.Highcharts.charts.forEach(c => {
-                            if (c.series) c.series.forEach(s => s.update({ dataGrouping: { enabled: false } }, false));
-                            c.redraw();
-                        });
-                    }
-                });
-                await new Promise(r => setTimeout(r, 5000)); // Wait for update
-
-                const daily = await page.evaluate(extractPoints);
-                if (daily) {
-                    console.log(`   📊 Captured ${daily.length} points (High-Res Stage)`);
-                    daily.forEach(p => masterMap.set(p.x, p.y));
-                }
-
-                // 4. Stage 2: Click requested duration to ensure range
+                // 3. Stage 1: Historical Duration (e.g. 10Y) - Do this FIRST so Daily can overwrite it
                 if (duration && !duration.includes('1년')) {
                     let targetBtn = '5Y';
                     const yMatch = duration.match(/(\d+)\s*년/);
@@ -597,7 +583,7 @@ app.get('/api/trading-economics', async (req, res) => {
                         targetBtn = 'MAX';
                     }
 
-                    console.log(`   🎯 Clicking ${targetBtn} for history...`);
+                    console.log(`   🎯 Stage 1: History (${targetBtn})...`);
                     const clicked = await page.evaluate((t) => {
                         const btn = Array.from(document.querySelectorAll('button, a')).find(el =>
                             el.textContent.trim() === t || el.textContent.trim() === t.replace('Y', ' Y')
@@ -607,13 +593,34 @@ app.get('/api/trading-economics', async (req, res) => {
                     }, targetBtn);
 
                     if (clicked) {
-                        await new Promise(r => setTimeout(r, 5000));
+                        await new Promise(r => setTimeout(r, 6000));
                         const history = await page.evaluate(extractPoints);
                         if (history) {
                             console.log(`   📊 Captured ${history.length} points (History Stage)`);
                             history.forEach(p => masterMap.set(p.x, p.y));
                         }
                     }
+                }
+
+                // 4. Stage 2: Force Daily (1Y) - Do this SECOND to ensure highest resolution for the current year
+                console.log('   📡 Stage 2: Daily (1Y) Resolution...');
+                await page.evaluate(() => {
+                    const btn1Y = Array.from(document.querySelectorAll('button, a')).find(el => el.textContent.trim() === '1Y');
+                    if (btn1Y) btn1Y.click();
+
+                    if (window.Highcharts && window.Highcharts.charts) {
+                        window.Highcharts.charts.forEach(c => {
+                            if (c.series) c.series.forEach(s => s.update({ dataGrouping: { enabled: false } }, false));
+                            c.redraw();
+                        });
+                    }
+                });
+                await new Promise(r => setTimeout(r, 6000));
+
+                const daily = await page.evaluate(extractPoints);
+                if (daily) {
+                    console.log(`   📊 Captured ${daily.length} points (Daily Stage - Overwriting History)`);
+                    daily.forEach(p => masterMap.set(p.x, p.y));
                 }
 
                 if (masterMap.size === 0) throw new Error('데이터 획득 실패');
@@ -679,7 +686,7 @@ app.get('/api/fred', (req, res) => {
     }
 
     // Python 스크립트 실행
-    const command = `python3 fred_api.py "${seriesId}" "${period}"`;
+    const command = `python fred_api.py "${seriesId}" "${period}"`;
     console.log(`[API] Executing: ${command}`);
 
     exec(command, (error, stdout, stderr) => {
@@ -694,7 +701,15 @@ app.get('/api/fred', (req, res) => {
         }
 
         try {
-            const result = JSON.parse(stdout);
+            // v30.9.3: Extract only the JSON part from stdout to avoid parse errors caused by warnings
+            const jsonStart = stdout.indexOf('{');
+            const jsonEnd = stdout.lastIndexOf('}');
+            if (jsonStart === -1 || jsonEnd === -1) {
+                throw new Error('No JSON object found in stdout');
+            }
+            const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
+
+            const result = JSON.parse(jsonString);
             if (result.success) {
                 // 캐시 저장
                 fredCache[cacheKey] = {

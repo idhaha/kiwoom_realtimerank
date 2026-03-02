@@ -35,3 +35,4 @@ dist/
 *.swp
 *.swo
 *~
+user_settings.json
