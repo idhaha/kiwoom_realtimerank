@@ -2722,7 +2722,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Calculate min/max values
     // v18: Use source-aware filter limit (36h buffer to allow international 'today')
     const now = new Date();
-    const todayFilterLimit = new Date(now.getTime() + 48 * 3600000); // v29: 48h buffer for TZs and projections
+    const todayFilterLimit = new Date(now.getTime() + 12 * 3600000); // v30.13: Reduced buffer to 12h to block forecast points
 
     // v30.7: Diagnostic Log
     console.log(`[Diagnostic] drawTradingEconomicsLineChart RAW (${canvas.dataset.chartUrl || 'unknown'}): Array length = ${data.length}, Last Items =`, data.slice(-5).map(d => ({ date: d.date.toISOString(), value: d.value })));
@@ -3121,13 +3121,16 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                             const resJson = await resp.json();
                             if (resJson.success) {
-                                if (!resJson.data || resJson.data.length === 0) throw new Error('데이터가 비어있습니다.');
+                                if (!resJson.data || resJson.data.length === 0) throw new Error('FRED: 데이터가 비어있습니다.');
+                                console.log(`[MultiSeries] FRED ${sid} loaded: ${resJson.data.length} points`);
                                 data = resJson.data.map(d => {
-                                    const dt = new Date(d.date); // 'YYYY-MM-DD' usually UTC
+                                    const dt = new Date(d.date); // 'YYYY-MM-DD'
+                                    // v30.13: Safety check - ignore anomaly years (e.g. 1900)
+                                    if (dt.getFullYear() < 1970) return null;
                                     // Standardize to local 00:00:00 to match ECOS
                                     return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
-                                });
-                            } else throw new Error(resJson.error || 'Unknown FRED Error');
+                                }).filter(x => x !== null);
+                            } else throw new Error(`FRED: ${resJson.error || 'Unknown FRED Error'}`);
                         } catch (fetchErr) {
                             clearTimeout(timeoutId);
                             throw fetchErr;
@@ -3168,6 +3171,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                             const resJson = await resp.json();
                             if (resJson.success && resJson.data) {
+                                console.log(`[MultiSeries] ECOS ${itemCode} loaded: ${resJson.data.length} points`);
                                 data = resJson.data.map(r => {
                                     const dStr = r.TIME;
                                     if (dStr.length === 8) {
@@ -3178,7 +3182,11 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                                     }
                                     return null;
                                 }).filter(x => x !== null).sort((a, b) => a.date - b.date);
-                            } else throw new Error(resJson.error || 'ECOS API returned no data');
+                            } else {
+                                const errorDetail = resJson.error || 'ECOS API returned no data';
+                                const errorCode = resJson.code ? ` (${resJson.code})` : '';
+                                throw new Error(`ECOS: ${errorDetail}${errorCode}`);
+                            }
                         } catch (fetchErr) {
                             clearTimeout(timeoutId);
                             throw fetchErr;
@@ -3209,7 +3217,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
 
                             // v18: Source-aware filter (36h buffer) and Daily Deduplication
                             const now = new Date();
-                            const todayFilterLimit = new Date(now.getTime() + 48 * 3600000); // v29: 48h buffer for TZs and projections
+                            const todayFilterLimit = new Date(now.getTime() + 12 * 3600000); // v30.13: Reduced buffer to 12h
 
                             const validData = rawData.map(item => {
                                 const dStr = item.DateTime || item.Date || item.date || item.last_update;
@@ -3357,10 +3365,14 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
         if (!s.data || s.data.length === 0) return;
 
         // v30.9.2: Data is already filtered in loadMultiSeriesChart.
-        // Re-filtering here with strict local 'tomorrowEnd' can truncate 
-        // valid data from other timezones (like EST or recent updates crossing midnight).
+        // v30.13: Safety re-filter for common range calculation
+        const now = new Date();
+        const tomorrowEnd = new Date(now.getTime() + 12 * 3600000);
+
         s.data.forEach(d => {
             if (d.value === null || isNaN(d.value)) return;
+            if (d.date > tomorrowEnd) return; // Ignore future projections in range calculation
+
             allValues.push(d.value);
             if (d.date < minDate) minDate = d.date;
             // Ensure maxDate strictly captures the absolute latest point across ALL series

@@ -539,7 +539,7 @@ app.get('/api/trading-economics', async (req, res) => {
                 const extractPoints = () => {
                     const map = new Map();
                     if (!window.Highcharts || !window.Highcharts.charts || window.Highcharts.charts.length === 0) return null;
-                    const tomorrow = Date.now() + 86400000 * 2; // Allow 2-day buffer for projections
+                    const tomorrow = Date.now() + 12 * 3600000; // v30.13: Reduced to 12h buffer to block projections
 
                     window.Highcharts.charts.forEach(chart => {
                         if (!chart.series) return;
@@ -567,6 +567,31 @@ app.get('/api/trading-economics', async (req, res) => {
                         });
                     });
                     return Array.from(map.entries()).map(([x, y]) => ({ x, y }));
+                };
+
+                // Add Step: Capture "Live" point from the page DOM (often more fresh than Highcharts)
+                const extractLivePoint = () => {
+                    try {
+                        const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p');
+                        const dateEl = document.querySelector('td#date, #last_update, [data-symbol$=":CUR"] td#date');
+                        if (priceEl) {
+                            const val = parseFloat(priceEl.textContent.replace(/,/g, ''));
+                            if (!isNaN(val)) {
+                                let timestamp = Date.now();
+                                if (dateEl) {
+                                    const dStr = dateEl.textContent.trim();
+                                    // TE date format is often "Mar/02" or "14:55"
+                                    if (dStr.includes(':')) {
+                                        // It's a time for today
+                                    } else if (dStr.includes('/')) {
+                                        // It's a date. If month/day matches today, use today's timestamp.
+                                    }
+                                }
+                                return { x: timestamp, y: val };
+                            }
+                        }
+                    } catch (e) { }
+                    return null;
                 };
 
                 let masterMap = new Map();
@@ -621,6 +646,13 @@ app.get('/api/trading-economics', async (req, res) => {
                 if (daily) {
                     console.log(`   📊 Captured ${daily.length} points (Daily Stage - Overwriting History)`);
                     daily.forEach(p => masterMap.set(p.x, p.y));
+                }
+
+                // 5. Stage 3: Live Point (Freshest)
+                const live = await page.evaluate(extractLivePoint);
+                if (live) {
+                    console.log(`   💎 Captured Live point: ${new Date(live.x).toISOString()} = ${live.y}`);
+                    masterMap.set(live.x, live.y);
                 }
 
                 if (masterMap.size === 0) throw new Error('데이터 획득 실패');
@@ -691,13 +723,11 @@ app.get('/api/fred', (req, res) => {
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
-            console.error(`[API] Exec error: ${error.message}`);
-            console.error(`[API] Stdout: ${stdout}`);
-            console.error(`[API] Stderr: ${stderr}`);
+            console.error(`[FRED] ❌ Exec error: ${error.message}`);
             return res.status(500).json({ success: false, error: error.message, stdout, stderr });
         }
-        if (stderr) {
-            console.warn(`[API] Exec stderr: ${stderr}`);
+        if (stderr && !stderr.includes('Warning')) {
+            console.warn(`[FRED] ⚠️ Stderr: ${stderr}`);
         }
 
         try {
@@ -705,21 +735,25 @@ app.get('/api/fred', (req, res) => {
             const jsonStart = stdout.indexOf('{');
             const jsonEnd = stdout.lastIndexOf('}');
             if (jsonStart === -1 || jsonEnd === -1) {
+                console.error(`[FRED] ❌ No JSON found in output: ${stdout}`);
                 throw new Error('No JSON object found in stdout');
             }
             const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
 
             const result = JSON.parse(jsonString);
             if (result.success) {
+                console.log(`[FRED] ✅ Success: ${seriesId} (${result.data?.length || 0} items)`);
                 // 캐시 저장
                 fredCache[cacheKey] = {
                     timestamp: Date.now(),
                     data: result
                 };
+            } else {
+                console.error(`[FRED] ❌ Script returned failure: ${result.error}`);
             }
             res.json(result);
         } catch (e) {
-            console.error(`[API] JSON Parse Error: ${e.message}, Output: ${stdout}`);
+            console.error(`[FRED] ❌ JSON Parse Error: ${e.message}, Output: ${stdout}`);
             res.status(500).json({ success: false, error: 'Invalid output from script: ' + stdout });
         }
     });
@@ -785,27 +819,34 @@ app.get('/api/ecos', async (req, res) => {
     // numOfdata is set to 100000 to fetch all data in range as requested ("불러온 데이터를 모두 보여주도록 계산해")
     const url = `https://ecos.bok.or.kr/api/StatisticSearch/${apiKey}/json/kr/1/100000/${table}/D/${start}/${end}/${item}`;
 
-    console.log(`[API] ECOS Request: ${table}, ${item}, ${start}~${end}`);
+    console.log(`[ECOS] 🔄 Requesting: ${table}/${item} (${start} ~ ${end})`);
 
     try {
-        const response = await axios.get(url, { timeout: 10000 });
+        const response = await axios.get(url, { timeout: 30000 }); // Increased timeout to 30s
         const result = response.data;
 
         if (result.StatisticSearch && result.StatisticSearch.row) {
+            const rowCount = result.StatisticSearch.row.length;
+            console.log(`[ECOS] ✅ Success: ${item} (${rowCount} items)`);
             res.json({
                 success: true,
                 data: result.StatisticSearch.row
             });
         } else {
-            console.warn('[API] ECOS Error Response:', JSON.stringify(result));
+            const errorCode = result.RESULT ? result.RESULT.CODE : (result.StatisticSearch ? result.StatisticSearch.RESULT.CODE : 'Unknown');
+            const errorMsg = result.RESULT ? result.RESULT.MESSAGE : (result.StatisticSearch ? result.StatisticSearch.RESULT.MESSAGE : '해당하는 데이터가 없습니다.');
+
+            console.warn(`[ECOS] ⚠️ Response: ${errorCode} - ${errorMsg}`);
+
             res.json({
                 success: false,
-                error: result.RESULT ? result.RESULT.MESSAGE : '데이터가 없습니다.',
+                error: errorMsg,
+                code: errorCode,
                 raw: result
             });
         }
     } catch (error) {
-        console.error('[API] ECOS Fetch Error:', error.message);
+        console.error(`[ECOS] ❌ Fetch Error: ${error.message} (URL: ${url})`);
         res.status(500).json({ success: false, error: error.message });
     }
 });
