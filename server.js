@@ -568,14 +568,10 @@ app.get('/api/trading-economics', async (req, res) => {
                 // Add Step: Capture "Live" point from the page DOM (often more fresh than Highcharts)
                 const extractLivePoint = () => {
                     try {
-                        // v30.15: Expanded selectors for live price and date
-                        const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p, .table-unit .actual');
+                        const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p, .table-unit .actual, .i-price-value');
                         if (priceEl) {
                             const val = parseFloat(priceEl.textContent.replace(/,/g, ''));
-                            if (!isNaN(val)) {
-                                console.log(`[Scraper] Live Point Extracted: ${val}`);
-                                return { x: Date.now(), y: val };
-                            }
+                            if (!isNaN(val)) return { x: Date.now(), y: val };
                         }
                     } catch (e) { }
                     return null;
@@ -583,7 +579,29 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 let masterMap = new Map();
 
-                // 3. Stage 1: Historical Duration (e.g. 10Y) - Do this FIRST so Daily can overwrite it
+                // 2.5 Scroll to make sure the chart is initialized
+                await page.evaluate(() => {
+                    const chart = document.querySelector('#chart, .iChart-container');
+                    if (chart) chart.scrollIntoView();
+                });
+                await new Promise(r => setTimeout(r, 2000));
+
+                const robustClick = async (t) => {
+                    return await page.evaluate((text) => {
+                        const buttons = Array.from(document.querySelectorAll('button, a, span, div'))
+                            .filter(el => {
+                                const tr = el.textContent.trim();
+                                return tr === text || tr === text.replace('Y', ' Y') || tr === text.replace('Y', ' Year');
+                            });
+                        if (buttons.length > 0) {
+                            buttons[0].click();
+                            return true;
+                        }
+                        return false;
+                    }, t);
+                };
+
+                // 3. Stage 1: Historical Duration (e.g. 5Y, 10Y)
                 if (duration && !duration.includes('1년')) {
                     let targetBtn = '5Y';
                     const yMatch = duration.match(/(\d+)\s*년/);
@@ -596,49 +614,40 @@ app.get('/api/trading-economics', async (req, res) => {
                     }
 
                     console.log(`   🎯 Stage 1: History (${targetBtn})...`);
-                    const clicked = await page.evaluate((t) => {
-                        const btn = Array.from(document.querySelectorAll('button, a')).find(el =>
-                            el.textContent.trim() === t || el.textContent.trim() === t.replace('Y', ' Y')
-                        );
-                        if (btn) { btn.click(); return true; }
-                        return false;
-                    }, targetBtn);
-
+                    const clicked = await robustClick(targetBtn);
                     if (clicked) {
-                        await new Promise(r => setTimeout(r, 6000));
+                        await new Promise(r => setTimeout(r, 8000)); // Wait longer for history load
                         const history = await page.evaluate(extractPoints);
-                        if (history) {
+                        if (history && history.length > 0) {
                             console.log(`   📊 Captured ${history.length} points (History Stage)`);
                             history.forEach(p => masterMap.set(p.x, p.y));
                         }
                     }
                 }
 
-                // 4. Stage 2: Force Daily (1Y) - Do this SECOND to ensure highest resolution for the current year
+                // 4. Stage 2: Daily (1Y) Resolution
                 console.log('   📡 Stage 2: Daily (1Y) Resolution...');
-                await page.evaluate(() => {
-                    const btn1Y = Array.from(document.querySelectorAll('button, a')).find(el => el.textContent.trim() === '1Y');
-                    if (btn1Y) btn1Y.click();
-
-                    if (window.Highcharts && window.Highcharts.charts) {
-                        window.Highcharts.charts.forEach(c => {
-                            if (c.series) c.series.forEach(s => s.update({ dataGrouping: { enabled: false } }, false));
-                            c.redraw();
-                        });
+                const clicked1Y = await robustClick('1Y');
+                if (clicked1Y) {
+                    await page.evaluate(() => {
+                        if (window.Highcharts && window.Highcharts.charts) {
+                            window.Highcharts.charts.forEach(c => {
+                                if (c.series) c.series.forEach(s => s.update({ dataGrouping: { enabled: false } }, false));
+                                c.redraw();
+                            });
+                        }
+                    });
+                    await new Promise(r => setTimeout(r, 6000));
+                    const daily = await page.evaluate(extractPoints);
+                    if (daily && daily.length > 0) {
+                        console.log(`   📊 Captured ${daily.length} points (Daily Stage)`);
+                        daily.forEach(p => masterMap.set(p.x, p.y));
                     }
-                });
-                await new Promise(r => setTimeout(r, 6000));
-
-                const daily = await page.evaluate(extractPoints);
-                if (daily) {
-                    console.log(`   📊 Captured ${daily.length} points (Daily Stage - Overwriting History)`);
-                    daily.forEach(p => masterMap.set(p.x, p.y));
                 }
 
                 // 5. Stage 3: Live Point (Freshest)
                 const live = await page.evaluate(extractLivePoint);
                 if (live) {
-                    console.log(`   💎 Captured Live point: ${new Date(live.x).toISOString()} = ${live.y}`);
                     masterMap.set(live.x, live.y);
                 }
 

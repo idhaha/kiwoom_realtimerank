@@ -2800,8 +2800,14 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
     }
 
-    const minDate = data[0].date;
-    const maxDate = data[data.length - 1].date;
+    let minDate = data[0].date;
+    let maxDate = data[data.length - 1].date;
+
+    // Safety: if only one point or same dates, create a 1-day range to avoid division by zero
+    if (minDate.getTime() === maxDate.getTime()) {
+        minDate = new Date(minDate.getTime() - 12 * 60 * 60 * 1000);
+        maxDate = new Date(maxDate.getTime() + 12 * 60 * 60 * 1000);
+    }
 
     // Draw line
     ctx.strokeStyle = '#3498db';
