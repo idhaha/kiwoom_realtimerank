@@ -2800,13 +2800,16 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         ctx.fillText(val.toFixed(2), w - padding.right + 5, y + 3);
     }
 
+    const minDate = data[0].date;
+    const maxDate = data[data.length - 1].date;
+
     // Draw line
     ctx.strokeStyle = '#3498db';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
 
     data.forEach((point, i) => {
-        const x = padding.left + (i / (data.length - 1)) * chartW;
+        const x = padding.left + ((point.date - minDate) / (maxDate - minDate)) * chartW;
         const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
 
         if (i === 0) {
@@ -2821,7 +2824,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     ctx.fillStyle = '#3498db';
     if (data.length <= 60) {
         data.forEach((point, i) => {
-            const x = padding.left + (i / (data.length - 1)) * chartW;
+            const x = padding.left + ((point.date - minDate) / (maxDate - minDate)) * chartW;
             const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
             ctx.beginPath();
             ctx.arc(x, y, 2, 0, Math.PI * 2);
@@ -2835,8 +2838,6 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
-    const minDate = data[0].date;
-    const maxDate = data[data.length - 1].date;
     const dateRange = maxDate - minDate;
     const daysDiff = dateRange / (1000 * 60 * 60 * 24);
 
@@ -2967,7 +2968,7 @@ function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     data.forEach((point, i) => {
-        const x = padding.left + (i / (data.length - 1)) * chartW;
+        const x = padding.left + ((point.date - minDate) / (maxDate - minDate)) * chartW;
         const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
         if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
