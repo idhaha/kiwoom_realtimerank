@@ -539,19 +539,17 @@ app.get('/api/trading-economics', async (req, res) => {
                 const extractPoints = () => {
                     const map = new Map();
                     if (!window.Highcharts || !window.Highcharts.charts || window.Highcharts.charts.length === 0) return null;
-                    const tomorrow = Date.now() + 12 * 3600000; // v30.13: Reduced to 12h buffer to block projections
+                    const tomorrow = Date.now() + 12 * 3600000; // v30.13: 12h buffer
 
                     window.Highcharts.charts.forEach(chart => {
                         if (!chart.series) return;
                         chart.series.forEach(series => {
-                            // v30.2: CRITICAL - Only extract 'Actual' historical series. 
-                            // Skip forecast/projection series (usually end with ':cur' or have 'Projection' in name)
-                            const sid = series.options.id || '';
-                            const isForecast = sid.toLowerCase().endsWith(':cur') ||
-                                (series.name && series.name.toLowerCase().includes('projection')) ||
+                            // v30.14: REMOVED ':cur' filter as it skips some main currency series.
+                            // Relying on dashStyle and Future date filter for projections.
+                            const isProjection = (series.name && series.name.toLowerCase().includes('projection')) ||
                                 (series.options.dashStyle && series.options.dashStyle !== 'Solid');
 
-                            if (isForecast) return;
+                            if (isProjection) return;
                             if (!series.data) return;
 
                             series.data.forEach(p => {
@@ -573,21 +571,11 @@ app.get('/api/trading-economics', async (req, res) => {
                 const extractLivePoint = () => {
                     try {
                         const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p');
-                        const dateEl = document.querySelector('td#date, #last_update, [data-symbol$=":CUR"] td#date');
                         if (priceEl) {
                             const val = parseFloat(priceEl.textContent.replace(/,/g, ''));
                             if (!isNaN(val)) {
-                                let timestamp = Date.now();
-                                if (dateEl) {
-                                    const dStr = dateEl.textContent.trim();
-                                    // TE date format is often "Mar/02" or "14:55"
-                                    if (dStr.includes(':')) {
-                                        // It's a time for today
-                                    } else if (dStr.includes('/')) {
-                                        // It's a date. If month/day matches today, use today's timestamp.
-                                    }
-                                }
-                                return { x: timestamp, y: val };
+                                // v30.14: Return timestamp and value. Frontend will handle the "Daily" mapping.
+                                return { x: Date.now(), y: val };
                             }
                         }
                     } catch (e) { }
