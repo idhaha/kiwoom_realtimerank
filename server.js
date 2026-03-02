@@ -539,13 +539,11 @@ app.get('/api/trading-economics', async (req, res) => {
                 const extractPoints = () => {
                     const map = new Map();
                     if (!window.Highcharts || !window.Highcharts.charts || window.Highcharts.charts.length === 0) return null;
-                    const tomorrow = Date.now() + 12 * 3600000; // v30.13: 12h buffer
+                    const tomorrow = Date.now() + 3600000; // v30.15: Strictly limit to 1h buffer
 
                     window.Highcharts.charts.forEach(chart => {
                         if (!chart.series) return;
                         chart.series.forEach(series => {
-                            // v30.14: REMOVED ':cur' filter as it skips some main currency series.
-                            // Relying on dashStyle and Future date filter for projections.
                             const isProjection = (series.name && series.name.toLowerCase().includes('projection')) ||
                                 (series.options.dashStyle && series.options.dashStyle !== 'Solid');
 
@@ -570,11 +568,12 @@ app.get('/api/trading-economics', async (req, res) => {
                 // Add Step: Capture "Live" point from the page DOM (often more fresh than Highcharts)
                 const extractLivePoint = () => {
                     try {
-                        const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p');
+                        // v30.15: Expanded selectors for live price and date
+                        const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p, .table-unit .actual');
                         if (priceEl) {
                             const val = parseFloat(priceEl.textContent.replace(/,/g, ''));
                             if (!isNaN(val)) {
-                                // v30.14: Return timestamp and value. Frontend will handle the "Daily" mapping.
+                                console.log(`[Scraper] Live Point Extracted: ${val}`);
                                 return { x: Date.now(), y: val };
                             }
                         }

@@ -2722,7 +2722,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     // Calculate min/max values
     // v18: Use source-aware filter limit (36h buffer to allow international 'today')
     const now = new Date();
-    const todayFilterLimit = new Date(now.getTime() + 24 * 3600000); // v30.14: Loosened to 24h buffer to prevent false filtering of today's data
+    const todayFilterLimit = new Date(now.getTime() + 1 * 3600000); // v30.15: Strictly limit to 1h buffer to prevent projection leaking
 
     // v30.7: Diagnostic Log
     console.log(`[Diagnostic] drawTradingEconomicsLineChart RAW (${canvas.dataset.chartUrl || 'unknown'}): Array length = ${data.length}, Last Items =`, data.slice(-5).map(d => ({ date: d.date.toISOString(), value: d.value })));
@@ -3217,7 +3217,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
 
                             // v18: Source-aware filter (36h buffer) and Daily Deduplication
                             const now = new Date();
-                            const todayFilterLimit = new Date(now.getTime() + 24 * 3600000); // v30.14: Loosened to 24h buffer
+                            const todayFilterLimit = new Date(now.getTime() + 1 * 3600000); // v30.15: 1h buffer
 
                             const validData = rawData.map(item => {
                                 const dStr = item.DateTime || item.Date || item.date || item.last_update;
@@ -3367,7 +3367,7 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
         // v30.9.2: Data is already filtered in loadMultiSeriesChart.
         // v30.13: Safety re-filter for common range calculation
         const now = new Date();
-        const tomorrowEnd = new Date(now.getTime() + 24 * 3600000); // v30.14: 24h buffer
+        const tomorrowEnd = new Date(now.getTime() + 1 * 3600000); // v30.15: 1h buffer
 
         s.data.forEach(d => {
             if (d.value === null || isNaN(d.value)) return;
