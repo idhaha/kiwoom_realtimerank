@@ -3071,14 +3071,11 @@ async function loadMultiSeriesChart(canvas, urls, title) {
     }
 
     try {
-        // Check for flat array format: ["url1", "lbl1", "dur1", "url2", "lbl2", "dur2"]
         let seriesConfig = [];
         if (Array.isArray(urls)) {
-            // If all elements are strings and length is divisible by 3, treat as flat array
             const allStrings = urls.every(u => typeof u === 'string');
             if (urls.length > 0 && urls.length % 3 === 0 && allStrings &&
                 (urls[0].includes('http') || urls[0].includes('tradingeconomics'))) {
-
                 for (let i = 0; i < urls.length; i += 3) {
                     seriesConfig.push({
                         url: urls[i],
@@ -3086,9 +3083,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         duration: urls[i + 2]
                     });
                 }
-                console.log('[MultiSeries] Detected flat array input, grouped into:', seriesConfig);
             } else {
-                // Regular processing (array of strings or objects)
                 seriesConfig = urls.map(u => {
                     if (typeof u === 'string') return { url: u, label: '' };
                     if (Array.isArray(u)) return { url: u[0], label: u[1], duration: u[2] };
@@ -3097,192 +3092,127 @@ async function loadMultiSeriesChart(canvas, urls, title) {
             }
         }
 
+        // v30.16: ASCII Normalization for FRED/ECOS periods
+        const normalizePeriod = (p) => {
+            if (!p) return '1y';
+            p = p.toLowerCase();
+            if (p.includes('10년') || p.includes('10y')) return '10y';
+            if (p.includes('5년') || p.includes('5y')) return '5y';
+            if (p.includes('2년') || p.includes('2y')) return '2y';
+            if (p.includes('1년') || p.includes('1y')) return '1y';
+            if (p.includes('6개월') || p.includes('6m')) return '6m';
+            return p;
+        };
+
         const seriesPromises = seriesConfig.map(async (item) => {
+            const { url, label } = item;
+            let data = null;
+            let dataSource = '';
+            const lowerUrl = url.toLowerCase();
+            if (lowerUrl.startsWith('fred(') || lowerUrl.indexOf('stlouisfed.org') !== -1) dataSource = 'fred';
+            else if (lowerUrl.startsWith('ecos(') || lowerUrl.indexOf('ecos.bok') !== -1) dataSource = 'ecos';
+            else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
+
             try {
-                let url = item.url;
-                let data = [];
-                let label = item.label || "";
-
-                let dataSource = '';
-                const lowerUrl = url.toLowerCase().trim();
-                if (lowerUrl.indexOf('fred') !== -1) dataSource = 'fred';
-                else if (lowerUrl.indexOf('ecos') !== -1) dataSource = 'ecos';
-                else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
-
-                console.log(`[MultiSeries] Final check - URL: "${url}", Source: "${dataSource}"`);
-
                 if (dataSource === 'fred') {
-                    // ... (existing FRED logic) ...
                     const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
                     if (fredMatch) {
                         const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
                         const sid = cleanArg(fredMatch[1]);
                         const per = cleanArg(fredMatch[2]) || '1년';
                         if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
-                        if (!label) label = sid;
+
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 20000); // Increased to 20s for reliability
+                        const timeoutId = setTimeout(() => controller.abort(), 20000);
                         try {
-                            const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(per)}`, { signal: controller.signal });
+                            const normalizedPer = normalizePeriod(per);
+                            const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizedPer)}`, { signal: controller.signal });
                             clearTimeout(timeoutId);
                             if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                             const resJson = await resp.json();
                             if (resJson.success) {
-                                if (!resJson.data || resJson.data.length === 0) throw new Error('FRED: 데이터가 비어있습니다.');
-                                console.log(`[MultiSeries] FRED ${sid} loaded: ${resJson.data.length} points`);
                                 data = resJson.data.map(d => {
-                                    const dt = new Date(d.date); // 'YYYY-MM-DD'
-                                    // v30.13: Safety check - ignore anomaly years (e.g. 1900)
+                                    const dt = new Date(d.date);
                                     if (dt.getFullYear() < 1970) return null;
-                                    // Standardize to local 00:00:00 to match ECOS
                                     return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
                                 }).filter(x => x !== null);
-                            } else throw new Error(`FRED: ${resJson.error || 'Unknown FRED Error'}`);
+                            } else throw new Error(`FRED: ${resJson.error || 'Unknown Error'}`);
                         } catch (fetchErr) {
                             clearTimeout(timeoutId);
                             throw fetchErr;
                         }
-                    } else throw new Error(`Invalid FRED format: ${url}`);
+                    }
                 } else if (dataSource === 'ecos') {
-                    // ... (existing ECOS logic) ...
                     const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
                     if (innerResult) {
                         const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
-                        let table = '817Y002';
-                        let itemCode = '';
-                        let period = '';
-                        if (args.length === 3) { table = args[0]; itemCode = args[1]; period = args[2]; }
-                        else if (args.length === 2) { itemCode = args[0]; period = args[1]; }
-                        else throw new Error(`Invalid ECOS format: ${url}`);
-                        if (!label) label = itemCode;
-                        // v18: Use local date components for YYYYMMDD to avoid UTC 9-hour gap
-                        const localNow = new Date();
-                        const formatLocalYMD = (d) => {
-                            const y = d.getFullYear();
-                            const m = String(d.getMonth() + 1).padStart(2, '0');
-                            const day = String(d.getDate()).padStart(2, '0');
-                            return `${y}${m}${day}`;
-                        };
-                        const endDate = formatLocalYMD(localNow);
+                        let tbl = '817Y002';
+                        let itm = '';
+                        let per = '';
+                        if (args.length === 3) { tbl = args[0]; itm = args[1]; per = args[2]; }
+                        else if (args.length === 2) { itm = args[0]; per = args[1]; }
 
-                        let startDateObj = new Date(localNow);
-                        if (period.includes('년')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(period) || 1));
-                        else if (period.includes('개월')) startDateObj.setMonth(localNow.getMonth() - (parseInt(period) || 1));
-                        else startDateObj.setFullYear(localNow.getFullYear() - 1);
-                        const startDate = formatLocalYMD(startDateObj);
                         const controller = new AbortController();
                         const timeoutId = setTimeout(() => controller.abort(), 10000);
                         try {
-                            const resp = await fetch(`/api/ecos?table=${encodeURIComponent(table)}&item=${encodeURIComponent(itemCode)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
+                            const normalizedPer = normalizePeriod(per);
+                            const resp = await fetch(`/api/ecos?table=${encodeURIComponent(tbl)}&item1=${encodeURIComponent(itm)}&period=${encodeURIComponent(normalizedPer)}`, { signal: controller.signal });
                             clearTimeout(timeoutId);
                             if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                             const resJson = await resp.json();
                             if (resJson.success && resJson.data) {
-                                console.log(`[MultiSeries] ECOS ${itemCode} loaded: ${resJson.data.length} points`);
                                 data = resJson.data.map(r => {
                                     const dStr = r.TIME;
                                     if (dStr.length === 8) {
-                                        const year = parseInt(dStr.substring(0, 4));
-                                        const month = parseInt(dStr.substring(4, 6)) - 1;
-                                        const day = parseInt(dStr.substring(6, 8));
-                                        return { date: new Date(year, month, day), value: parseFloat(r.DATA_VALUE) };
+                                        return { date: new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8))), value: parseFloat(r.DATA_VALUE) };
                                     }
                                     return null;
                                 }).filter(x => x !== null).sort((a, b) => a.date - b.date);
-                            } else {
-                                const errorDetail = resJson.error || 'ECOS API returned no data';
-                                const errorCode = resJson.code ? ` (${resJson.code})` : '';
-                                throw new Error(`ECOS: ${errorDetail}${errorCode}`);
-                            }
+                            } else throw new Error(`ECOS: ${resJson.error || 'No data'}`);
                         } catch (fetchErr) {
                             clearTimeout(timeoutId);
                             throw fetchErr;
                         }
-                    } else throw new Error(`Invalid ECOS format: ${url}`);
+                    }
                 } else if (dataSource === 'te') {
                     const actualUrl = url;
                     const period = item.duration || '';
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => {
-                        controller.abort();
-                    }, 120000);
-
+                    const timeoutId = setTimeout(() => controller.abort(), 120000);
                     try {
                         let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
                         if (period) proxyUrl += `&duration=${encodeURIComponent(period)}`;
-
                         const resp = await fetch(proxyUrl, { signal: controller.signal });
                         clearTimeout(timeoutId);
                         if (!resp.ok) throw new Error(`서버 오류 (${resp.status})`);
-
                         const resJson = await resp.json();
-                        let rawData = resJson.data;
-
-                        if (resJson.success && Array.isArray(rawData) && rawData.length > 0) {
-                            // v30.7: Diagnostic Log
-                            console.log(`[Diagnostic] loadMultiSeriesChart RAW (${actualUrl}): Array length = ${rawData.length}, Last Items =`, rawData.slice(-5));
-
-                            // v18: Source-aware filter (36h buffer) and Daily Deduplication
-                            const now = new Date();
-                            const todayFilterLimit = new Date(now.getTime() + 1 * 3600000); // v30.15: 1h buffer
-
-                            const validData = rawData.map(item => {
-                                const dStr = item.DateTime || item.Date || item.date || item.last_update;
-                                const val = item.Value !== undefined ? item.Value : (item.Close !== undefined ? item.Close : (item.Actual !== undefined ? item.Actual : item.actual));
+                        if (resJson.success && Array.isArray(resJson.data) && resJson.data.length > 0) {
+                            const todayFilterLimit = new Date(new Date().getTime() + 1 * 3600000);
+                            const validData = resJson.data.map(i => {
+                                const dStr = i.DateTime || i.Date || i.date || i.last_update;
+                                const val = i.Value !== undefined ? i.Value : (i.Close !== undefined ? i.Close : (i.Actual !== undefined ? i.Actual : i.actual));
                                 return { date: new Date(dStr), value: parseFloat(val) };
                             }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayFilterLimit)
                                 .sort((a, b) => a.date - b.date);
 
-                            // v30.7: Diagnostic Log
-                            console.log(`[Diagnostic] loadMultiSeriesChart VALID (${actualUrl}): Filter Limit = ${todayFilterLimit.toISOString()}, Array length = ${validData.length}, Last Items =`, validData.slice(-5).map(d => ({ date: d.date.toISOString(), value: d.value })));
-
-                            if (validData.length === 0) return null;
-
-                            // v18: Group by date and take last point per day
                             const dailyMap = new Map();
-                            validData.forEach(d => {
-                                const key = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
-                                dailyMap.set(key, d);
-                            });
-
-                            const finalData = Array.from(dailyMap.values()).map(d => ({
+                            validData.forEach(d => { dailyMap.set(`${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`, d); });
+                            data = Array.from(dailyMap.values()).map(d => ({
                                 date: new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate()),
                                 value: d.value
                             })).sort((a, b) => a.date - b.date);
-
-                            let finalSource = dataSource || 'te';
-                            if (actualUrl.includes('stlouisfed.org') || actualUrl.includes('fred')) finalSource = 'fred';
-                            if (actualUrl.includes('ecos.bok')) finalSource = 'ecos';
-
-                            return {
-                                url: actualUrl,
-                                label: label || actualUrl.split('/').pop().split('?')[0],
-                                dataSource: finalSource,
-                                data: finalData
-                            };
-                        } else {
-                            throw new Error(resJson.error || '데이터 형식이 올바르지 않습니다.');
                         }
                     } catch (fetchErr) {
                         clearTimeout(timeoutId);
                         throw fetchErr;
                     }
-                } else if (dataSource === '') {
-                    throw new Error(`지원하지 않는 데이터 소스입니다: ${dataSource}`);
                 }
 
                 if (data && data.length > 0) {
                     let finalSource = dataSource || 'te';
-                    // Source-aware labeling fallback
                     if (url.includes('stlouisfed.org') || url.includes('fred')) finalSource = 'fred';
                     if (url.includes('ecos.bok')) finalSource = 'ecos';
-
-                    return {
-                        url: url,
-                        label: label || url.split('/').pop().split('?')[0],
-                        dataSource: finalSource,
-                        data: data
-                    };
+                    return { url, label: label || url.split('/').pop().split('?')[0], dataSource: finalSource, data };
                 }
                 return null;
             } catch (err) {
@@ -3293,10 +3223,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
 
         const results = await Promise.all(seriesPromises);
         const validResults = results.filter(r => r && r.data.length > 0);
-
-        if (validResults.length === 0) {
-            throw new Error("유효한 데이터가 없습니다.");
-        }
+        if (validResults.length === 0) throw new Error("유효한 데이터가 없습니다.");
 
         drawMultiSeriesLineChart(canvas, validResults, title);
         if (loadingEl) loadingEl.style.display = 'none';

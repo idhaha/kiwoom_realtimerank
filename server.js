@@ -717,21 +717,20 @@ app.get('/api/fred', (req, res) => {
     const command = `python fred_api.py "${seriesId}" "${period}"`;
     console.log(`[API] Executing: ${command}`);
 
-    exec(command, { cwd: __dirname }, (error, stdout, stderr) => {
+    exec(command, { cwd: __dirname, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
         if (error) {
-            console.error(`[FRED] ❌ Exec error: ${error.message}`);
+            fileLog(`[FRED] ❌ Exec error: ${error.message}`);
             return res.status(500).json({ success: false, error: error.message, stdout, stderr });
         }
         if (stderr && !stderr.includes('Warning')) {
-            console.warn(`[FRED] ⚠️ Stderr: ${stderr}`);
+            fileLog(`[FRED] ⚠️ Stderr: ${stderr}`);
         }
 
         try {
-            // v30.9.3: Extract only the JSON part from stdout to avoid parse errors caused by warnings
             const jsonStart = stdout.indexOf('{');
             const jsonEnd = stdout.lastIndexOf('}');
             if (jsonStart === -1 || jsonEnd === -1) {
-                console.error(`[FRED] ❌ No JSON found in output: ${stdout}`);
+                fileLog(`[FRED] ❌ No JSON found in output: ${stdout}`);
                 throw new Error('No JSON object found in stdout');
             }
             const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
@@ -739,17 +738,16 @@ app.get('/api/fred', (req, res) => {
             const result = JSON.parse(jsonString);
             if (result.success) {
                 console.log(`[FRED] ✅ Success: ${seriesId} (${result.data?.length || 0} items)`);
-                // 캐시 저장
                 fredCache[cacheKey] = {
                     timestamp: Date.now(),
                     data: result
                 };
             } else {
-                console.error(`[FRED] ❌ Script returned failure: ${result.error}`);
+                fileLog(`[FRED] ❌ Script returned failure: ${result.error}`);
             }
             res.json(result);
         } catch (e) {
-            console.error(`[FRED] ❌ JSON Parse Error: ${e.message}, Output: ${stdout}`);
+            fileLog(`[FRED] ❌ JSON Parse Error: ${e.message}, Output: ${stdout}`);
             res.status(500).json({ success: false, error: 'Invalid output from script: ' + stdout });
         }
     });
