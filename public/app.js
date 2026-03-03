@@ -3267,8 +3267,22 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         clearTimeout(timeoutId);
                         throw fetchErr;
                     }
-                } else {
+                } else if (dataSource === '') {
                     throw new Error(`지원하지 않는 데이터 소스입니다: ${dataSource}`);
+                }
+
+                if (data && data.length > 0) {
+                    let finalSource = dataSource || 'te';
+                    // Source-aware labeling fallback
+                    if (url.includes('stlouisfed.org') || url.includes('fred')) finalSource = 'fred';
+                    if (url.includes('ecos.bok')) finalSource = 'ecos';
+
+                    return {
+                        url: url,
+                        label: label || url.split('/').pop().split('?')[0],
+                        dataSource: finalSource,
+                        data: data
+                    };
                 }
                 return null;
             } catch (err) {
@@ -3828,55 +3842,51 @@ async function refreshExchangeRateCharts(tabId) {
         }
     };
 
-    // 1. TradingEconomics Charts
+    // 1. Prepare all reload promises
+    const promises = [];
+
+    // TradingEconomics Charts
     for (const box of chartBoxes) {
         const url = box.dataset.teUrl;
         const duration = box.dataset.teDuration || '';
-        const idx = box.dataset.teIdx;
         const canvas = box.querySelector('.te-chart-canvas');
         const title = box.querySelector('.finviz-chart-title')?.textContent || '';
 
         if (url && canvas) {
-            try {
-                await loadTradingEconomicsChart(canvas, url, title, duration);
-            } catch (e) {
-                console.error('[ExchangeRate] Chart load failed:', e);
-            }
+            promises.push(loadTradingEconomicsChart(canvas, url, title, duration).finally(checkComplete));
+        } else {
+            checkComplete();
         }
-        checkComplete();
     }
 
-    // 2. Multi-Series / FRED Charts
+    // Multi-Series / FRED Charts
     for (const canvas of multiCanvases) {
         const box = canvas.closest('.multi-chart-box');
         if (box) {
-            try {
-                let seriesConfig = [];
-                // Try reading data-series first
-                if (box.dataset.series) {
-                    try {
-                        seriesConfig = JSON.parse(decodeURIComponent(box.dataset.series));
-                    } catch (e) { /* ignore */ }
-                }
-
-                // Fallback to data-urls if series not found
-                if (seriesConfig.length === 0 && box.dataset.urls) {
-                    let rawUrls = box.dataset.urls;
-                    try { rawUrls = decodeURIComponent(rawUrls); } catch (e) { }
-                    const urls = JSON.parse(rawUrls);
-                    seriesConfig = urls.map(u => ({ url: u, label: '' }));
-                }
-
-                if (seriesConfig.length > 0) {
-                    const title = box.querySelector('.finviz-chart-title')?.textContent || '';
-                    await loadMultiSeriesChart(canvas, seriesConfig, title);
-                }
-            } catch (e) {
-                console.error('[ExchangeRate] Multi-chart load failed:', e);
+            let seriesConfig = [];
+            if (box.dataset.series) {
+                try { seriesConfig = JSON.parse(decodeURIComponent(box.dataset.series)); } catch (e) { }
             }
+            if (seriesConfig.length === 0 && box.dataset.urls) {
+                try {
+                    const urls = JSON.parse(decodeURIComponent(box.dataset.urls));
+                    seriesConfig = urls.map(u => ({ url: u, label: '' }));
+                } catch (e) { }
+            }
+
+            if (seriesConfig.length > 0) {
+                const title = box.querySelector('.finviz-chart-title')?.textContent || '';
+                promises.push(loadMultiSeriesChart(canvas, seriesConfig, title).finally(checkComplete));
+            } else {
+                checkComplete();
+            }
+        } else {
+            checkComplete();
         }
-        checkComplete();
     }
+
+    // Wait all (but checkComplete already handles individual counter)
+    await Promise.allSettled(promises);
 }
 
 /**

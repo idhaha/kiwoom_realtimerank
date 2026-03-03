@@ -717,7 +717,7 @@ app.get('/api/fred', (req, res) => {
     const command = `python fred_api.py "${seriesId}" "${period}"`;
     console.log(`[API] Executing: ${command}`);
 
-    exec(command, (error, stdout, stderr) => {
+    exec(command, { cwd: __dirname }, (error, stdout, stderr) => {
         if (error) {
             console.error(`[FRED] ❌ Exec error: ${error.message}`);
             return res.status(500).json({ success: false, error: error.message, stdout, stderr });
