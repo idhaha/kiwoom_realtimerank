@@ -4794,13 +4794,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const localData = loadFromLocalStorage();
 
     let finalData = null;
-    if (serverData && localData) {
-        const serverTime = serverData.updatedAt || 0;
-        const localTime = localData.updatedAt || 0;
-        console.log(`⏱️ 데이터 시점 비교 - Server: ${new Date(serverTime).toLocaleString()}, Local: ${new Date(localTime).toLocaleString()}`);
-        finalData = serverTime >= localTime ? serverData : localData;
+    if (serverData) {
+        // [v28] Prioritize server data ALWAYS for consistency across PCs
+        console.log("☁️ 서버 데이터를 우선적으로 사용합니다.");
+        finalData = serverData;
     } else {
-        finalData = serverData || localData;
+        finalData = localData;
     }
 
     if (finalData) {
@@ -5036,11 +5035,23 @@ function initMemoEditor() {
         console.log("✅ [initMemoEditor] Quill successfully initialized");
         loadMemo();
 
+        // [v28] Auto-save disabled per user request. Use manual 'Save' button.
+        /*
         let saveTimeout;
         quillEditor.on('text-change', () => {
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(saveMemoAuto, 1000);
         });
+        */
+
+        // Wire Manual Save Button
+        const saveBtn = document.getElementById('memoSaveBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                console.log("💾 [Memo] Manual save triggered");
+                saveMemo();
+            });
+        }
     } catch (e) {
         console.error("❌ [initMemoEditor] Quill init failed:", e);
     }
