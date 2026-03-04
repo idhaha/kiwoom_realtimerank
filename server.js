@@ -498,6 +498,7 @@ app.get('/api/trading-economics', async (req, res) => {
                 });
 
                 const page = await browser.newPage();
+                page.setDefaultTimeout(60000); // v30.9.10: Set explicit 60s timeout for Puppeteer
                 await page.setViewport({ width: 1920, height: 1080 });
 
                 // Stealth
@@ -616,7 +617,7 @@ app.get('/api/trading-economics', async (req, res) => {
                     console.log(`   🎯 Stage 1: History (${targetBtn})...`);
                     const clicked = await robustClick(targetBtn);
                     if (clicked) {
-                        await new Promise(r => setTimeout(r, 8000)); // Wait longer for history load
+                        await new Promise(r => setTimeout(r, 6000)); // v30.9.10: Reduce wait from 8s to 6s
                         const history = await page.evaluate(extractPoints);
                         if (history && history.length > 0) {
                             console.log(`   📊 Captured ${history.length} points (History Stage)`);
@@ -637,7 +638,7 @@ app.get('/api/trading-economics', async (req, res) => {
                             });
                         }
                     });
-                    await new Promise(r => setTimeout(r, 6000));
+                    await new Promise(r => setTimeout(r, 3000)); // v30.9.10: Reduce wait from 6s to 3s
                     const daily = await page.evaluate(extractPoints);
                     if (daily && daily.length > 0) {
                         console.log(`   📊 Captured ${daily.length} points (Daily Stage)`);
@@ -715,15 +716,17 @@ app.get('/api/fred', (req, res) => {
 
     // Try 'python' first, then 'python3' as fallback
     const runFred = (cmd) => {
-        console.log(`[FRED] 🔄 Executing: ${cmd} fred_api.py "${seriesId}" "${period}"`);
-        exec(`${cmd} fred_api.py "${seriesId}" "${period}"`, { cwd: __dirname, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        const fullCmd = `${cmd} fred_api.py "${seriesId}" "${period}"`;
+        console.log(`[FRED] 🔄 Executing: ${fullCmd}`);
+        exec(fullCmd, { cwd: __dirname, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
             if (error) {
                 if (cmd === 'python') {
                     console.warn(`[FRED] ⚠️ 'python' failed, retrying with 'python3'...`);
                     return runFred('python3');
                 }
-                fileLog(`[FRED] ❌ Exec error: ${error.message}`);
-                return res.status(500).json({ success: false, error: error.message, stdout, stderr });
+                fileLog(`[FRED] ❌ Exec error (${cmd}): ${error.message}`);
+                fileLog(`[FRED] ❌ Stderr: ${stderr}`);
+                return res.status(500).json({ success: false, error: error.message, cmd: fullCmd, stderr });
             }
             if (stderr && !stderr.includes('Warning')) {
                 fileLog(`[FRED] ⚠️ Stderr: ${stderr}`);

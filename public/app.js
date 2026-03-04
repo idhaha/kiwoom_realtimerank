@@ -2626,11 +2626,21 @@ async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
             controller.abort();
-            console.warn(`[TradingEconomics] Timeout (120s) for ${url}`);
-        }, 120000);
+            console.warn(`[TradingEconomics] Timeout (180s) for ${url}`);
+        }, 180000);
 
         const response = await fetch(proxyUrl, { signal: controller.signal });
         clearTimeout(timeoutId);
+
+        // v30.9.10: Handle non-JSON (HTML) responses from Gateway/Proxy
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('text/html')) {
+            const htmlText = await response.text();
+            if (htmlText.includes('504') || htmlText.includes('Time-out')) throw new Error('서버 타임아웃 (Proxy 504). 데이터가 많거나 서버가 느립니다.');
+            if (htmlText.includes('502')) throw new Error('서버 연결 오류 (Proxy 502).');
+            throw new Error('서버가 JSON 대신 HTML을 반환했습니다. (Proxy Error)');
+        }
+
         const result = await response.json();
 
         if (!result.success) {
@@ -3128,7 +3138,15 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             const normalizedPer = normalizePeriod(per);
                             const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizedPer)}`, { signal: controller.signal });
                             clearTimeout(timeoutId);
-                            if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
+
+                            if (!resp.ok) {
+                                // FRED often returns 500 with a reason. Detect HTML error page first.
+                                const ct = resp.headers.get('content-type');
+                                if (ct && ct.includes('text/html')) throw new Error(`서버 오류 (HTTP ${resp.status}) - HTML 응답`);
+                                const errJson = await resp.json().catch(() => ({ error: 'Unknown JSON Error' }));
+                                throw new Error(`FRED 오류: ${errJson.error || errJson.details || `HTTP ${resp.status}`}`);
+                            }
+
                             const resJson = await resp.json();
                             if (resJson.success) {
                                 data = resJson.data.map(d => {
@@ -3193,13 +3211,22 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                     const actualUrl = url;
                     const period = item.duration || '';
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 120000);
+                    const timeoutId = setTimeout(() => controller.abort(), 180000); // v30.9.10: Increase to 180s
                     try {
                         let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
                         if (period) proxyUrl += `&duration=${encodeURIComponent(period)}`;
                         const resp = await fetch(proxyUrl, { signal: controller.signal });
                         clearTimeout(timeoutId);
-                        if (!resp.ok) throw new Error(`서버 오류 (${resp.status})`);
+
+                        if (!resp.ok) {
+                            const ct = resp.headers.get('content-type');
+                            if (ct && ct.includes('text/html')) throw new Error(`서버 타임아웃/오류 (HTTP ${resp.status})`);
+                            throw new Error(`서버 오류 (${resp.status})`);
+                        }
+
+                        const ct = resp.headers.get('content-type');
+                        if (ct && ct.includes('text/html')) throw new Error('서버가 HTML을 반환했습니다. (Timeout 가능성)');
+
                         const resJson = await resp.json();
                         if (resJson.success && Array.isArray(resJson.data) && resJson.data.length > 0) {
                             const todayFilterLimit = new Date(new Date().getTime() + 1 * 3600000);
