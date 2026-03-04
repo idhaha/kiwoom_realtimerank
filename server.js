@@ -459,7 +459,7 @@ app.get('/api/finviz-image', async (req, res) => {
  * 환율, 금리 등 경제 지표 데이터 제공
  */
 let activeBrowsers = 0; // 동시에 실행 중인 브라우저 수
-const MAX_BROWSERS = 1; // 오라클 서버 메모리(1GB) 고려 시 1개가 안정적
+const MAX_BROWSERS = 2; // v30.9.12: Increased from 1 for better concurrency on dual-core Oracle Cloud
 
 // v30.9.11: Memory Cache for TradingEconomics
 const teCache = {};
@@ -535,7 +535,7 @@ app.get('/api/trading-economics', async (req, res) => {
                 while (retryCount < 2) {
                     try {
                         console.log(`   🌐 Navigating... (Attempt ${retryCount + 1})`);
-                        await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
+                        await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); // v30.9.12: Increased to 60s
                         break;
                     } catch (e) {
                         retryCount++;
@@ -628,7 +628,7 @@ app.get('/api/trading-economics', async (req, res) => {
                     console.log(`   🎯 Stage 1: History (${targetBtn})...`);
                     const clicked = await robustClick(targetBtn);
                     if (clicked) {
-                        await new Promise(r => setTimeout(r, 6000)); // v30.9.10: Reduce wait from 8s to 6s
+                        await new Promise(r => setTimeout(r, 8000)); // v30.9.12: Restored to 8s
                         const history = await page.evaluate(extractPoints);
                         if (history && history.length > 0) {
                             console.log(`   📊 Captured ${history.length} points (History Stage)`);
@@ -649,7 +649,7 @@ app.get('/api/trading-economics', async (req, res) => {
                             });
                         }
                     });
-                    await new Promise(r => setTimeout(r, 3000)); // v30.9.10: Reduce wait from 6s to 3s
+                    await new Promise(r => setTimeout(r, 6000)); // v30.9.12: Restored to 6s
                     const daily = await page.evaluate(extractPoints);
                     if (daily && daily.length > 0) {
                         console.log(`   📊 Captured ${daily.length} points (Daily Stage)`);
