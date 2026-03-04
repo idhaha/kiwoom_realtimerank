@@ -3133,7 +3133,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
 
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 20000);
+                        const timeoutId = setTimeout(() => controller.abort(), 180000); // v30.9.11: Sync to 180s
                         try {
                             const normalizedPer = normalizePeriod(per);
                             const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizedPer)}`, { signal: controller.signal });
@@ -3187,7 +3187,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         const startDate = formatLocalYMD(startDateObj);
 
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 20000);
+                        const timeoutId = setTimeout(() => controller.abort(), 180000); // v30.9.11: Sync to 180s
                         try {
                             const resp = await fetch(`/api/ecos?table=${encodeURIComponent(tbl)}&item=${encodeURIComponent(itm)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
                             clearTimeout(timeoutId);

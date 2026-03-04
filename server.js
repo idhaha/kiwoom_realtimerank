@@ -461,6 +461,10 @@ app.get('/api/finviz-image', async (req, res) => {
 let activeBrowsers = 0; // 동시에 실행 중인 브라우저 수
 const MAX_BROWSERS = 1; // 오라클 서버 메모리(1GB) 고려 시 1개가 안정적
 
+// v30.9.11: Memory Cache for TradingEconomics
+const teCache = {};
+const TE_CACHE_DURATION = 60 * 60 * 1000; // 1시간
+
 app.get('/api/trading-economics', async (req, res) => {
     let originalUrl = req.query.url;
     const duration = req.query.duration || ''; // e.g., '10년'
@@ -468,6 +472,13 @@ app.get('/api/trading-economics', async (req, res) => {
 
     originalUrl = originalUrl.replace(/([^:]\/)\/+/g, '$1');
     console.log(`📡 [TE Proxy] Request: ${originalUrl}, Duration: ${duration || 'default'}`);
+
+    const cacheKey = `${originalUrl}_${duration}`;
+    const cached = teCache[cacheKey];
+    if (cached && (Date.now() - cached.timestamp < TE_CACHE_DURATION)) {
+        console.log(`   🧊 [TE] Serving from Cache: ${originalUrl}`);
+        return res.json({ success: true, data: cached.data });
+    }
 
     try {
         const targetUrl = originalUrl;
@@ -659,6 +670,13 @@ app.get('/api/trading-economics', async (req, res) => {
                     .map(([x, y]) => ({ DateTime: new Date(x).toISOString(), Value: y }));
 
                 console.log(`   ✅ Success: Merged total ${masterMap.size} points.`);
+
+                // v30.9.11: Store in cache
+                teCache[cacheKey] = {
+                    timestamp: Date.now(),
+                    data: finalData
+                };
+
                 res.set('Cache-Control', 'public, max-age=300');
                 return res.json({ success: true, data: finalData });
 
@@ -680,10 +698,21 @@ app.get('/api/trading-economics', async (req, res) => {
                 'Referer': 'https://tradingeconomics.com/'
             }
         });
-        let data = response.data;
+
+        let data = response.data; // v30.9.11: RESTORED definition
         if (typeof data === 'string') {
             try { data = JSON.parse(data.trim()); } catch (e) { }
         }
+
+        // v30.9.11: Save to Cache
+        if (Array.isArray(data) && data.length > 0) {
+            teCache[cacheKey] = {
+                timestamp: Date.now(),
+                data: data
+            };
+            console.log(`[TE] ✅ Cache Updated: ${originalUrl}`);
+        }
+
         res.set('Cache-Control', 'public, max-age=300');
         res.json({ success: true, data: data });
 
