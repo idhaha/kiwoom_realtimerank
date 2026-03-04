@@ -3811,51 +3811,50 @@ async function refreshExchangeRateCharts(tabId) {
         }
     };
 
-    // 1. Prepare all reload promises
-    const promises = [];
+    // 1. Prepare and Run Sequential Loading (v30.9.13: To avoid 504 Gateway Timeout)
+    const runSequential = async () => {
+        // TradingEconomics Charts
+        for (const box of chartBoxes) {
+            const url = box.dataset.teUrl;
+            const duration = box.dataset.teDuration || '';
+            const canvas = box.querySelector('.te-chart-canvas');
+            const title = box.querySelector('.finviz-chart-title')?.textContent || '';
 
-    // TradingEconomics Charts
-    for (const box of chartBoxes) {
-        const url = box.dataset.teUrl;
-        const duration = box.dataset.teDuration || '';
-        const canvas = box.querySelector('.te-chart-canvas');
-        const title = box.querySelector('.finviz-chart-title')?.textContent || '';
-
-        if (url && canvas) {
-            promises.push(loadTradingEconomicsChart(canvas, url, title, duration).finally(checkComplete));
-        } else {
-            checkComplete();
-        }
-    }
-
-    // Multi-Series / FRED Charts
-    for (const canvas of multiCanvases) {
-        const box = canvas.closest('.multi-chart-box');
-        if (box) {
-            let seriesConfig = [];
-            if (box.dataset.series) {
-                try { seriesConfig = JSON.parse(decodeURIComponent(box.dataset.series)); } catch (e) { }
-            }
-            if (seriesConfig.length === 0 && box.dataset.urls) {
-                try {
-                    const urls = JSON.parse(decodeURIComponent(box.dataset.urls));
-                    seriesConfig = urls.map(u => ({ url: u, label: '' }));
-                } catch (e) { }
-            }
-
-            if (seriesConfig.length > 0) {
-                const title = box.querySelector('.finviz-chart-title')?.textContent || '';
-                promises.push(loadMultiSeriesChart(canvas, seriesConfig, title).finally(checkComplete));
+            if (url && canvas) {
+                await loadTradingEconomicsChart(canvas, url, title, duration).finally(checkComplete);
             } else {
                 checkComplete();
             }
-        } else {
-            checkComplete();
         }
-    }
 
-    // Wait all (but checkComplete already handles individual counter)
-    await Promise.allSettled(promises);
+        // Multi-Series / FRED Charts
+        for (const canvas of multiCanvases) {
+            const box = canvas.closest('.multi-chart-box');
+            if (box) {
+                let seriesConfig = [];
+                if (box.dataset.series) {
+                    try { seriesConfig = JSON.parse(decodeURIComponent(box.dataset.series)); } catch (e) { }
+                }
+                if (seriesConfig.length === 0 && box.dataset.urls) {
+                    try {
+                        const urls = JSON.parse(decodeURIComponent(box.dataset.urls));
+                        seriesConfig = urls.map(u => ({ url: u, label: '' }));
+                    } catch (e) { }
+                }
+
+                if (seriesConfig.length > 0) {
+                    const title = box.querySelector('.finviz-chart-title')?.textContent || '';
+                    await loadMultiSeriesChart(canvas, seriesConfig, title).finally(checkComplete);
+                } else {
+                    checkComplete();
+                }
+            } else {
+                checkComplete();
+            }
+        }
+    };
+
+    await runSequential();
 }
 
 /**

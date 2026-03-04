@@ -459,7 +459,7 @@ app.get('/api/finviz-image', async (req, res) => {
  * 환율, 금리 등 경제 지표 데이터 제공
  */
 let activeBrowsers = 0; // 동시에 실행 중인 브라우저 수
-const MAX_BROWSERS = 2; // v30.9.12: Increased from 1 for better concurrency on dual-core Oracle Cloud
+const MAX_BROWSERS = 3; // v30.9.13: Increased for buffer with sequential loading
 
 // v30.9.11: Memory Cache for TradingEconomics
 const teCache = {};
