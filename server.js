@@ -713,44 +713,47 @@ app.get('/api/fred', (req, res) => {
         return res.json(cached.data);
     }
 
-    // Python 스크립트 실행
-    const command = `python fred_api.py "${seriesId}" "${period}"`;
-    console.log(`[API] Executing: ${command}`);
-
-    exec(command, { cwd: __dirname, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) {
-            fileLog(`[FRED] ❌ Exec error: ${error.message}`);
-            return res.status(500).json({ success: false, error: error.message, stdout, stderr });
-        }
-        if (stderr && !stderr.includes('Warning')) {
-            fileLog(`[FRED] ⚠️ Stderr: ${stderr}`);
-        }
-
-        try {
-            const jsonStart = stdout.indexOf('{');
-            const jsonEnd = stdout.lastIndexOf('}');
-            if (jsonStart === -1 || jsonEnd === -1) {
-                fileLog(`[FRED] ❌ No JSON found in output: ${stdout}`);
-                throw new Error('No JSON object found in stdout');
+    // Try 'python' first, then 'python3' as fallback
+    const runFred = (cmd) => {
+        console.log(`[FRED] 🔄 Executing: ${cmd} fred_api.py "${seriesId}" "${period}"`);
+        exec(`${cmd} fred_api.py "${seriesId}" "${period}"`, { cwd: __dirname, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+            if (error) {
+                if (cmd === 'python') {
+                    console.warn(`[FRED] ⚠️ 'python' failed, retrying with 'python3'...`);
+                    return runFred('python3');
+                }
+                fileLog(`[FRED] ❌ Exec error: ${error.message}`);
+                return res.status(500).json({ success: false, error: error.message, stdout, stderr });
             }
-            const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
-
-            const result = JSON.parse(jsonString);
-            if (result.success) {
-                console.log(`[FRED] ✅ Success: ${seriesId} (${result.data?.length || 0} items)`);
-                fredCache[cacheKey] = {
-                    timestamp: Date.now(),
-                    data: result
-                };
-            } else {
-                fileLog(`[FRED] ❌ Script returned failure: ${result.error}`);
+            if (stderr && !stderr.includes('Warning')) {
+                fileLog(`[FRED] ⚠️ Stderr: ${stderr}`);
             }
-            res.json(result);
-        } catch (e) {
-            fileLog(`[FRED] ❌ JSON Parse Error: ${e.message}, Output: ${stdout}`);
-            res.status(500).json({ success: false, error: 'Invalid output from script: ' + stdout });
-        }
-    });
+
+            try {
+                const jsonStart = stdout.indexOf('{');
+                const jsonEnd = stdout.lastIndexOf('}');
+                if (jsonStart === -1 || jsonEnd === -1) {
+                    fileLog(`[FRED] ❌ No JSON found in output: ${stdout}`);
+                    throw new Error('No JSON object found in stdout');
+                }
+                const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
+                const result = JSON.parse(jsonString);
+
+                if (result.success) {
+                    console.log(`[FRED] ✅ Success: ${seriesId} (${result.data?.length || 0} items)`);
+                    fredCache[cacheKey] = { timestamp: Date.now(), data: result };
+                } else {
+                    fileLog(`[FRED] ❌ Script failure: ${result.error}`);
+                }
+                res.json(result);
+            } catch (e) {
+                fileLog(`[FRED] ❌ JSON Parse Error: ${e.message}, Output: ${stdout}`);
+                res.status(500).json({ success: false, error: 'Invalid output from script: ' + stdout });
+            }
+        });
+    };
+
+    runFred('python');
 });
 
 /**

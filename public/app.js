@@ -3119,7 +3119,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                     if (fredMatch) {
                         const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
                         const sid = cleanArg(fredMatch[1]);
-                        const per = cleanArg(fredMatch[2]) || '1년';
+                        const per = cleanArg(fredMatch[2]) || '1y';
                         if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
 
                         const controller = new AbortController();
@@ -3133,7 +3133,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             if (resJson.success) {
                                 data = resJson.data.map(d => {
                                     const dt = new Date(d.date);
-                                    if (dt.getFullYear() < 1970) return null;
+                                    if (isNaN(dt.getTime())) return null;
                                     return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
                                 }).filter(x => x !== null);
                             } else throw new Error(`FRED: ${resJson.error || 'Unknown Error'}`);
@@ -3152,11 +3152,26 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                         if (args.length === 3) { tbl = args[0]; itm = args[1]; per = args[2]; }
                         else if (args.length === 2) { itm = args[0]; per = args[1]; }
 
+                        // v30.16: Restore local date calculation for ECOS (item, start, end)
+                        const localNow = new Date();
+                        const formatLocalYMD = (d) => {
+                            const y = d.getFullYear();
+                            const m = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            return `${y}${m}${day}`;
+                        };
+                        const endDate = formatLocalYMD(localNow);
+                        let startDateObj = new Date(localNow);
+                        const normalizedPer = normalizePeriod(per);
+                        if (normalizedPer.includes('y')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(normalizedPer) || 1));
+                        else if (normalizedPer.includes('m')) startDateObj.setMonth(localNow.getMonth() - (parseInt(normalizedPer) || 1));
+                        else startDateObj.setFullYear(localNow.getFullYear() - 1);
+                        const startDate = formatLocalYMD(startDateObj);
+
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 10000);
+                        const timeoutId = setTimeout(() => controller.abort(), 20000);
                         try {
-                            const normalizedPer = normalizePeriod(per);
-                            const resp = await fetch(`/api/ecos?table=${encodeURIComponent(tbl)}&item1=${encodeURIComponent(itm)}&period=${encodeURIComponent(normalizedPer)}`, { signal: controller.signal });
+                            const resp = await fetch(`/api/ecos?table=${encodeURIComponent(tbl)}&item=${encodeURIComponent(itm)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
                             clearTimeout(timeoutId);
                             if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
                             const resJson = await resp.json();
