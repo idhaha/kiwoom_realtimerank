@@ -3117,155 +3117,156 @@ async function loadMultiSeriesChart(canvas, urls, title) {
         const results = [];
         for (const item of seriesConfig) {
             const res = await (async (item) => {
-                const { url, label } = item;
-                let data = null;
-                let dataSource = '';
-                const lowerUrl = url.toLowerCase();
-                if (lowerUrl.startsWith('fred(') || lowerUrl.indexOf('stlouisfed.org') !== -1) dataSource = 'fred';
-                else if (lowerUrl.startsWith('ecos(') || lowerUrl.indexOf('ecos.bok') !== -1) dataSource = 'ecos';
-                else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
+                try {
+                    const { url, label } = item;
+                    let data = null;
+                    let dataSource = '';
+                    const lowerUrl = url.toLowerCase();
+                    if (lowerUrl.startsWith('fred(') || lowerUrl.indexOf('stlouisfed.org') !== -1) dataSource = 'fred';
+                    else if (lowerUrl.startsWith('ecos(') || lowerUrl.indexOf('ecos.bok') !== -1) dataSource = 'ecos';
+                    else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
 
-                let retryCount = 0;
-                const MAX_RETRIES = 1;
+                    let retryCount = 0;
+                    const MAX_RETRIES = 1;
 
-                while (retryCount <= MAX_RETRIES) {
-                    try {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s
+                    while (retryCount <= MAX_RETRIES) {
+                        try {
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s
 
-                        let fetchUrl = "";
-                        if (dataSource === 'fred') {
-                            const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
-                            if (fredMatch) {
-                                const sid = fredMatch[1].replace(/['"“”‘’]/g, '').trim();
-                                const per = fredMatch[2] ? fredMatch[2].replace(/['"“”‘’]/g, '').trim() : '1y';
-                                fetchUrl = `/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizePeriod(per))}`;
+                            let fetchUrl = "";
+                            if (dataSource === 'fred') {
+                                const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
+                                if (fredMatch) {
+                                    const sid = fredMatch[1].replace(/['"“”‘’]/g, '').trim();
+                                    const per = fredMatch[2] ? fredMatch[2].replace(/['"“”‘’]/g, '').trim() : '1y';
+                                    fetchUrl = `/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizePeriod(per))}`;
+                                }
+                            } else if (dataSource === 'ecos') {
+                                const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
+                                if (innerResult) {
+                                    const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
+                                    let tbl = '817Y002';
+                                    let itm = '';
+                                    let per = '';
+                                    if (args.length === 3) { tbl = args[0]; itm = args[1]; per = args[2]; }
+                                    else if (args.length === 2) { itm = args[0]; per = args[1]; }
+
+                                    const localNow = new Date();
+                                    const formatLocalYMD = (d) => {
+                                        const y = d.getFullYear();
+                                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                                        const day = String(d.getDate()).padStart(2, '0');
+                                        return `${y}${m}${day}`;
+                                    };
+                                    const endDate = formatLocalYMD(localNow);
+                                    let startDateObj = new Date(localNow);
+                                    const normalizedPer = normalizePeriod(per);
+                                    if (normalizedPer.includes('y')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(normalizedPer) || 1));
+                                    else if (normalizedPer.includes('m')) startDateObj.setMonth(localNow.getMonth() - (parseInt(normalizedPer) || 1));
+                                    else startDateObj.setFullYear(localNow.getFullYear() - 1);
+                                    const startDate = formatLocalYMD(startDateObj);
+                                    fetchUrl = `/api/ecos?table=${encodeURIComponent(tbl)}&item=${encodeURIComponent(itm)}&start=${startDate}&end=${endDate}`;
+                                }
+                            } else if (dataSource === 'te') {
+                                const period = item.duration || '';
+                                fetchUrl = `/api/trading-economics?url=${encodeURIComponent(url)}${period ? `&duration=${encodeURIComponent(period)}` : ''}`;
                             }
-                        } else if (dataSource === 'ecos') {
-                            const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
-                            if (innerResult) {
-                                const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
-                                let tbl = '817Y002';
-                                let itm = '';
-                                let per = '';
-                                if (args.length === 3) { tbl = args[0]; itm = args[1]; per = args[2]; }
-                                else if (args.length === 2) { itm = args[0]; per = args[1]; }
 
-                                const localNow = new Date();
-                                const formatLocalYMD = (d) => {
-                                    const y = d.getFullYear();
-                                    const m = String(d.getMonth() + 1).padStart(2, '0');
-                                    const day = String(d.getDate()).padStart(2, '0');
-                                    return `${y}${m}${day}`;
-                                };
-                                const endDate = formatLocalYMD(localNow);
-                                let startDateObj = new Date(localNow);
-                                const normalizedPer = normalizePeriod(per);
-                                if (normalizedPer.includes('y')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(normalizedPer) || 1));
-                                else if (normalizedPer.includes('m')) startDateObj.setMonth(localNow.getMonth() - (parseInt(normalizedPer) || 1));
-                                else startDateObj.setFullYear(localNow.getFullYear() - 1);
-                                const startDate = formatLocalYMD(startDateObj);
-                                fetchUrl = `/api/ecos?table=${encodeURIComponent(tbl)}&item=${encodeURIComponent(itm)}&start=${startDate}&end=${endDate}`;
+                            if (!fetchUrl) break;
+
+                            const resp = await fetch(fetchUrl, { signal: controller.signal });
+                            clearTimeout(timeoutId);
+
+                            if (!resp.ok) {
+                                const ct = resp.headers.get('content-type');
+                                if (resp.status === 504 && retryCount < MAX_RETRIES) {
+                                    console.warn(`[MultiSeries] 504 detected for ${url}. Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+                                    retryCount++;
+                                    await new Promise(r => setTimeout(r, 2000)); // Wait before retry
+                                    continue;
+                                }
+                                if (ct && ct.includes('text/html')) throw new Error(`서버 타임아웃/오류 (HTTP ${resp.status})`);
+                                throw new Error(`서버 오류 (${resp.status})`);
                             }
-                        } else if (dataSource === 'te') {
-                            const period = item.duration || '';
-                            fetchUrl = `/api/trading-economics?url=${encodeURIComponent(url)}${period ? `&duration=${encodeURIComponent(period)}` : ''}`;
-                        }
 
-                        if (!fetchUrl) break;
-
-                        const resp = await fetch(fetchUrl, { signal: controller.signal });
-                        clearTimeout(timeoutId);
-
-                        if (!resp.ok) {
                             const ct = resp.headers.get('content-type');
-                            if (resp.status === 504 && retryCount < MAX_RETRIES) {
-                                console.warn(`[MultiSeries] 504 detected for ${url}. Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+                            if (ct && ct.includes('text/html')) throw new Error('서버가 HTML을 반환했습니다. (Timeout 가능성)');
+
+                            const resJson = await resp.json();
+                            if (resJson.success) {
+                                if (dataSource === 'fred') {
+                                    data = resJson.data.map(d => {
+                                        const dt = new Date(d.date);
+                                        if (isNaN(dt.getTime())) return null;
+                                        return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
+                                    }).filter(x => x !== null);
+                                } else if (dataSource === 'ecos' && resJson.data) {
+                                    data = resJson.data.map(r => {
+                                        const dStr = r.TIME;
+                                        if (dStr.length === 8) {
+                                            return { date: new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8))), value: parseFloat(r.DATA_VALUE) };
+                                        }
+                                        return null;
+                                    }).filter(x => x !== null).sort((a, b) => a.date - b.date);
+                                } else if (dataSource === 'te' && Array.isArray(resJson.data) && resJson.data.length > 0) {
+                                    const todayFilterLimit = new Date(new Date().getTime() + 1 * 3600000);
+                                    const validData = resJson.data.map(i => {
+                                        const dStr = i.DateTime || i.Date || i.date || i.last_update;
+                                        const val = i.Value !== undefined ? i.Value : (i.Close !== undefined ? i.Close : (i.Actual !== undefined ? i.Actual : i.actual));
+                                        return { date: new Date(dStr), value: parseFloat(val) };
+                                    }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayFilterLimit)
+                                        .sort((a, b) => a.date - b.date);
+
+                                    const dailyMap = new Map();
+                                    validData.forEach(d => { dailyMap.set(`${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`, d); });
+                                    data = Array.from(dailyMap.values()).map(d => ({
+                                        date: new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate()),
+                                        value: d.value
+                                    })).sort((a, b) => a.date - b.date);
+                                }
+                            } else {
+                                throw new Error(resJson.error || 'Unknown Error');
+                            }
+                            break; // Success
+                        } catch (err) {
+                            if (retryCount < MAX_RETRIES && (err.name === 'AbortError' || err.message.includes('504') || err.message.includes('fetch'))) {
+                                console.warn(`[MultiSeries] Retryable error for ${url}: ${err.message}. Retrying...`);
                                 retryCount++;
-                                await new Promise(r => setTimeout(r, 2000)); // Wait before retry
+                                await new Promise(r => setTimeout(r, 2000));
                                 continue;
                             }
-                            if (ct && ct.includes('text/html')) throw new Error(`서버 타임아웃/오류 (HTTP ${resp.status})`);
-                            throw new Error(`서버 오류 (${resp.status})`);
+                            throw err;
                         }
-
-                        const ct = resp.headers.get('content-type');
-                        if (ct && ct.includes('text/html')) throw new Error('서버가 HTML을 반환했습니다. (Timeout 가능성)');
-
-                        const resJson = await resp.json();
-                        if (resJson.success) {
-                            if (dataSource === 'fred') {
-                                data = resJson.data.map(d => {
-                                    const dt = new Date(d.date);
-                                    if (isNaN(dt.getTime())) return null;
-                                    return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
-                                }).filter(x => x !== null);
-                            } else if (dataSource === 'ecos' && resJson.data) {
-                                data = resJson.data.map(r => {
-                                    const dStr = r.TIME;
-                                    if (dStr.length === 8) {
-                                        return { date: new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8))), value: parseFloat(r.DATA_VALUE) };
-                                    }
-                                    return null;
-                                }).filter(x => x !== null).sort((a, b) => a.date - b.date);
-                            } else if (dataSource === 'te' && Array.isArray(resJson.data) && resJson.data.length > 0) {
-                                const todayFilterLimit = new Date(new Date().getTime() + 1 * 3600000);
-                                const validData = resJson.data.map(i => {
-                                    const dStr = i.DateTime || i.Date || i.date || i.last_update;
-                                    const val = i.Value !== undefined ? i.Value : (i.Close !== undefined ? i.Close : (i.Actual !== undefined ? i.Actual : i.actual));
-                                    return { date: new Date(dStr), value: parseFloat(val) };
-                                }).filter(d => !isNaN(d.date.getTime()) && !isNaN(d.value) && d.date <= todayFilterLimit)
-                                    .sort((a, b) => a.date - b.date);
-
-                                const dailyMap = new Map();
-                                validData.forEach(d => { dailyMap.set(`${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`, d); });
-                                data = Array.from(dailyMap.values()).map(d => ({
-                                    date: new Date(d.date.getFullYear(), d.date.getMonth(), d.date.getDate()),
-                                    value: d.value
-                                })).sort((a, b) => a.date - b.date);
-                            }
-                        } else {
-                            throw new Error(resJson.error || 'Unknown Error');
-                        }
-                        break; // Success
-                    } catch (err) {
-                        if (retryCount < MAX_RETRIES && (err.name === 'AbortError' || err.message.includes('504') || err.message.includes('fetch'))) {
-                            console.warn(`[MultiSeries] Retryable error for ${url}: ${err.message}. Retrying...`);
-                            retryCount++;
-                            await new Promise(r => setTimeout(r, 2000));
-                            continue;
-                        }
-                        throw err;
                     }
-                }
 
-                if (data && data.length > 0) {
-                    let finalSource = dataSource || 'te';
-                    if (url.includes('stlouisfed.org') || url.includes('fred')) finalSource = 'fred';
-                    if (url.includes('ecos.bok')) finalSource = 'ecos';
-                    return { url, label: label || url.split('/').pop().split('?')[0], dataSource: finalSource, data };
+                    if (data && data.length > 0) {
+                        let finalSource = dataSource || 'te';
+                        if (url.includes('stlouisfed.org') || url.includes('fred')) finalSource = 'fred';
+                        if (url.includes('ecos.bok')) finalSource = 'ecos';
+                        return { url, label: label || url.split('/').pop().split('?')[0], dataSource: finalSource, data };
+                    }
+                    return null;
+                } catch (err) {
+                    console.warn("[MultiSeries] Failed to load individual series:", err);
+                    return null;
                 }
-                return null;
-            } catch (err) {
-                console.warn("[MultiSeries] Failed to load individual series:", err);
-                return null;
-            }
-        }) (item);
-        results.push(res);
-    }
+            })(item);
+            results.push(res);
+        }
         const validResults = results.filter(r => r && r.data.length > 0);
-    if (validResults.length === 0) throw new Error("유효한 데이터가 없습니다.");
+        if (validResults.length === 0) throw new Error("유효한 데이터가 없습니다.");
 
-    drawMultiSeriesLineChart(canvas, validResults, title);
-    if (loadingEl) loadingEl.style.display = 'none';
+        drawMultiSeriesLineChart(canvas, validResults, title);
+        if (loadingEl) loadingEl.style.display = 'none';
 
-} catch (e) {
-    console.error("[MultiSeries] Error loading chart:", e);
-    if (loadingEl) {
-        loadingEl.textContent = `오류: ${e.message}`;
-        loadingEl.style.color = '#e74c3c';
+    } catch (e) {
+        console.error("[MultiSeries] Error loading chart:", e);
+        if (loadingEl) {
+            loadingEl.textContent = `오류: ${e.message}`;
+            loadingEl.style.color = '#e74c3c';
+        }
     }
-}
 }
 
 /**
