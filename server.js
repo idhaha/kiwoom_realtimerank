@@ -459,7 +459,7 @@ app.get('/api/finviz-image', async (req, res) => {
  * 환율, 금리 등 경제 지표 데이터 제공
  */
 let activeBrowsers = 0; // 동시에 실행 중인 브라우저 수
-const MAX_BROWSERS = 3; // v30.9.13: Increased for buffer with sequential loading
+const MAX_BROWSERS = 2; // v30.9.15: Reduced from 3 to prevent RAM pressure on 1GB Oracle Cloud
 
 // v30.9.11: Memory Cache for TradingEconomics
 const teCache = {};
@@ -546,7 +546,7 @@ app.get('/api/trading-economics', async (req, res) => {
 
                 // 2. Wait for chart container
                 await page.waitForSelector('.highcharts-container', { timeout: 30000 });
-                await new Promise(r => setTimeout(r, 2000));
+                await new Promise(r => setTimeout(r, 1000)); // v30.9.15: Reduced from 2s
 
                 const extractPoints = () => {
                     const map = new Map();
@@ -628,7 +628,7 @@ app.get('/api/trading-economics', async (req, res) => {
                     console.log(`   🎯 Stage 1: History (${targetBtn})...`);
                     const clicked = await robustClick(targetBtn);
                     if (clicked) {
-                        await new Promise(r => setTimeout(r, 8000)); // v30.9.12: Restored to 8s
+                        await new Promise(r => setTimeout(r, 7000)); // v30.9.15: Reduced from 8s
                         const history = await page.evaluate(extractPoints);
                         if (history && history.length > 0) {
                             console.log(`   📊 Captured ${history.length} points (History Stage)`);
@@ -649,7 +649,7 @@ app.get('/api/trading-economics', async (req, res) => {
                             });
                         }
                     });
-                    await new Promise(r => setTimeout(r, 6000)); // v30.9.12: Restored to 6s
+                    await new Promise(r => setTimeout(r, 4000)); // v30.9.15: Reduced from 6s
                     const daily = await page.evaluate(extractPoints);
                     if (daily && daily.length > 0) {
                         console.log(`   📊 Captured ${daily.length} points (Daily Stage)`);

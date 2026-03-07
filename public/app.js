@@ -3125,110 +3125,90 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                 else if (lowerUrl.startsWith('ecos(') || lowerUrl.indexOf('ecos.bok') !== -1) dataSource = 'ecos';
                 else if (lowerUrl.indexOf('tradingeconomics.com') !== -1 || lowerUrl.indexOf('tradingeconomics') !== -1) dataSource = 'te';
 
-                try {
-                    if (dataSource === 'fred') {
-                        const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
-                        if (fredMatch) {
-                            const cleanArg = (s) => s ? s.replace(/['"“”‘’]/g, '').trim() : '';
-                            const sid = cleanArg(fredMatch[1]);
-                            const per = cleanArg(fredMatch[2]) || '1y';
-                            if (!sid) throw new Error("FRED Series ID가 비어있습니다.");
+                let retryCount = 0;
+                const MAX_RETRIES = 1;
 
-                            const controller = new AbortController();
-                            const timeoutId = setTimeout(() => controller.abort(), 180000); // v30.9.11: Sync to 180s
-                            try {
-                                const normalizedPer = normalizePeriod(per);
-                                const resp = await fetch(`/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizedPer)}`, { signal: controller.signal });
-                                clearTimeout(timeoutId);
-
-                                if (!resp.ok) {
-                                    const ct = resp.headers.get('content-type');
-                                    if (ct && ct.includes('text/html')) throw new Error(`서버 오류 (HTTP ${resp.status}) - HTML 응답`);
-                                    const errJson = await resp.json().catch(() => ({ error: 'Unknown JSON Error' }));
-                                    throw new Error(`FRED 오류: ${errJson.error || errJson.details || `HTTP ${resp.status}`}`);
-                                }
-
-                                const resJson = await resp.json();
-                                if (resJson.success) {
-                                    data = resJson.data.map(d => {
-                                        const dt = new Date(d.date);
-                                        if (isNaN(dt.getTime())) return null;
-                                        return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
-                                    }).filter(x => x !== null);
-                                } else throw new Error(`FRED: ${resJson.error || 'Unknown Error'}`);
-                            } catch (fetchErr) {
-                                clearTimeout(timeoutId);
-                                throw fetchErr;
-                            }
-                        }
-                    } else if (dataSource === 'ecos') {
-                        const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
-                        if (innerResult) {
-                            const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
-                            let tbl = '817Y002';
-                            let itm = '';
-                            let per = '';
-                            if (args.length === 3) { tbl = args[0]; itm = args[1]; per = args[2]; }
-                            else if (args.length === 2) { itm = args[0]; per = args[1]; }
-
-                            const localNow = new Date();
-                            const formatLocalYMD = (d) => {
-                                const y = d.getFullYear();
-                                const m = String(d.getMonth() + 1).padStart(2, '0');
-                                const day = String(d.getDate()).padStart(2, '0');
-                                return `${y}${m}${day}`;
-                            };
-                            const endDate = formatLocalYMD(localNow);
-                            let startDateObj = new Date(localNow);
-                            const normalizedPer = normalizePeriod(per);
-                            if (normalizedPer.includes('y')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(normalizedPer) || 1));
-                            else if (normalizedPer.includes('m')) startDateObj.setMonth(localNow.getMonth() - (parseInt(normalizedPer) || 1));
-                            else startDateObj.setFullYear(localNow.getFullYear() - 1);
-                            const startDate = formatLocalYMD(startDateObj);
-
-                            const controller = new AbortController();
-                            const timeoutId = setTimeout(() => controller.abort(), 180000); // v30.9.11: Sync to 180s
-                            try {
-                                const resp = await fetch(`/api/ecos?table=${encodeURIComponent(tbl)}&item=${encodeURIComponent(itm)}&start=${startDate}&end=${endDate}`, { signal: controller.signal });
-                                clearTimeout(timeoutId);
-                                if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
-                                const resJson = await resp.json();
-                                if (resJson.success && resJson.data) {
-                                    data = resJson.data.map(r => {
-                                        const dStr = r.TIME;
-                                        if (dStr.length === 8) {
-                                            return { date: new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8))), value: parseFloat(r.DATA_VALUE) };
-                                        }
-                                        return null;
-                                    }).filter(x => x !== null).sort((a, b) => a.date - b.date);
-                                } else throw new Error(`ECOS: ${resJson.error || 'No data'}`);
-                            } catch (fetchErr) {
-                                clearTimeout(timeoutId);
-                                throw fetchErr;
-                            }
-                        }
-                    } else if (dataSource === 'te') {
-                        const actualUrl = url;
-                        const period = item.duration || '';
+                while (retryCount <= MAX_RETRIES) {
+                    try {
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 180000); // v30.9.10: Increase to 180s
-                        try {
-                            let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(actualUrl)}`;
-                            if (period) proxyUrl += `&duration=${encodeURIComponent(period)}`;
-                            const resp = await fetch(proxyUrl, { signal: controller.signal });
-                            clearTimeout(timeoutId);
+                        const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s
 
-                            if (!resp.ok) {
-                                const ct = resp.headers.get('content-type');
-                                if (ct && ct.includes('text/html')) throw new Error(`서버 타임아웃/오류 (HTTP ${resp.status})`);
-                                throw new Error(`서버 오류 (${resp.status})`);
+                        let fetchUrl = "";
+                        if (dataSource === 'fred') {
+                            const fredMatch = url.match(/fred\s*\(\s*([^,)]+)(?:,\s*([^)]+))?\s*\)/i);
+                            if (fredMatch) {
+                                const sid = fredMatch[1].replace(/['"“”‘’]/g, '').trim();
+                                const per = fredMatch[2] ? fredMatch[2].replace(/['"“”‘’]/g, '').trim() : '1y';
+                                fetchUrl = `/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizePeriod(per))}`;
                             }
+                        } else if (dataSource === 'ecos') {
+                            const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
+                            if (innerResult) {
+                                const args = innerResult[1].split(',').map(s => s.trim().replace(/['"]/g, ''));
+                                let tbl = '817Y002';
+                                let itm = '';
+                                let per = '';
+                                if (args.length === 3) { tbl = args[0]; itm = args[1]; per = args[2]; }
+                                else if (args.length === 2) { itm = args[0]; per = args[1]; }
 
+                                const localNow = new Date();
+                                const formatLocalYMD = (d) => {
+                                    const y = d.getFullYear();
+                                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                                    const day = String(d.getDate()).padStart(2, '0');
+                                    return `${y}${m}${day}`;
+                                };
+                                const endDate = formatLocalYMD(localNow);
+                                let startDateObj = new Date(localNow);
+                                const normalizedPer = normalizePeriod(per);
+                                if (normalizedPer.includes('y')) startDateObj.setFullYear(localNow.getFullYear() - (parseInt(normalizedPer) || 1));
+                                else if (normalizedPer.includes('m')) startDateObj.setMonth(localNow.getMonth() - (parseInt(normalizedPer) || 1));
+                                else startDateObj.setFullYear(localNow.getFullYear() - 1);
+                                const startDate = formatLocalYMD(startDateObj);
+                                fetchUrl = `/api/ecos?table=${encodeURIComponent(tbl)}&item=${encodeURIComponent(itm)}&start=${startDate}&end=${endDate}`;
+                            }
+                        } else if (dataSource === 'te') {
+                            const period = item.duration || '';
+                            fetchUrl = `/api/trading-economics?url=${encodeURIComponent(url)}${period ? `&duration=${encodeURIComponent(period)}` : ''}`;
+                        }
+
+                        if (!fetchUrl) break;
+
+                        const resp = await fetch(fetchUrl, { signal: controller.signal });
+                        clearTimeout(timeoutId);
+
+                        if (!resp.ok) {
                             const ct = resp.headers.get('content-type');
-                            if (ct && ct.includes('text/html')) throw new Error('서버가 HTML을 반환했습니다. (Timeout 가능성)');
+                            if (resp.status === 504 && retryCount < MAX_RETRIES) {
+                                console.warn(`[MultiSeries] 504 detected for ${url}. Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+                                retryCount++;
+                                await new Promise(r => setTimeout(r, 2000)); // Wait before retry
+                                continue;
+                            }
+                            if (ct && ct.includes('text/html')) throw new Error(`서버 타임아웃/오류 (HTTP ${resp.status})`);
+                            throw new Error(`서버 오류 (${resp.status})`);
+                        }
 
-                            const resJson = await resp.json();
-                            if (resJson.success && Array.isArray(resJson.data) && resJson.data.length > 0) {
+                        const ct = resp.headers.get('content-type');
+                        if (ct && ct.includes('text/html')) throw new Error('서버가 HTML을 반환했습니다. (Timeout 가능성)');
+
+                        const resJson = await resp.json();
+                        if (resJson.success) {
+                            if (dataSource === 'fred') {
+                                data = resJson.data.map(d => {
+                                    const dt = new Date(d.date);
+                                    if (isNaN(dt.getTime())) return null;
+                                    return { date: new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()), value: d.value };
+                                }).filter(x => x !== null);
+                            } else if (dataSource === 'ecos' && resJson.data) {
+                                data = resJson.data.map(r => {
+                                    const dStr = r.TIME;
+                                    if (dStr.length === 8) {
+                                        return { date: new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8))), value: parseFloat(r.DATA_VALUE) };
+                                    }
+                                    return null;
+                                }).filter(x => x !== null).sort((a, b) => a.date - b.date);
+                            } else if (dataSource === 'te' && Array.isArray(resJson.data) && resJson.data.length > 0) {
                                 const todayFilterLimit = new Date(new Date().getTime() + 1 * 3600000);
                                 const validData = resJson.data.map(i => {
                                     const dStr = i.DateTime || i.Date || i.date || i.last_update;
@@ -3244,39 +3224,48 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                                     value: d.value
                                 })).sort((a, b) => a.date - b.date);
                             }
-                        } catch (fetchErr) {
-                            clearTimeout(timeoutId);
-                            throw fetchErr;
+                        } else {
+                            throw new Error(resJson.error || 'Unknown Error');
                         }
+                        break; // Success
+                    } catch (err) {
+                        if (retryCount < MAX_RETRIES && (err.name === 'AbortError' || err.message.includes('504') || err.message.includes('fetch'))) {
+                            console.warn(`[MultiSeries] Retryable error for ${url}: ${err.message}. Retrying...`);
+                            retryCount++;
+                            await new Promise(r => setTimeout(r, 2000));
+                            continue;
+                        }
+                        throw err;
                     }
-
-                    if (data && data.length > 0) {
-                        let finalSource = dataSource || 'te';
-                        if (url.includes('stlouisfed.org') || url.includes('fred')) finalSource = 'fred';
-                        if (url.includes('ecos.bok')) finalSource = 'ecos';
-                        return { url, label: label || url.split('/').pop().split('?')[0], dataSource: finalSource, data };
-                    }
-                    return null;
-                } catch (err) {
-                    console.warn("[MultiSeries] Failed to load individual series:", err);
-                    return null;
                 }
-            })(item);
-            results.push(res);
-        }
-        const validResults = results.filter(r => r && r.data.length > 0);
-        if (validResults.length === 0) throw new Error("유효한 데이터가 없습니다.");
 
-        drawMultiSeriesLineChart(canvas, validResults, title);
-        if (loadingEl) loadingEl.style.display = 'none';
-
-    } catch (e) {
-        console.error("[MultiSeries] Error loading chart:", e);
-        if (loadingEl) {
-            loadingEl.textContent = `오류: ${e.message}`;
-            loadingEl.style.color = '#e74c3c';
-        }
+                if (data && data.length > 0) {
+                    let finalSource = dataSource || 'te';
+                    if (url.includes('stlouisfed.org') || url.includes('fred')) finalSource = 'fred';
+                    if (url.includes('ecos.bok')) finalSource = 'ecos';
+                    return { url, label: label || url.split('/').pop().split('?')[0], dataSource: finalSource, data };
+                }
+                return null;
+            } catch (err) {
+                console.warn("[MultiSeries] Failed to load individual series:", err);
+                return null;
+            }
+        }) (item);
+        results.push(res);
     }
+        const validResults = results.filter(r => r && r.data.length > 0);
+    if (validResults.length === 0) throw new Error("유효한 데이터가 없습니다.");
+
+    drawMultiSeriesLineChart(canvas, validResults, title);
+    if (loadingEl) loadingEl.style.display = 'none';
+
+} catch (e) {
+    console.error("[MultiSeries] Error loading chart:", e);
+    if (loadingEl) {
+        loadingEl.textContent = `오류: ${e.message}`;
+        loadingEl.style.color = '#e74c3c';
+    }
+}
 }
 
 /**
@@ -3845,6 +3834,7 @@ async function refreshExchangeRateCharts(tabId) {
                 if (seriesConfig.length > 0) {
                     const title = box.querySelector('.finviz-chart-title')?.textContent || '';
                     await loadMultiSeriesChart(canvas, seriesConfig, title).finally(checkComplete);
+                    await new Promise(r => setTimeout(r, 500)); // v30.9.15: Small rest between heavy charts
                 } else {
                     checkComplete();
                 }
@@ -5091,6 +5081,32 @@ function initMemoEditor() {
             saveBtn.addEventListener('click', () => {
                 console.log("💾 [Memo] Manual save triggered");
                 saveMemo();
+            });
+        }
+
+        // Wire Refresh Button – fetch latest memo from server
+        const refreshBtn = document.getElementById('memoRefreshBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', async () => {
+                const statusEl = document.getElementById('memoStatus');
+                if (statusEl) statusEl.textContent = '서버에서 불러오는 중...';
+                refreshBtn.disabled = true;
+                try {
+                    const serverData = await loadAppDataFromServer();
+                    if (serverData) {
+                        applyData(serverData);
+                        if (statusEl) statusEl.textContent = '새로고침 완료 ✓';
+                        console.log("🔄 [Memo] Refreshed from server");
+                    } else {
+                        if (statusEl) statusEl.textContent = '서버 데이터 없음';
+                    }
+                } catch (e) {
+                    if (statusEl) statusEl.textContent = '새로고침 실패 ✗';
+                    console.error("❌ [Memo] Refresh failed:", e);
+                } finally {
+                    refreshBtn.disabled = false;
+                    setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+                }
             });
         }
     } catch (e) {
