@@ -463,19 +463,22 @@ const MAX_BROWSERS = 2; // v30.9.15: Reduced from 3 to prevent RAM pressure on 1
 
 // v30.9.11: Memory Cache for TradingEconomics
 const teCache = {};
-const TE_CACHE_DURATION = 60 * 60 * 1000; // 1시간
+// 1시간 타이머 제거: 사용자가 수동 새로고침하기 전까지 영구 캐시 유지 (서버 재시작 전까지)
 
 app.get('/api/trading-economics', async (req, res) => {
     let originalUrl = req.query.url;
     const duration = req.query.duration || ''; // e.g., '10년'
+    const forceRefresh = req.query.force_refresh === 'true' || req.query.force_refresh === '1'; // 강제 새로고침 플래그
     if (!originalUrl) return res.status(400).json({ error: "URL 파라미터가 필요합니다." });
 
     originalUrl = originalUrl.replace(/([^:]\/)\/+/g, '$1');
-    console.log(`📡 [TE Proxy] Request: ${originalUrl}, Duration: ${duration || 'default'}`);
+    console.log(`📡 [TE Proxy] Request: ${originalUrl}, Duration: ${duration || 'default'}, Force: ${forceRefresh}`);
 
     const cacheKey = `${originalUrl}_${duration}`;
     const cached = teCache[cacheKey];
-    if (cached && (Date.now() - cached.timestamp < TE_CACHE_DURATION)) {
+
+    // 강제 새로고침이 아닐 때만 캐시를 반환 (시간 제한 없음)
+    if (!forceRefresh && cached) {
         console.log(`   🧊 [TE] Serving from Cache: ${originalUrl}`);
         return res.json({ success: true, data: cached.data });
     }
@@ -726,11 +729,12 @@ app.get('/api/trading-economics', async (req, res) => {
  * FRED 데이터 제공 API (캐싱 적용)
  */
 const fredCache = {}; // { "seriesId_period": { timestamp: 12345, data: ... } }
-const FRED_CACHE_DURATION = 60 * 60 * 6 * 1000; // 6시간
+// 6시간 타이머 제거: 수동 조회(새로고침) 버튼으로만 캐시 무시 (영구 유지)
 
 app.get('/api/fred', (req, res) => {
     const seriesId = req.query.series_id;
     const period = req.query.period || '1년';
+    const forceRefresh = req.query.force_refresh === 'true' || req.query.force_refresh === '1';
 
     if (!seriesId) {
         return res.status(400).json({ success: false, error: 'series_id is required' });
@@ -738,7 +742,8 @@ app.get('/api/fred', (req, res) => {
 
     const cacheKey = `${seriesId}_${period}`;
     const cached = fredCache[cacheKey];
-    if (cached && (Date.now() - cached.timestamp < FRED_CACHE_DURATION)) {
+
+    if (!forceRefresh && cached) {
         console.log(`[API] Serving FRED from Cache: ${cacheKey}`);
         return res.json(cached.data);
     }

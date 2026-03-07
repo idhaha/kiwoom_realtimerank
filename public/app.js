@@ -2608,7 +2608,7 @@ function renderTradingEconomicsChartItem(chart, color = '', tabId, idx) {
 /**
  * TradingEconomics 차트 데이터 로드 및 렌더링
  */
-async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
+async function loadTradingEconomicsChart(canvas, url, title, duration = '', force = false) {
     const wrapper = canvas.closest('.te-chart-wrapper');
     const loadingEl = wrapper?.querySelector('.te-chart-loading');
 
@@ -2617,6 +2617,8 @@ async function loadTradingEconomicsChart(canvas, url, title, duration = '') {
     try {
         let proxyUrl = `/api/trading-economics?url=${encodeURIComponent(url)}`;
         if (duration) proxyUrl += `&duration=${encodeURIComponent(duration)}`;
+        if (force) proxyUrl += `&force_refresh=true`;
+
 
         if (loadingEl) {
             loadingEl.style.display = 'block';
@@ -3072,7 +3074,7 @@ function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
 /**
  * 다중 시리즈 차트 데이터 로드 및 렌더링
  */
-async function loadMultiSeriesChart(canvas, urls, title) {
+async function loadMultiSeriesChart(canvas, urls, title, force = false) {
     const loadingEl = canvas.nextElementSibling;
     if (loadingEl) {
         loadingEl.style.display = 'flex';
@@ -3141,6 +3143,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                                     const sid = fredMatch[1].replace(/['"“”‘’]/g, '').trim();
                                     const per = fredMatch[2] ? fredMatch[2].replace(/['"“”‘’]/g, '').trim() : '1y';
                                     fetchUrl = `/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizePeriod(per))}`;
+                                    if (force) fetchUrl += `&force_refresh=true`;
                                 }
                             } else if (dataSource === 'ecos') {
                                 const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);
@@ -3171,6 +3174,7 @@ async function loadMultiSeriesChart(canvas, urls, title) {
                             } else if (dataSource === 'te') {
                                 const period = item.duration || '';
                                 fetchUrl = `/api/trading-economics?url=${encodeURIComponent(url)}${period ? `&duration=${encodeURIComponent(period)}` : ''}`;
+                                if (force) fetchUrl += `&force_refresh=true`;
                             }
 
                             if (!fetchUrl) break;
@@ -3811,7 +3815,8 @@ async function refreshExchangeRateCharts(tabId) {
             const title = box.querySelector('.finviz-chart-title')?.textContent || '';
 
             if (url && canvas) {
-                await loadTradingEconomicsChart(canvas, url, title, duration).finally(checkComplete);
+                // refresh 버튼 클릭 시 호출되므로 force=true 전달
+                await loadTradingEconomicsChart(canvas, url, title, duration, true).finally(checkComplete);
             } else {
                 checkComplete();
             }
@@ -3834,7 +3839,8 @@ async function refreshExchangeRateCharts(tabId) {
 
                 if (seriesConfig.length > 0) {
                     const title = box.querySelector('.finviz-chart-title')?.textContent || '';
-                    await loadMultiSeriesChart(canvas, seriesConfig, title).finally(checkComplete);
+                    // 새로고침 버튼으로부터 호출되었으므로 force=true 전달
+                    await loadMultiSeriesChart(canvas, seriesConfig, title, true).finally(checkComplete);
                     await new Promise(r => setTimeout(r, 500)); // v30.9.15: Small rest between heavy charts
                 } else {
                     checkComplete();
@@ -4424,7 +4430,7 @@ function refreshOverseasCustomCharts(tabId) {
 
                     if (seriesConfig.length > 0) {
                         const title = box.querySelector('.finviz-chart-title')?.textContent || '';
-                        loadMultiSeriesChart(canvas, seriesConfig, title).then(checkComplete);
+                        loadMultiSeriesChart(canvas, seriesConfig, title, true).then(checkComplete);
                     } else {
                         checkComplete();
                     }
