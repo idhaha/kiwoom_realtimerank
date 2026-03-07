@@ -5271,6 +5271,23 @@ async function captureTabContent(tabContent, tabName) {
         el.style.overflowY = 'visible';
     });
 
+    // 랭크 페이지만 테이블 행수 제한 (20개 초과 행 숨김 처리)
+    const hiddenRows = [];
+    if (tabContent.id === 'tab-transaction_rank' || tabName.toLowerCase().includes('rank')) {
+        const tables = target.querySelectorAll('table tbody');
+        tables.forEach(tbody => {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            if (rows.length > 20) {
+                for (let i = 20; i < rows.length; i++) {
+                    if (rows[i].style.display !== 'none') {
+                        hiddenRows.push(rows[i]);
+                        rows[i].style.display = 'none';
+                    }
+                }
+            }
+        });
+    }
+
     try {
         await new Promise(r => setTimeout(r, 200));
 
@@ -5306,6 +5323,11 @@ async function captureTabContent(tabContent, tabName) {
             s.el.style.maxHeight = s.mh;
             s.el.style.overflow = s.ov;
             s.el.style.overflowY = s.ovy;
+        });
+
+        // 숨겼던 테이블 행 복원
+        hiddenRows.forEach(row => {
+            row.style.display = '';
         });
     }
 }
