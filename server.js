@@ -241,6 +241,14 @@ app.get('/api/stock', async (req, res) => {
                 await new Promise(resolve => setTimeout(resolve, 50));
             }
             console.log("Step 2.5: eFriend 현재가 조회 완료. 등락률, 현재가 병합됨.");
+
+            // 등락률이 마이너스인 종목 필터링 (사용자 요청)
+            const beforeCount = efriendStocks.length;
+            efriendStocks = efriendStocks.filter(stock => {
+                const ctrt = parseFloat(stock.prdy_ctrt || "0");
+                return ctrt >= 0;
+            });
+            console.log(`Step 2.6: 등락률 필터링 완료 (${beforeCount} -> ${efriendStocks.length} 종목)`);
         }
 
         // 상세 로그 추가: 응답 본문 전체 확인
