@@ -1095,9 +1095,9 @@ function applyData(data) {
         }
 
         // Only switch tabs IF this is the INITIAL local load (when we don't have a specific trigger)
-        // Manual refresh/sync should stay on the current tab.
+        // Manual refresh/sync should stay on the current tab (activeContent exists).
         const activeContent = document.querySelector('.tab-content.active');
-        if (!activeContent || isInitializing) {
+        if (!activeContent) {
             const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
             activateTab(targetId);
         }
