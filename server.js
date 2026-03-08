@@ -158,16 +158,23 @@ app.get('/api/stock', async (req, res) => {
                             "PDNO": "",
                             "THCO_STLN_PSBL_YN": "Y",
                             "INQR_DVSN_1": "0",
-                            "INQR_DVSN_2": "0"
+                            "INQR_DVSN_2": "0",
+                            "CTX_AREA_FK200": "",
+                            "CTX_AREA_NK100": ""
                         },
                         timeout: 5000
                     }
                 ).then(r => {
                     const rt_cd = r.data?.rt_cd;
                     const msg1 = r.data?.msg1;
+                    const keys = Object.keys(r.data || {});
                     fileLog(`[eFriend] Responded with rt_cd: ${rt_cd}, msg1: ${msg1}`);
-                    fileLog(`[eFriend] Data fetch successful: ${r.data?.output?.length || 0} items`);
-                    efriendStocks = r.data.output || [];
+                    fileLog(`[eFriend] Response keys: ${keys.join(', ')}`);
+
+                    // Try to find the output array (output or output1)
+                    const dataArray = r.data.output || r.data.output1 || [];
+                    fileLog(`[eFriend] Data fetch successful: ${dataArray.length} items`);
+                    efriendStocks = dataArray;
                 }).catch(err => {
                     fileLog(`[eFriend] Data fetch failed: ${err.message}`);
                     if (err.response) fileLog(`[eFriend] Data Error response: ${JSON.stringify(err.response.data)}`);
