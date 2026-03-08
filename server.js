@@ -53,6 +53,9 @@ app.get('/api/stock', async (req, res) => {
     // 환경변수에서 다시 가져오기 (매 요청마다 최신값 확인용)
     const appKey = (process.env.KIWOOM_APPKEY || "").trim();
     const secretKey = (process.env.KIWOOM_SECRETKEY || "").trim();
+    const efriendAppKey = (process.env.EFRIEND_APPKEY || "").trim();
+    const efriendSecretKey = (process.env.EFRIEND_SECRETKEY || "").trim();
+    const efriendDomain = (process.env.EFRIEND_DOMAIN || "").trim();
 
     try {
         if (!appKey || !secretKey) {
@@ -65,11 +68,23 @@ app.get('/api/stock', async (req, res) => {
         // 1. Access Token 발급
         fileLog("Step 1: 토큰 발급 시도...");
         let accessToken = null;
+        let efriendToken = null;
         try {
-            accessToken = await getAccessToken(appKey, secretKey);
+            const tokenPromises = [];
+            tokenPromises.push(
+                getAccessToken(appKey, secretKey).then(t => accessToken = t)
+            );
+            if (efriendAppKey && efriendSecretKey && efriendDomain) {
+                tokenPromises.push(
+                    getEfriendAccessToken(efriendDomain, efriendAppKey, efriendSecretKey)
+                        .then(t => efriendToken = t)
+                        .catch(err => console.error("eFriend 토큰 발급 실패:", err.message))
+                );
+            }
+            await Promise.all(tokenPromises);
             console.log("✅ 토큰 발급 성공");
         } catch (tokenError) {
-            console.error("❌ 토큰 발급 실패:", tokenError.message);
+            console.error("❌ 키움 토큰 발급 실패:", tokenError.message);
             return res.status(500).json({
                 success: false,
                 error: tokenError.message,
@@ -79,37 +94,132 @@ app.get('/api/stock', async (req, res) => {
 
         // 1.1 토큰 유효성 체크 추가 (디버그용)
         if (!accessToken) {
-            console.error("❌ 에러: 발급된 토큰이 null입니다.");
+            console.error("❌ 에러: 발급된 핵심 토큰이 null입니다.");
             return res.status(500).json({ success: false, error: "Token issuance returned null" });
         }
 
-        // 2. 실시간종목조회순위 API 호출 (전체 순위를 먼저 가져옴)
-        console.log("Step 2: 전체 종목 순위(Global Rank) 조회 중...");
+        // 2. 실시간종목조회순위 API 호출 (전체 순위를 먼저 가져옴) 및 eFriend 호출 병렬
+        console.log("Step 2: 전체 종목 순위(Global Rank) 및 eFriend 조회 중...");
 
-        // 클라이언트에서 요청한 qry_tp 사용 (기본값: '1' - 1분 간격)
-        // 1:1분, 2:10분, 3:1시간, 4:당일누적, 5:30초
         const qryTp = req.query.qry_tp || "1";
 
-        const totalResp = await axios.post(
-            "https://api.kiwoom.com/api/dostk/stkinfo",
-            {
-                "qry_tp": qryTp,
-                "mrkt_tp": "000", // 전체
-                "sort_tp": "1",
-                "trde_qty_tp": "0000",
-                "stk_cnd": "0",
-                "crd_cnd": "0",
-                "stex_tp": "1"
-            },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`,
-                    "api-id": "ka00198",
+        let totalResp = null;
+        let efriendStocks = [];
+        const dataPromises = [];
+
+        dataPromises.push(
+            axios.post(
+                "https://api.kiwoom.com/api/dostk/stkinfo",
+                {
+                    "qry_tp": qryTp,
+                    "mrkt_tp": "000",
+                    "sort_tp": "1",
+                    "trde_qty_tp": "0000",
+                    "stk_cnd": "0",
+                    "crd_cnd": "0",
+                    "stex_tp": "1"
                 },
-                timeout: 5000
-            }
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${accessToken}`,
+                        "api-id": "ka00198",
+                    },
+                    timeout: 5000
+                }
+            ).then(r => totalResp = r)
         );
+
+        if (efriendToken) {
+            dataPromises.push(
+                axios.get(
+                    `${efriendDomain}/uapi/domestic-stock/v1/quotations/lendable-by-company`,
+                    {
+                        headers: {
+                            "content-type": "application/json; charset=utf-8",
+                            "authorization": `Bearer ${efriendToken}`,
+                            "appkey": efriendAppKey,
+                            "appsecret": efriendSecretKey,
+                            "tr_id": "CTSC2702R",
+                            "custtype": "P"
+                        },
+                        params: {
+                            "EXCG_DVSN_CD": "00",
+                            "PDNO": "",
+                            "THCO_STLN_PSBL_YN": "Y",
+                            "INQR_DVSN_1": "0",
+                            "CTX_AREA_FK200": "",
+                            "CTX_AREA_NK100": ""
+                        }
+                    }
+                ).then(res => {
+                    efriendStocks = res.data.output1 || [];
+                }).catch(err => {
+                    console.error("eFriend 데이터 조회 실패:", err.message);
+                })
+            );
+        }
+
+        await Promise.all(dataPromises);
+
+        // --- 2.5 eFriend 현재가(등락률) 일괄 조회 ---
+        if (efriendToken && efriendStocks.length > 0) {
+            console.log(`Step 2.5: eFriend ${efriendStocks.length}개 종목 현재가(등락률) 조회 시작...`);
+            const efriendChunkSize = 10; // 10개씩 병렬 처리하여 429 에러 방지
+
+            for (let i = 0; i < efriendStocks.length; i += efriendChunkSize) {
+                const chunk = efriendStocks.slice(i, i + efriendChunkSize);
+                const pricePromises = chunk.map(async (stock) => {
+                    if (!stock.pdno) return;
+
+                    // J:KRX, NX:NXT 등 시장구분이 필요한데 기본값 J(KRX)로 처리
+                    let iscd = stock.pdno.trim();
+                    if (iscd.length === 6 && (iscd.startsWith('5') || iscd.startsWith('7'))) {
+                        iscd = "Q" + iscd; // ETN 예외처리 (CSV 명세서 권장사항)
+                    }
+
+                    try {
+                        const priceRes = await axios.get(
+                            `${efriendDomain}/uapi/domestic-stock/v1/quotations/inquire-price`,
+                            {
+                                headers: {
+                                    "content-type": "application/json; charset=utf-8",
+                                    "authorization": `Bearer ${efriendToken}`,
+                                    "appkey": efriendAppKey,
+                                    "appsecret": efriendSecretKey,
+                                    "tr_id": "FHKST01010100", // 현재가 시세 TR ID
+                                    "custtype": "P"
+                                },
+                                params: {
+                                    "FID_COND_MRKT_DIV_CODE": "J",
+                                    "FID_INPUT_ISCD": iscd
+                                },
+                                timeout: 3000
+                            }
+                        );
+
+                        if (priceRes.data && priceRes.data.output) {
+                            stock.prdy_ctrt = priceRes.data.output.prdy_ctrt; // 전일 대비율 (등락률)
+                            stock.stck_prpr = priceRes.data.output.stck_prpr; // 현재가
+                            stock.rprs_mrkt_kor_name = priceRes.data.output.rprs_mrkt_kor_name; // 시장 정보 (KOSPI/KOSDAQ)
+                        } else {
+                            stock.prdy_ctrt = "0.00";
+                            stock.stck_prpr = stock.bfdy_clpr;
+                            stock.rprs_mrkt_kor_name = "";
+                        }
+                    } catch (err) {
+                        // 에러 로그는 생략 (과부하 방지)
+                        stock.prdy_ctrt = "0.00";
+                        stock.stck_prpr = stock.bfdy_clpr;
+                    }
+                });
+
+                await Promise.all(pricePromises);
+                // API 부하 조절을 위한 대기 시간 (50ms)
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            console.log("Step 2.5: eFriend 현재가 조회 완료. 등락률, 현재가 병합됨.");
+        }
 
         // 상세 로그 추가: 응답 본문 전체 확인
         console.log("DEBUG: ka00198 Full Response Data:", JSON.stringify(totalResp.data, null, 2));
@@ -240,7 +350,10 @@ app.get('/api/stock', async (req, res) => {
         console.log("Step 5: 데이터 보정 및 병합 완료");
         res.json({
             success: true,
-            data: enrichedStocks,
+            data: {
+                kiwoom: enrichedStocks,
+                efriend: efriendStocks
+            },
             server_time: new Date().toISOString(),
             start_time: SERVER_START_TIME
         });
@@ -936,6 +1049,53 @@ async function getAccessToken(appKey, secretKey) {
 
     fileLog(`토큰 발급 완료 (만료: ${new Date(tokenExpiryTime).toLocaleString()})`);
     return token;
+}
+
+// eFriend 토큰 캐싱을 위한 전역 변수
+let efriendCachedToken = null;
+let efriendTokenExpiryTime = 0;
+
+/**
+ * 한국투자증권(eFriend) Access Token 발급
+ */
+async function getEfriendAccessToken(domain, appKey, secretKey) {
+    if (efriendCachedToken && Date.now() < (efriendTokenExpiryTime - 300000)) {
+        return efriendCachedToken;
+    }
+
+    fileLog("eFriend 새로운 Access Token 발급 시도...");
+    try {
+        const response = await axios.post(
+            `${domain}/oauth2/tokenP`,
+            {
+                grant_type: "client_credentials",
+                appkey: appKey,
+                appsecret: secretKey,
+            },
+            {
+                headers: {
+                    "Content-Type": "application/json; charset=UTF-8"
+                },
+                timeout: 5000
+            }
+        );
+
+        const token = response.data.access_token;
+        if (token) {
+            const expiresIn = response.data.expires_in || 86400; // 초 단위
+            efriendCachedToken = token;
+            efriendTokenExpiryTime = Date.now() + (expiresIn * 1000);
+            fileLog(`eFriend 토큰 발급 완료`);
+            return token;
+        } else {
+            const bodyStr = JSON.stringify(response.data);
+            throw new Error(`한국투자증권 토큰 발급 실패: 응답에 access_token 필드가 없습니다. Body: ${bodyStr}`);
+        }
+    } catch (error) {
+        const errorData = error.response?.data;
+        console.error("한국투자증권 토큰 발급 에러:", errorData || error.message);
+        throw error;
+    }
 }
 
 app.listen(PORT, () => {

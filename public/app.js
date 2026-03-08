@@ -533,7 +533,8 @@ function renderTable(data) {
 
     console.log("📊 렌더링할 종목 데이터 예시:", stocks[0]);
 
-    tableBody.innerHTML = stocks.map((stock, index) => {
+    // 표시 항목 수를 15개로 제한하여 세로 길이 축소
+    tableBody.innerHTML = stocks.slice(0, 20).map((stock, index) => {
         const changeRate = stock.base_comp_chgr || '0';
         let trdeAmtRaw = stock.trde_amt ? String(stock.trde_amt).replace(/[+,-]/g, '') : '0';
         let trdeAmtNum = parseInt(trdeAmtRaw) || 0;
@@ -552,6 +553,71 @@ function renderTable(data) {
                     ${formatChangeRate(changeRate)}
                 </td>
                 <td class="align-right num-cell">${formatNumber(trdeAmtMillion)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+/**
+ * 한국투자증권(eFriend) 테이블 렌더링
+ */
+function renderEfriendTable(stocks) {
+    const efriendTableBody = document.getElementById('efriendTableBody');
+    if (!efriendTableBody) return;
+
+    if (!Array.isArray(stocks) || stocks.length === 0) {
+        efriendTableBody.innerHTML = `
+            <tr>
+                <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    조회된 대주가능 종목 데이터가 없습니다.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    console.log("📊 eFriend 렌더링 데이터 예시:", stocks[0]);
+
+    // 등락률 기준으로 내림차순 정렬 (prdy_ctrt)
+    const sortedStocks = [...stocks].sort((a, b) => {
+        const rateA = parseFloat(a.prdy_ctrt) || 0;
+        const rateB = parseFloat(b.prdy_ctrt) || 0;
+        return rateB - rateA;
+    });
+
+    efriendTableBody.innerHTML = sortedStocks.map((stock, index) => {
+        const prdtName = stock.prdt_name || '-';
+        const currentPrice = parseInt(stock.stck_prpr) || parseInt(stock.bfdy_clpr) || 0;
+        const changeRate = stock.prdy_ctrt || '0.00';
+        const tradActiveQty = parseInt(stock.trad_psbl_qty2) || 0;
+
+        // 시장 구분: KOSPI/KS 포함 시 K, KOSDAQ/KSQ 포함 시 Q, 그 외 -
+        const mrktName = (stock.rprs_mrkt_kor_name || '').toUpperCase();
+        let marketLabel = '-';
+        if (mrktName.includes('KOSPI') || mrktName.includes('KSP') || mrktName === 'KOSPI200' || mrktName === '유가증권' || mrktName.startsWith('KS')) {
+            // "KSQ"가 포함되어 있으면 KOSDAQ 처리하므로 "KS"로 먼저 시작하거나 명확하게 KOSPI 등락이 있는 경우
+            if (mrktName.includes('KSQ') || mrktName.includes('KOSDAQ')) {
+                marketLabel = 'Q';
+            } else {
+                marketLabel = 'K';
+            }
+        } else if (mrktName.includes('KOSDAQ') || mrktName.includes('KSQ') || mrktName === '코스닥') {
+            marketLabel = 'Q';
+        }
+
+        // 매매가능금액 = 현재가 * 매매가능수량 (단위: 원)
+        const tradActiveValue = currentPrice * tradActiveQty;
+
+        return `
+            <tr class="fade-in">
+                <td class="align-right">${index + 1}</td>
+                <td class="market-type align-center">${marketLabel}</td>
+                <td>${prdtName}</td>
+                <td class="align-right num-cell ${getPriceClass(changeRate)}">
+                    ${formatChangeRate(changeRate)}
+                </td>
+                <td class="align-right num-cell ${tradActiveQty > 0 ? 'price-up' : ''}">${formatNumber(tradActiveQty)}</td>
+                <td class="align-right num-cell">${formatNumber(tradActiveValue)}</td>
             </tr>
         `;
     }).join('');
@@ -577,11 +643,12 @@ async function loadTransactionRank() {
             console.log("Transaction Items:", items.length);
 
             if (items.length === 0) {
-                transactionBody.innerHTML = `<tr><td colspan="4" class="align-center">데이터 없음</td></tr>`;
+                transactionBody.innerHTML = `<tr><td colspan="5" class="align-center">데이터 없음</td></tr>`;
                 return;
             }
 
-            transactionBody.innerHTML = items.map((stock, index) => {
+            // 표시 항목 수를 20개로 제한하여 세로 길이 축소
+            transactionBody.innerHTML = items.slice(0, 20).map((stock, index) => {
                 const changeRate = stock.fluc_rt || stock.base_comp_chgr || '0';
                 const trdeAmtRaw = stock.trde_amt || stock.acml_tr_pbmn || '0';
                 const trdeAmtNum = parseInt(String(trdeAmtRaw).replace(/[^0-9]/g, '')) || 0;
@@ -604,11 +671,11 @@ async function loadTransactionRank() {
 
         } else {
             console.error("Trans Rank Error:", result.error);
-            transactionBody.innerHTML = `<tr><td colspan="4" class="align-center error">로드 실패: ${result.error}</td></tr>`;
+            transactionBody.innerHTML = `<tr><td colspan="5" class="align-center error">통신 오류</td></tr>`;
         }
     } catch (e) {
         console.error("Trans Rank Fetch Fail:", e);
-        transactionBody.innerHTML = `<tr><td colspan="4" class="align-center error">통신 오류</td></tr>`;
+        transactionBody.innerHTML = `<tr><td colspan="5" class="align-center error">통신 오류</td></tr>`;
     }
 }
 
@@ -655,9 +722,20 @@ async function loadData() {
             throw new Error(result.error || '알 수 없는 오류가 발생했습니다');
         }
 
-        renderTable(result.data);
+        // result.data now contains { kiwoom: [], efriend: [] }
+        if (result.data && typeof result.data === 'object' && result.data.kiwoom) {
+            renderTable(result.data.kiwoom);
+            renderEfriendTable(result.data.efriend || []);
+        } else {
+            // Fallback for older format just in case
+            renderTable(result.data);
+            renderEfriendTable([]);
+        }
 
         dataContainer.style.display = 'block';
+        const efriendDataContainer = document.getElementById('efriendDataContainer');
+        if (efriendDataContainer) efriendDataContainer.style.display = 'block';
+
         lastUpdate.textContent = formatTime(new Date());
         updateStatus('success', '데이터 로딩 완료');
 
@@ -1016,8 +1094,13 @@ function applyData(data) {
             lastSavedSettings.adrInterval = '2';
         }
 
-        const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
-        activateTab(targetId);
+        // Only switch tabs IF this is the INITIAL local load (when we don't have a specific trigger)
+        // Manual refresh/sync should stay on the current tab.
+        const activeContent = document.querySelector('.tab-content.active');
+        if (!activeContent || isInitializing) {
+            const targetId = (data.activeTabId && document.getElementById(data.activeTabId)) ? data.activeTabId : PERM_TAB_ID;
+            activateTab(targetId);
+        }
 
         // Restore Memo content from server data
         if (data.memoHtml || data.memoDelta) {
@@ -1463,7 +1546,7 @@ function createChartGrid(tabId) {
 
     // 5. Default Dynamic Charts Tab (Multiple Iframes)
     if (!tabData[tabId]) {
-        const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT", "SP:SPX", "KRX:005930"];
+        const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT"];
         tabData[tabId] = defaults.map(sym => ({ symbol: sym, lastSymbol: sym, mode: 'main', mainSrc: '', subSrc: '' }));
     }
 
@@ -2446,8 +2529,8 @@ document.getElementById('addChartTab').addEventListener('click', () => {
     const currentTabs = Array.from(document.querySelectorAll(".tab-btn"));
     const chartCount = currentTabs.filter(btn => btn.textContent.startsWith("차트")).length + 1;
 
-    // Default 6-grid behavior
-    const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT", "SP:SPX", "KRX:005930"];
+    // Default 4-grid behavior
+    const defaults = ["FX_IDC:USDKRW", "KRX:KOSPI", "KRX:KOSDAQ", "BINANCE:BTCUSDT"];
     tabData[newTabId] = defaults.map(sym => ({ symbol: sym, lastSymbol: sym, mode: 'main', mainSrc: '', subSrc: '' }));
 
     createTabButtonElement(newTabId, "차트 " + chartCount);

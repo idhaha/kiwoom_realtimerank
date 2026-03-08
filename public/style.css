@@ -61,16 +61,17 @@ body {
 }
 
 .container {
-    max-width: 1400px;
-    /* 2단 레이아웃을 위해 너비 확장 */
+    max-width: 1700px;
+    /* 3단 레이아웃을 위해 너비 확장 */
     margin: 0 auto;
 }
 
 .grid-container {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    grid-template-columns: 1.1fr 1.1fr 1.3fr;
+    gap: 1.25rem;
     margin-top: 1rem;
+    align-items: start;
 }
 
 @media (max-width: 900px) {
@@ -229,6 +230,16 @@ input:checked+.slider:before {
     /* Header not bold */
 }
 
+.table-wrapper table tbody tr:nth-child(even) {
+    background-color: #f8fafc;
+    /* Subtle zebra striping */
+}
+
+.table-wrapper table tbody tr:hover {
+    background-color: rgba(15, 23, 42, 0.03);
+    /* Subtle hover effect */
+}
+
 /* Specific Column Widths for Rank Tables */
 .table-wrapper table thead th:nth-child(1),
 .table-wrapper table tbody td:nth-child(1) {
@@ -244,8 +255,8 @@ input:checked+.slider:before {
 
 .table-wrapper table thead th:nth-child(3),
 .table-wrapper table tbody td:nth-child(3) {
-    width: auto;
-    /* 종목명 (Flexible) */
+    width: 140px;
+    /* 종목명 (Fixed to reduce gap) */
 }
 
 .table-wrapper table thead th:nth-child(4),
@@ -256,8 +267,50 @@ input:checked+.slider:before {
 
 .table-wrapper table thead th:nth-child(5),
 .table-wrapper table tbody td:nth-child(5) {
-    width: 110px;
+    width: 100px;
     /* 거래대금 */
+}
+
+/* eFriend Table Specific Widths */
+#efriendStockTable thead th:nth-child(1),
+#efriendStockTable tbody td:nth-child(1) {
+    width: 60px;
+    /* 순위 */
+}
+
+#efriendStockTable thead th:nth-child(2),
+#efriendStockTable tbody td:nth-child(2) {
+    width: 50px;
+    /* 시장 (K/Q) */
+}
+
+#efriendStockTable thead th:nth-child(3),
+#efriendStockTable tbody td:nth-child(3) {
+    width: 150px;
+    /* 종목명 */
+}
+
+#efriendStockTable thead th:nth-child(4),
+#efriendStockTable tbody td:nth-child(4) {
+    width: 80px;
+    /* 등락률 */
+}
+
+#efriendStockTable thead th:nth-child(5),
+#efriendStockTable tbody td:nth-child(5) {
+    width: 90px;
+    /* 매매가능수량 */
+}
+
+#efriendStockTable thead th:nth-child(6),
+#efriendStockTable tbody td:nth-child(6) {
+    width: 120px;
+    /* 매매가능금액(원) */
+}
+
+/* Colspan fix for empty messages */
+table tbody td[colspan] {
+    width: 100% !important;
 }
 
 /* Table Body Scrolling */
@@ -273,8 +326,10 @@ input:checked+.slider:before {
 /* Table Body Scrolling - Scoped to specific tables to avoid breaking FullCalendar */
 #transactionTable thead,
 #stockTable thead,
+#efriendStockTable thead,
 #transactionTable tbody tr,
-#stockTable tbody tr {
+#stockTable tbody tr,
+#efriendStockTable tbody tr {
     display: table;
     width: 100%;
     table-layout: fixed;
@@ -535,9 +590,11 @@ footer {
 
 .chart-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: 1fr 1fr;
     gap: 15px;
     width: 100%;
+    padding: 10px;
+    box-sizing: border-box;
 }
 
 .chart-box {
