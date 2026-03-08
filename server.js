@@ -246,9 +246,9 @@ app.get('/api/stock', async (req, res) => {
             const beforeCount = efriendStocks.length;
             efriendStocks = efriendStocks.filter(stock => {
                 const ctrt = parseFloat(stock.prdy_ctrt || "0");
-                return ctrt >= 3;
+                return ctrt >= 1;
             });
-            console.log(`Step 2.6: 등락률 필터링 완료 (+3% 이상) (${beforeCount} -> ${efriendStocks.length} 종목)`);
+            console.log(`Step 2.6: 등락률 필터링 완료 (+1% 이상) (${beforeCount} -> ${efriendStocks.length} 종목)`);
         }
 
         // 상세 로그 추가: 응답 본문 전체 확인
