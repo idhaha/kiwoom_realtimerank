@@ -163,6 +163,9 @@ app.get('/api/stock', async (req, res) => {
                         timeout: 5000
                     }
                 ).then(r => {
+                    const rt_cd = r.data?.rt_cd;
+                    const msg1 = r.data?.msg1;
+                    fileLog(`[eFriend] Responded with rt_cd: ${rt_cd}, msg1: ${msg1}`);
                     fileLog(`[eFriend] Data fetch successful: ${r.data?.output?.length || 0} items`);
                     efriendStocks = r.data.output || [];
                 }).catch(err => {
