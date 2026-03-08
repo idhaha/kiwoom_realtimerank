@@ -75,11 +75,20 @@ app.get('/api/stock', async (req, res) => {
                 getAccessToken(appKey, secretKey).then(t => accessToken = t)
             );
             if (efriendAppKey && efriendSecretKey && efriendDomain) {
+                fileLog(`[eFriend] Attempting token issuance for domain: ${efriendDomain}`);
                 tokenPromises.push(
                     getEfriendAccessToken(efriendDomain, efriendAppKey, efriendSecretKey)
-                        .then(t => efriendToken = t)
-                        .catch(err => console.error("eFriend 토큰 발급 실패:", err.message))
+                        .then(t => {
+                            efriendToken = t;
+                            fileLog("[eFriend] Token issuance successful");
+                        })
+                        .catch(err => {
+                            fileLog(`[eFriend] Token issuance failed: ${err.message}`);
+                            if (err.response) fileLog(`[eFriend] Token Error response: ${JSON.stringify(err.response.data)}`);
+                        })
                 );
+            } else {
+                fileLog("[eFriend] Missing environment variables. Skipping eFriend API.");
             }
             await Promise.all(tokenPromises);
             console.log("✅ 토큰 발급 성공");
@@ -131,6 +140,7 @@ app.get('/api/stock', async (req, res) => {
         );
 
         if (efriendToken) {
+            fileLog("[eFriend] Starting lendable items fetch...");
             dataPromises.push(
                 axios.get(
                     `${efriendDomain}/uapi/domestic-stock/v1/quotations/lendable-by-company`,
@@ -148,14 +158,16 @@ app.get('/api/stock', async (req, res) => {
                             "PDNO": "",
                             "THCO_STLN_PSBL_YN": "Y",
                             "INQR_DVSN_1": "0",
-                            "CTX_AREA_FK200": "",
-                            "CTX_AREA_NK100": ""
-                        }
+                            "INQR_DVSN_2": "0"
+                        },
+                        timeout: 5000
                     }
-                ).then(res => {
-                    efriendStocks = res.data.output1 || [];
+                ).then(r => {
+                    fileLog(`[eFriend] Data fetch successful: ${r.data?.output?.length || 0} items`);
+                    efriendStocks = r.data.output || [];
                 }).catch(err => {
-                    console.error("eFriend 데이터 조회 실패:", err.message);
+                    fileLog(`[eFriend] Data fetch failed: ${err.message}`);
+                    if (err.response) fileLog(`[eFriend] Data Error response: ${JSON.stringify(err.response.data)}`);
                 })
             );
         }
