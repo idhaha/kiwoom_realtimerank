@@ -180,10 +180,12 @@ app.get('/api/stock', async (req, res) => {
                         allItems = allItems.concat(pageItems);
 
                         fileLog(`[eFriend] Page ${++pageCount} fetched: ${pageItems.length} items (Total: ${allItems.length})`);
+                        fileLog(`[eFriend] Debug tr_cont Header: ${response.headers['tr_cont']}, Body tr_cont: ${data.tr_cont || data.tr_cont_nk}`);
+                        fileLog(`[eFriend] Full Headers: ${JSON.stringify(response.headers)}`);
 
                         // KIS Pagination: Check tr_cont and context keys
                         // tr_cont: 'M' or 'F' usually means more data
-                        hasMore = (response.headers['tr_cont'] === 'M' || response.headers['tr_cont'] === 'F' || data.tr_cont === 'M');
+                        hasMore = (response.headers['tr_cont'] === 'M' || response.headers['tr_cont'] === 'F' || data.tr_cont === 'M' || data.tr_cont === 'F');
                         fk200 = data.ctx_area_fk200 || "";
                         nk100 = data.ctx_area_nk100 || "";
 
