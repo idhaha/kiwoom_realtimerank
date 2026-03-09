@@ -185,21 +185,22 @@ app.get('/api/stock', async (req, res) => {
                         const b_tr_cont = data.tr_cont || data.tr_cont_nk || data.tr_cont_nk100;
                         const rt_cd = data.rt_cd || "no_rt_cd";
 
-                        fileLog(`[v2.4.42] Page ${++pageCount} Result: ${pageItems.length} items (Total: ${allItems.length}), rt_cd: ${rt_cd}`);
-                        fileLog(`[v2.4.42] Pagination Search - Header: "${h_tr_cont}", Body: "${b_tr_cont}", rt_cd: "${rt_cd}"`);
+                        fileLog(`[v2.4.43] Page ${++pageCount} Result: ${pageItems.length} items (Total: ${allItems.length}), rt_cd: ${rt_cd}`);
+                        fileLog(`[v2.4.43] Pagination Search - Header: "${h_tr_cont}", Body: "${b_tr_cont}", rt_cd: "${rt_cd}"`);
 
                         // More inclusive check for more data
                         hasMore = (
                             h_tr_cont === 'M' || h_tr_cont === 'F' ||
                             b_tr_cont === 'M' || b_tr_cont === 'F' ||
-                            (data.ctx_area_fk200 && data.ctx_area_fk200.trim() !== "") ||
-                            (data.ctx_area_nk100 && data.ctx_area_nk100.trim() !== "")
+                            (data.ctx_area_fk200 && data.ctx_area_fk200.length > 0) ||
+                            (data.ctx_area_nk100 && data.ctx_area_nk100.length > 0)
                         );
 
-                        fk200 = (data.ctx_area_fk200 || "").trim();
-                        nk100 = (data.ctx_area_nk100 || "").trim();
+                        // CRITICAL: KIS context keys are fixed-length. Do NOT trim.
+                        fk200 = data.ctx_area_fk200 || "";
+                        nk100 = data.ctx_area_nk100 || "";
 
-                        fileLog(`[v2.4.42] hasMore decided: ${hasMore}`);
+                        fileLog(`[v2.4.43] hasMore decided: ${hasMore}`);
 
                         if (hasMore) {
                             // Slight delay between pages to avoid rate limiting
