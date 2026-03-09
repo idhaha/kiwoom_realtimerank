@@ -140,46 +140,68 @@ app.get('/api/stock', async (req, res) => {
         );
 
         if (efriendToken) {
-            fileLog("[eFriend] Starting Market-split fetch for lendable items (KOSPI + KOSDAQ)...");
+            fileLog("[eFriend] Starting pagination experiment with tr_cont: 'Y'...");
+            const fetchAllLendable = async () => {
+                let allItems = [];
+                let hasMore = true;
+                let fk200 = "";
+                let nk100 = "";
+                let pageCount = 0;
 
-            const fetchByMarket = async (marketCode) => {
-                try {
-                    const response = await axios.get(
-                        `${efriendDomain}/uapi/domestic-stock/v1/quotations/lendable-by-company`,
-                        {
-                            headers: {
-                                "content-type": "application/json; charset=utf-8",
-                                "authorization": `Bearer ${efriendToken}`,
-                                "appkey": efriendAppKey,
-                                "appsecret": efriendSecretKey,
-                                "tr_id": "CTSC2702R",
-                                "custtype": "P"
-                            },
-                            params: {
-                                "EXCG_DVSN_CD": marketCode, // 02: KOSPI, 03: KOSDAQ
-                                "PDNO": "",
-                                "THCO_STLN_PSBL_YN": "Y",
-                                "INQR_DVSN_1": "0",
-                                "INQR_DVSN_2": "0",
-                                "CTX_AREA_FK200": "",
-                                "CTX_AREA_NK100": ""
-                            },
-                            timeout: 10000
+                while (hasMore && pageCount < 20) {
+                    try {
+                        const response = await axios.get(
+                            `${efriendDomain}/uapi/domestic-stock/v1/quotations/lendable-by-company`,
+                            {
+                                headers: {
+                                    "content-type": "application/json; charset=utf-8",
+                                    "authorization": `Bearer ${efriendToken}`,
+                                    "appkey": efriendAppKey,
+                                    "appsecret": efriendSecretKey,
+                                    "tr_id": "CTSC2702R",
+                                    "custtype": "P",
+                                    "tr_cont": pageCount === 0 ? "" : "Y" // User suggest tr_cont: 'Y'
+                                },
+                                params: {
+                                    "EXCG_DVSN_CD": "00",
+                                    "PDNO": "",
+                                    "THCO_STLN_PSBL_YN": "Y",
+                                    "INQR_DVSN_1": "0",
+                                    "INQR_DVSN_2": "0",
+                                    "CTX_AREA_FK200": fk200,
+                                    "CTX_AREA_NK100": nk100
+                                },
+                                timeout: 10000
+                            }
+                        );
+
+                        const data = response.data;
+                        const pageItems = data.output || data.output1 || [];
+                        allItems = allItems.concat(pageItems);
+
+                        const h_tr_cont = response.headers['tr_cont'] || response.headers['TR_CONT'];
+                        fileLog(`[v2.4.45] Page ${++pageCount} Result: ${pageItems.length} items (Total: ${allItems.length}), Header tr_cont: ${h_tr_cont}`);
+
+                        // Use tr_cont header of return context keys to decide hasMore
+                        hasMore = (h_tr_cont === 'M' || h_tr_cont === 'F' || (data.ctx_area_fk200 && data.ctx_area_fk200.trim() !== ""));
+                        fk200 = data.ctx_area_fk200 || "";
+                        nk100 = data.ctx_area_nk100 || "";
+
+                        if (hasMore) {
+                            await new Promise(r => setTimeout(r, 200));
                         }
-                    );
-                    const items = response.data.output || response.data.output1 || [];
-                    fileLog(`[eFriend] Market ${marketCode} fetch: ${items.length} items`);
-                    return items;
-                } catch (e) {
-                    fileLog(`[eFriend] Market ${marketCode} fetch error: ${e.message}`);
-                    return [];
+                    } catch (e) {
+                        fileLog(`[eFriend] Pagination error at page ${pageCount + 1}: ${e.message}`);
+                        hasMore = false;
+                    }
                 }
+                return allItems;
             };
 
             dataPromises.push(
-                Promise.all([fetchByMarket("02"), fetchByMarket("03")]).then(results => {
-                    efriendStocks = results[0].concat(results[1]);
-                    fileLog(`[v2.4.44] Total items merged (KOSPI+KOSDAQ): ${efriendStocks.length}`);
+                fetchAllLendable().then(items => {
+                    efriendStocks = items;
+                    fileLog(`[v2.4.45] Final merged items: ${efriendStocks.length}`);
                 })
             );
         }
