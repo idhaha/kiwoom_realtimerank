@@ -593,6 +593,7 @@ function renderEfriendTable(stocks) {
 
         // 시장 구분: KOSPI/KS 포함 시 K, KOSDAQ/KSQ 포함 시 Q, 그 외 -
         const mrktName = (stock.rprs_mrkt_kor_name || '').toUpperCase();
+        console.log(`[Market Name Log] Stock: ${prdtName}, Raw mrktName: "${stock.rprs_mrkt_kor_name}", Processed: "${mrktName}"`); // Added log for user
         let marketLabel = '-';
         if (mrktName.includes('KOSPI') || mrktName.includes('KSP') || mrktName === 'KOSPI200' || mrktName === '유가증권' || mrktName.startsWith('KS')) {
             // "KSQ"가 포함되어 있으면 KOSDAQ 처리하므로 "KS"로 먼저 시작하거나 명확하게 KOSPI 등락이 있는 경우
@@ -2842,7 +2843,35 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
         value: d.value
     })).sort((a, b) => a.date - b.date);
 
-    const values = data.map(d => d.value);
+    // Zoom state override
+    let currentMinDate;
+    let currentMaxDate;
+    
+    // Always calculate original bounds from the dataset provided (if it's the full one) or fallback to cached
+    const calcMinDate = data[0].date;
+    const calcMaxDate = data[data.length - 1].date;
+    
+    // If the passed in data already has bounds cached, use those as the absolute "original"
+    const originalMinDate = (canvas.chartData && canvas.chartData.originalMinDate) ? canvas.chartData.originalMinDate : calcMinDate;
+    const originalMaxDate = (canvas.chartData && canvas.chartData.originalMaxDate) ? canvas.chartData.originalMaxDate : calcMaxDate;
+    // v30.22: Preserve the full original data if we already have it, otherwise use the current dataset
+    const originalFullData = (canvas.chartData && canvas.chartData.originalData) ? canvas.chartData.originalData : data;
+
+    if (canvas.zoomState && canvas.zoomState.active) {
+        currentMinDate = canvas.zoomState.minDate;
+        currentMaxDate = canvas.zoomState.maxDate;
+    } else {
+        // Reset zoom state to the absolute original bounds
+        currentMinDate = originalMinDate;
+        currentMaxDate = originalMaxDate;
+        canvas.zoomState = { active: false, minDate: currentMinDate, maxDate: currentMaxDate };
+    }
+
+    // Filter data for the current view to recalculate Y min/max based on visible data
+    const visibleData = data.filter(d => d.date >= currentMinDate && d.date <= currentMaxDate);
+    const renderData = visibleData.length > 0 ? visibleData : data; // Fallback entirely to original if Zoom is empty
+
+    const values = renderData.map(d => d.value);
     const minVal = Math.min(...values);
     const maxVal = Math.max(...values);
     const range = maxVal - minVal || 1;
@@ -2850,9 +2879,6 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
 
     const yMin = minVal - buffer;
     const yMax = maxVal + buffer;
-
-    const firstDate = data[0].date.toISOString().slice(0, 10).replace(/-/g, '/');
-    const lastDate = data[data.length - 1].date.toISOString().slice(0, 10).replace(/-/g, '/');
 
     // Font settings
     const axisFont = '11px sans-serif';
@@ -2862,10 +2888,13 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
 
     // Cache data for redraw
     canvas.chartData = {
-        data: data,
+        data: renderData, // Data visible in the current zoomed range
+        originalData: originalFullData, // Keep the full dataset for zoom reset
         title: title,
-        minDate: data[0].date,
-        maxDate: data[data.length - 1].date,
+        minDate: currentMinDate,
+        maxDate: currentMaxDate,
+        originalMinDate: originalMinDate,
+        originalMaxDate: originalMaxDate,
         yMin: yMin,
         yMax: yMax,
         padding: padding,
@@ -2909,8 +2938,8 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     ctx.lineWidth = 1.5;
     ctx.beginPath();
 
-    data.forEach((point, i) => {
-        const x = padding.left + ((point.date - minDate) / (maxDate - minDate)) * chartW;
+    renderData.forEach((point, i) => {
+        const x = padding.left + ((point.date - currentMinDate) / (currentMaxDate - currentMinDate)) * chartW;
         const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
 
         if (i === 0) {
@@ -2923,9 +2952,9 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
 
     // Draw data points
     ctx.fillStyle = '#3498db';
-    if (data.length <= 60) {
-        data.forEach((point, i) => {
-            const x = padding.left + ((point.date - minDate) / (maxDate - minDate)) * chartW;
+    if (renderData.length <= 60) {
+        renderData.forEach((point, i) => {
+            const x = padding.left + ((point.date - currentMinDate) / (currentMaxDate - currentMinDate)) * chartW;
             const y = padding.top + (1 - (point.value - yMin) / (yMax - yMin)) * chartH;
             ctx.beginPath();
             ctx.arc(x, y, 2, 0, Math.PI * 2);
@@ -2939,7 +2968,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
-    const dateRange = maxDate - minDate;
+    const dateRange = currentMaxDate - currentMinDate;
     const daysDiff = dateRange / (1000 * 60 * 60 * 24);
 
     let numLabels = 5;
@@ -2948,7 +2977,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
 
     for (let i = 0; i <= numLabels; i++) {
         const ratio = i / numLabels;
-        const date = new Date(minDate.getTime() + dateRange * ratio);
+        const date = new Date(currentMinDate.getTime() + dateRange * ratio);
         const x = padding.left + chartW * ratio;
 
         let dateLabel;
@@ -2963,7 +2992,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     }
 
     // Standardized Legend (Single Line top-right)
-    const latestItem = data[data.length - 1];
+    const latestItem = renderData[renderData.length - 1] || data[data.length - 1];
     const mm = String(latestItem.date.getMonth() + 1).padStart(2, '0');
     const dd = String(latestItem.date.getDate()).padStart(2, '0');
     const dateStr = `${mm}/${dd}`;
@@ -2981,11 +3010,34 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
     if (!canvas.hasInteractiveEvents) {
         canvas.hasInteractiveEvents = true;
 
-        canvas.addEventListener('mousemove', (e) => {
+        canvas.addEventListener('mousedown', (e) => {
             if (!canvas.chartData) return;
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
+            const { padding, chartW } = canvas.chartData;
+            
+            if (mouseX >= padding.left && mouseX <= padding.left + chartW) {
+                canvas.isDragging = true;
+                canvas.dragStartX = mouseX;
+                canvas.dragEndX = mouseX;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!canvas.chartData) return;
+            const rect = canvas.getBoundingClientRect();
+            let mouseX = e.clientX - rect.left;
             const { padding, chartW, minDate, maxDate, data } = canvas.chartData;
+
+            // Clamp mouseX to chart area
+            mouseX = Math.max(padding.left, Math.min(mouseX, padding.left + chartW));
+
+            if (canvas.isDragging) {
+                canvas.dragEndX = mouseX;
+                // Redraw with the drag selection overlay
+                drawTradingEconomicsWithCursor(canvas, mouseX, [], true);
+                return;
+            }
 
             if (mouseX < padding.left || mouseX > padding.left + chartW) return;
 
@@ -3003,9 +3055,46 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
             syncCursorToOtherCharts(canvas, hoveredDate);
         });
 
+        canvas.addEventListener('mouseup', (e) => {
+            if (!canvas.isDragging || !canvas.chartData) return;
+            canvas.isDragging = false;
+            
+            const { padding, chartW, minDate, maxDate, originalData, title } = canvas.chartData;
+            
+            // Allow minimum 10px drag to consider it a zoom selection, avoiding normal clicks
+            if (Math.abs(canvas.dragEndX - canvas.dragStartX) > 10) {
+                if (canvas.dragEndX > canvas.dragStartX) {
+                    // Left to Right Drag -> Zoom In
+                    const startRatio = (canvas.dragStartX - padding.left) / chartW;
+                    const endRatio = (canvas.dragEndX - padding.left) / chartW;
+                    const newMinDate = new Date(minDate.getTime() + (maxDate - minDate) * startRatio);
+                    const newMaxDate = new Date(minDate.getTime() + (maxDate - minDate) * endRatio);
+                    
+                    canvas.zoomState = {
+                        active: true,
+                        minDate: newMinDate,
+                        maxDate: newMaxDate
+                    };
+                } else {
+                    // Right to Left Drag -> Zoom Out (Reset)
+                    canvas.zoomState = { active: false };
+                }
+                
+                // Redraw with the new zoom state using the original full data
+                const fullData = canvas.chartData.originalData || originalData;
+                drawTradingEconomicsLineChart(canvas, fullData, title);
+                syncZoomToOtherCharts(canvas, canvas.zoomState);
+            } else {
+                // Was just a click, redraw normally
+                drawTradingEconomicsLineChart(canvas, originalData, title);
+            }
+        });
+
         canvas.addEventListener('mouseleave', () => {
+            canvas.isDragging = false; // Cancel drag on leave
             if (canvas.chartData) {
-                drawTradingEconomicsLineChart(canvas, canvas.chartData.data, canvas.chartData.title);
+                // Redraw with the current zoom state using the original full data
+                drawTradingEconomicsLineChart(canvas, canvas.chartData.originalData, canvas.chartData.title);
             }
             clearCursorFromOtherCharts(canvas);
         });
@@ -3015,7 +3104,7 @@ function drawTradingEconomicsLineChart(canvas, data, title) {
 /**
  * 커서와 툴팁이 포함된 TradingEconomics 차트 그리기
  */
-function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
+function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues, isDraggingOverlay = false) {
     if (!canvas.chartData) return;
 
     const { data, title, minDate, maxDate, yMin, yMax, padding, chartW, chartH, w, h } = canvas.chartData;
@@ -3097,15 +3186,27 @@ function drawTradingEconomicsWithCursor(canvas, mouseX, hoveredValues) {
         ctx.fillText(dateLabel, x, h - 30);
     }
 
-    // 수직 커서선
-    ctx.strokeStyle = '#ff6b6b';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 3]);
-    ctx.beginPath();
-    ctx.moveTo(mouseX, padding.top);
-    ctx.lineTo(mouseX, padding.top + chartH);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // 수직 커서선 또는 드래그 오버레이
+    if (isDraggingOverlay && canvas.isDragging) {
+        const startX = Math.min(canvas.dragStartX, canvas.dragEndX);
+        const width = Math.abs(canvas.dragEndX - canvas.dragStartX);
+        
+        ctx.fillStyle = 'rgba(52, 152, 219, 0.2)'; // Light blue translucent
+        ctx.fillRect(startX, padding.top, width, chartH);
+        
+        ctx.strokeStyle = 'rgba(52, 152, 219, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(startX, padding.top, width, chartH);
+    } else {
+        ctx.strokeStyle = '#ff6b6b';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(mouseX, padding.top);
+        ctx.lineTo(mouseX, padding.top + chartH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
 
     // 툴팁 및 포인트 마커
     if (hoveredValues && hoveredValues.length > 0) {
@@ -3457,8 +3558,39 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
 
     if (allValues.length === 0) return;
 
-    const minVal = Math.min(...allValues);
-    const maxVal = Math.max(...allValues);
+    // Zoom state override
+    let currentMinDate;
+    let currentMaxDate;
+
+    // Use cached original bounds if available, else use calculated
+    const originalMinDate = (canvas.chartData && canvas.chartData.originalMinDate) ? canvas.chartData.originalMinDate : minDate;
+    const originalMaxDate = (canvas.chartData && canvas.chartData.originalMaxDate) ? canvas.chartData.originalMaxDate : maxDate;
+
+    if (canvas.zoomState && canvas.zoomState.active) {
+        currentMinDate = canvas.zoomState.minDate;
+        currentMaxDate = canvas.zoomState.maxDate;
+    } else {
+        // Reset zoom state to absolute true bounds
+        currentMinDate = originalMinDate;
+        currentMaxDate = originalMaxDate;
+        canvas.zoomState = { active: false, minDate: currentMinDate, maxDate: currentMaxDate };
+    }
+
+    // Filter data for the current view to recalculate Y min/max based on visible data
+    let visibleValues = [];
+    allSeries.forEach(s => {
+        if (!s.data || s.data.length === 0) return;
+        s.data.forEach(d => {
+            if (d.value !== null && !isNaN(d.value) && d.date >= currentMinDate && d.date <= currentMaxDate) {
+                visibleValues.push(d.value);
+            }
+        });
+    });
+
+    const renderValues = visibleValues.length > 0 ? visibleValues : allValues;
+
+    const minVal = Math.min(...renderValues);
+    const maxVal = Math.max(...renderValues);
     const range = maxVal - minVal || 1;
     const buffer = range * 0.1;
 
@@ -3468,8 +3600,10 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     // 차트 데이터를 canvas에 저장 (마우스 이벤트에서 사용)
     canvas.chartData = {
         allSeries: allSeries,
-        minDate: minDate,
-        maxDate: maxDate,
+        minDate: currentMinDate,
+        maxDate: currentMaxDate,
+        originalMinDate: originalMinDate,
+        originalMaxDate: originalMaxDate,
         yMin: yMin,
         yMax: yMax,
         padding: padding,
@@ -3501,16 +3635,25 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
         // Use helper to get correct timezone label
         const tzLabel = getTimezoneForUrl(s.url || '', dataSource);
 
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(padding.left, padding.top, chartW, chartH);
+        ctx.clip(); // Clip the drawing to the chart area so lines don't overflow the padding
+
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.beginPath();
 
+        // Re-iterate without skipping to let canvas handle lines going off-screen
+        let firstPoint = true;
         s.data.forEach((d, i) => {
-            const x = padding.left + ((d.date - minDate) / (maxDate - minDate)) * chartW;
-            const y = padding.top + (1 - (d.value - yMin) / (yMax - yMin)) * chartH;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+             const x = padding.left + ((d.date - currentMinDate) / (currentMaxDate - currentMinDate)) * chartW;
+             const y = padding.top + (1 - (d.value - yMin) / (yMax - yMin)) * chartH;
+             if (firstPoint) { ctx.moveTo(x, y); firstPoint = false; } else ctx.lineTo(x, y);
         });
+        
         ctx.stroke();
+        ctx.restore();
 
         // 범례 표시 (우측 상단)
         ctx.fillStyle = color;
@@ -3536,16 +3679,24 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     let maxDateOverall = null;
     allSeries.forEach(s => {
         if (s.data && s.data.length > 0) {
-            const sMin = s.data[0].date;
-            const sMax = s.data[s.data.length - 1].date;
-            if (minDateOverall === null || sMin < minDateOverall) minDateOverall = sMin;
-            if (maxDateOverall === null || sMax > maxDateOverall) maxDateOverall = sMax;
+            // Find min/max of the visible subset of this series
+            const visibleSeries = s.data.filter(d => d.date >= currentMinDate && d.date <= currentMaxDate);
+            if (visibleSeries.length > 0) {
+                const sMin = visibleSeries[0].date;
+                const sMax = visibleSeries[visibleSeries.length - 1].date;
+                if (minDateOverall === null || sMin < minDateOverall) minDateOverall = sMin;
+                if (maxDateOverall === null || sMax > maxDateOverall) maxDateOverall = sMax;
+            }
         }
     });
 
-    if (!minDateOverall || !maxDateOverall) return;
+    if (!minDateOverall || !maxDateOverall) {
+        // Fallback to currentMinDate/currentMaxDate if no individual series points perfectly land inside the bounds
+        minDateOverall = currentMinDate;
+        maxDateOverall = currentMaxDate;
+    }
 
-    const dateRange = maxDateOverall - minDateOverall;
+    const dateRange = currentMaxDate - currentMinDate;
     const daysDiff = dateRange / (1000 * 60 * 60 * 24);
 
     let numLabels = 5;
@@ -3554,7 +3705,7 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
 
     for (let i = 0; i <= numLabels; i++) {
         const ratio = i / numLabels;
-        const date = new Date(minDateOverall.getTime() + dateRange * ratio);
+        const date = new Date(currentMinDate.getTime() + dateRange * ratio);
         const x = padding.left + chartW * ratio;
 
         // 날짜 포맷 (년도만 또는 년-월)
@@ -3574,14 +3725,37 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
     if (!canvas.hasInteractiveEvents) {
         canvas.hasInteractiveEvents = true;
 
+        canvas.addEventListener('mousedown', (e) => {
+            if (!canvas.chartData) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const { padding, chartW } = canvas.chartData;
+            
+            if (mouseX >= padding.left && mouseX <= padding.left + chartW) {
+                canvas.isDragging = true;
+                canvas.dragStartX = mouseX;
+                canvas.dragEndX = mouseX;
+            }
+        });
+
         canvas.addEventListener('mousemove', (e) => {
             if (!canvas.chartData) return;
 
             const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
+            let mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
 
             const { padding, chartW, minDate, maxDate, allSeries } = canvas.chartData;
+
+            // Clamp mouseX to chart area
+            mouseX = Math.max(padding.left, Math.min(mouseX, padding.left + chartW));
+
+            if (canvas.isDragging) {
+                canvas.dragEndX = mouseX;
+                // Redraw with the drag selection overlay
+                drawMultiSeriesWithCursor(canvas, mouseX, [], true);
+                return;
+            }
 
             // 차트 영역 내에 있는지 확인
             if (mouseX < padding.left || mouseX > padding.left + chartW) {
@@ -3608,7 +3782,42 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
             syncCursorToOtherCharts(canvas, hoveredDate);
         });
 
+        canvas.addEventListener('mouseup', (e) => {
+            if (!canvas.isDragging || !canvas.chartData) return;
+            canvas.isDragging = false;
+            
+            const { padding, chartW, minDate, maxDate, allSeries, title } = canvas.chartData;
+            
+            // Allow minimum 10px drag to consider it a zoom selection, avoiding normal clicks
+            if (Math.abs(canvas.dragEndX - canvas.dragStartX) > 10) {
+                if (canvas.dragEndX > canvas.dragStartX) {
+                    // Left to Right Drag -> Zoom In
+                    const startRatio = (canvas.dragStartX - padding.left) / chartW;
+                    const endRatio = (canvas.dragEndX - padding.left) / chartW;
+                    const newMinDate = new Date(minDate.getTime() + (maxDate - minDate) * startRatio);
+                    const newMaxDate = new Date(minDate.getTime() + (maxDate - minDate) * endRatio);
+                    
+                    canvas.zoomState = {
+                        active: true,
+                        minDate: newMinDate,
+                        maxDate: newMaxDate
+                    };
+                } else {
+                    // Right to Left Drag -> Zoom Out (Reset)
+                    canvas.zoomState = { active: false };
+                }
+                
+                // Redraw with the new zoom state using the original full data
+                drawMultiSeriesLineChart(canvas, allSeries, title);
+                syncZoomToOtherCharts(canvas, canvas.zoomState);
+            } else {
+                // Was just a click, redraw normally
+                drawMultiSeriesLineChart(canvas, allSeries, title);
+            }
+        });
+
         canvas.addEventListener('mouseleave', () => {
+            canvas.isDragging = false; // Cancel drag on leave
             // 커서 제거하고 원래 차트 다시 그리기
             if (canvas.chartData) {
                 drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
@@ -3622,7 +3831,7 @@ function drawMultiSeriesLineChart(canvas, allSeries, title) {
 /**
  * 커서와 툴팁이 포함된 차트 그리기
  */
-function drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues) {
+function drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues, isDraggingOverlay = false) {
     if (!canvas.chartData) return;
 
     const { allSeries, minDate, maxDate, yMin, yMax, padding, chartW, chartH, w, h, title } = canvas.chartData;
@@ -3723,15 +3932,27 @@ function drawMultiSeriesWithCursor(canvas, mouseX, hoveredValues) {
         ctx.fillText(dateLabel, x, h - 30);
     }
 
-    // 수직 커서 라인
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(mouseX, padding.top);
-    ctx.lineTo(mouseX, padding.top + chartH);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // 수직 커서 라인 또는 드래그 오버레이
+    if (isDraggingOverlay && canvas.isDragging) {
+        const startX = Math.min(canvas.dragStartX, canvas.dragEndX);
+        const width = Math.abs(canvas.dragEndX - canvas.dragStartX);
+        
+        ctx.fillStyle = 'rgba(52, 152, 219, 0.2)'; // Light blue translucent
+        ctx.fillRect(startX, padding.top, width, chartH);
+        
+        ctx.strokeStyle = 'rgba(52, 152, 219, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(startX, padding.top, width, chartH);
+    } else {
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(mouseX, padding.top);
+        ctx.lineTo(mouseX, padding.top + chartH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
 
     // 툴팁
     if (hoveredValues && hoveredValues.length > 0) {
@@ -3856,6 +4077,42 @@ function clearCursorFromOtherCharts(sourceCanvas) {
     });
 }
 
+
+/**
+ * 환율/금리 탭의 다른 차트에 줌(Zoom) 상태 동기화
+ */
+function syncZoomToOtherCharts(sourceCanvas, zoomStateParams) {
+    const activeContent = document.querySelector('.tab-content.active');
+    if (!activeContent) return;
+
+    const allCanvases = activeContent.querySelectorAll('canvas[data-chart-type="multi-series"], canvas[data-chart-type="te-single"]');
+
+    allCanvases.forEach(canvas => {
+        if (canvas === sourceCanvas) return;
+        if (!canvas.chartData) return;
+
+        // Apply global zoom constraint (clamped to the target chart's full bounds if necessary, 
+        // but typically TE charts share the exact same dates when aligned).
+        if (zoomStateParams && zoomStateParams.active) {
+            canvas.zoomState = {
+                active: true,
+                minDate: zoomStateParams.minDate,
+                maxDate: zoomStateParams.maxDate
+            };
+        } else {
+            canvas.zoomState = { active: false };
+        }
+
+        const chartType = canvas.getAttribute('data-chart-type');
+        if (chartType === 'multi-series') {
+            drawMultiSeriesLineChart(canvas, canvas.chartData.allSeries, canvas.chartData.title);
+        } else if (chartType === 'te-single') {
+            // Revert or apply zoom and trigger redraw based on original full data cache
+            const fullData = canvas.chartData.originalData || canvas.chartData.data;
+            drawTradingEconomicsLineChart(canvas, fullData, canvas.chartData.title);
+        }
+    });
+}
 
 /**
  * 환율/금리 탭 차트 새로고침

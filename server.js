@@ -148,7 +148,7 @@ app.get('/api/stock', async (req, res) => {
                 let nk100 = "";
                 let pageCount = 0;
 
-                while (hasMore && pageCount < 20) {
+                while (hasMore) { // removed artificial page limit
                     try {
                         const response = await axios.get(
                             `${efriendDomain}/uapi/domestic-stock/v1/quotations/lendable-by-company`,
@@ -183,7 +183,7 @@ app.get('/api/stock', async (req, res) => {
                         fileLog(`[v2.4.45] Page ${++pageCount} Result: ${pageItems.length} items (Total: ${allItems.length}), Header tr_cont: ${h_tr_cont}`);
 
                         // Use tr_cont header of return context keys to decide hasMore
-                        hasMore = (h_tr_cont === 'M' || h_tr_cont === 'F' || (data.ctx_area_fk200 && data.ctx_area_fk200.trim() !== ""));
+                        hasMore = (h_tr_cont && (h_tr_cont.toUpperCase() === 'M' || h_tr_cont.toUpperCase() === 'F')); // ONLY check header for hasMore
                         fk200 = data.ctx_area_fk200 || "";
                         nk100 = data.ctx_area_nk100 || "";
 
@@ -248,6 +248,8 @@ app.get('/api/stock', async (req, res) => {
                             stock.prdy_ctrt = priceRes.data.output.prdy_ctrt; // 전일 대비율 (등락률)
                             stock.stck_prpr = priceRes.data.output.stck_prpr; // 현재가
                             stock.rprs_mrkt_kor_name = priceRes.data.output.rprs_mrkt_kor_name; // 시장 정보 (KOSPI/KOSDAQ)
+                            // log original response field to understand what is coming from API
+                            console.log(`[Server] INQ PRICE for ${stock.pdno}: rprs_mrkt_kor_name = "${priceRes.data.output.rprs_mrkt_kor_name}", tr_mkt_name = "${priceRes.data.output.tr_mkt_name}", mrkt_div_code = "${priceRes.data.output.mrkt_div_code}", mkt_nm = "${priceRes.data.output.mkt_nm}"`);
                         } else {
                             stock.prdy_ctrt = "0.00";
                             stock.stck_prpr = stock.bfdy_clpr;
@@ -713,36 +715,97 @@ app.get('/api/trading-economics', async (req, res) => {
                 const extractPoints = () => {
                     const map = new Map();
                     if (!window.Highcharts || !window.Highcharts.charts || window.Highcharts.charts.length === 0) return null;
-                    const tomorrow = Date.now() + 3600000; // v30.15: Strictly limit to 1h buffer
+                    const tomorrow = Date.now() + 3600000;
 
-                    window.Highcharts.charts.forEach(chart => {
-                        if (!chart.series) return;
-                        chart.series.forEach(series => {
-                            const isProjection = (series.name && series.name.toLowerCase().includes('projection')) ||
-                                (series.options.dashStyle && series.options.dashStyle !== 'Solid');
-
-                            if (isProjection) return;
-                            if (!series.data) return;
-
-                            series.data.forEach(p => {
-                                let x, y;
-                                if (Array.isArray(p)) { x = p[0]; y = p[1]; }
-                                else if (p && typeof p === 'object') { x = p.x; y = p.y; }
-
-                                if (x !== undefined && y !== null && y !== undefined) {
-                                    if (x > tomorrow) return;
-                                    map.set(x, y);
+                    // v30.22: Target only the primary chart to avoid collision with related/crosses charts
+                    // Usually the main chart is in #chart, .chart, or .iChart-container
+                    let primaryChart = null;
+                    
+                    // Try to guess the ticker from the URL or page meta/title for more accurate targeting
+                    const url = window.location.href;
+                    let ticker = "";
+                    if (url.includes("2-year-note-yield")) ticker = "gjgb2y";
+                    else if (url.includes("government-bond-yield")) ticker = "gjgb10";
+                    
+                    const mainContainers = document.querySelectorAll('#chart, .chart, .iChart-container, .table-unit');
+                    
+                    if (mainContainers.length > 0) {
+                        for (const container of mainContainers) {
+                            // Check if this container has a chart
+                            const chart = window.Highcharts.charts.find(c => c && c.renderTo && container.contains(c.renderTo));
+                            if (chart) {
+                                // If we have a ticker, check if any series name contains it (TE often uses stickers in hidden fields or names)
+                                if (ticker) {
+                                    const hasTicker = chart.series.some(s => 
+                                        (s.name && s.name.toLowerCase().includes(ticker)) || 
+                                        (chart.renderTo && chart.renderTo.className && chart.renderTo.className.includes(ticker))
+                                    );
+                                    if (hasTicker) {
+                                        primaryChart = chart;
+                                        break;
+                                    }
                                 }
-                            });
+                                if (!primaryChart) primaryChart = chart; 
+                                // Don't break yet if we are looking for a ticker match
+                                if (!ticker) break;
+                            }
+                        }
+                    }
+
+                    // Fallback: pick the chart with most series/points if no container match
+                    if (!primaryChart) {
+                        primaryChart = window.Highcharts.charts.reduce((prev, curr) => {
+                            const prevPoints = prev ? (prev.series ? prev.series.reduce((s, ser) => s + (ser.data ? ser.data.length : 0), 0) : 0) : 0;
+                            const currPoints = curr ? (curr.series ? curr.series.reduce((s, ser) => s + (ser.data ? ser.data.length : 0), 0) : 0) : 0;
+                            return (currPoints > prevPoints) ? curr : prev;
+                        }, window.Highcharts.charts[0]);
+                    }
+
+                    if (!primaryChart || !primaryChart.series) return null;
+
+                    primaryChart.series.forEach(series => {
+                        const isProjection = (series.name && series.name.toLowerCase().includes('projection')) ||
+                            (series.options.dashStyle && series.options.dashStyle !== 'Solid');
+
+                        if (isProjection) return;
+                        if (!series.data) return;
+
+                        series.data.forEach(p => {
+                            let x, y;
+                            if (Array.isArray(p)) { x = p[0]; y = p[1]; }
+                            else if (p && typeof p === 'object') { x = p.x; y = p.y; }
+
+                            if (x !== undefined && y !== null && y !== undefined) {
+                                if (x > tomorrow) return;
+                                map.set(x, y);
+                            }
                         });
                     });
+
                     return Array.from(map.entries()).map(([x, y]) => ({ x, y }));
                 };
 
                 // Add Step: Capture "Live" point from the page DOM (often more fresh than Highcharts)
                 const extractLivePoint = () => {
                     try {
-                        const priceEl = document.querySelector('td#p, #last_value, [data-symbol$=":CUR"] td#p, .table-unit .actual, .i-price-value');
+                        // v30.22: Target only the main price element, avoiding "Related" or "Crosses" tables
+                        // Typically, the main price is in the header or has a specific ticker-based class
+                        const url = window.location.href;
+                        let ticker = "";
+                        if (url.includes("2-year-note-yield")) ticker = "gjgb2y";
+                        else if (url.includes("government-bond-yield")) ticker = "gjgb10";
+
+                        if (ticker) {
+                            // High priority: ticker-specific label in legend area
+                            const tickerLabel = document.querySelector(`div.${ticker}\\:ind span.closeLabel, #Label-${ticker}`);
+                            if (tickerLabel) {
+                                const val = parseFloat(tickerLabel.textContent.replace(/,/g, ''));
+                                if (!isNaN(val)) return { x: Date.now(), y: val };
+                            }
+                        }
+
+                        // Medium priority: main header elements
+                        const priceEl = document.querySelector('.table-unit .actual, .header-pricing #p, #last_value, .i-price-value');
                         if (priceEl) {
                             const val = parseFloat(priceEl.textContent.replace(/,/g, ''));
                             if (!isNaN(val)) return { x: Date.now(), y: val };
