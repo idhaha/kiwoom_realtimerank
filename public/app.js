@@ -456,8 +456,27 @@ const captureAllBtn = document.getElementById("captureAllBtn");
 if (captureAllBtn) {
     captureAllBtn.addEventListener('click', captureAllTabs);
 }
+const moreControlsBtn = document.getElementById("moreControlsBtn");
 const contextMenu = document.getElementById("contextMenu");
 const addTabMenu = document.getElementById("addTabMenu");
+
+if (moreControlsBtn) {
+    moreControlsBtn.addEventListener('click', (e) => {
+        const controls = document.querySelector('.right-controls');
+        if (controls) {
+            controls.classList.toggle('show-all');
+            e.stopPropagation();
+        }
+    });
+
+    // Close mobile menu when clicking outside
+    document.addEventListener('click', (e) => {
+        const controls = document.querySelector('.right-controls');
+        if (controls && controls.classList.contains('show-all') && !controls.contains(e.target)) {
+            controls.classList.remove('show-all');
+        }
+    });
+}
 
 let currentConfigTabId = null; // Track which tab is being configured
 

@@ -1826,3 +1826,68 @@ body.modal-open {
     background: var(--accent-primary, #0f172a);
     color: #ffffff;
 }
+
+/* ==========================================================
+   Mobile Header Optimization
+   ========================================================== */
+@media (max-width: 600px) {
+    .tab-container {
+        padding: 0 5px;
+    }
+
+    .right-controls {
+        gap: 4px;
+        padding-left: 5px;
+    }
+
+    /* Hide non-essential buttons by default on mobile */
+    #bulkUpload, 
+    #bulkDownload, 
+    #captureAllBtn {
+        display: none !important;
+    }
+
+    /* Show them when 'show-all' class is toggled */
+    .right-controls.show-all {
+        position: absolute;
+        top: 45px;
+        right: 10px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 5px 10px;
+        box-shadow: var(--shadow-lg);
+        z-index: 1001;
+        flex-direction: row;
+        box-shadow: var(--shadow-lg);
+    }
+
+    .right-controls.show-all #bulkUpload, 
+    .right-controls.show-all #bulkDownload, 
+    .right-controls.show-all #captureAllBtn {
+        display: flex !important;
+    }
+
+    #moreControlsBtn {
+        display: flex !important;
+    }
+
+    /* Hide text labels on mobile to save space */
+    #globalRefreshBtn span, 
+    #logoutBtn span {
+        display: none;
+    }
+
+    #globalRefreshBtn, 
+    #logoutBtn {
+        padding: 0 12px !important;
+        min-width: 44px;
+        justify-content: center;
+        display: flex;
+        align-items: center;
+    }
+    
+    #logoutBtn {
+        margin-left: 5px !important;
+    }
+}
