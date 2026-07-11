@@ -13,6 +13,7 @@ const ADR_TAB_ID = 'tab_adr';
 const MEMO_TAB_ID = 'tab_memo';
 const EARNINGS_TAB_ID = 'tab_earnings';
 let isInitializing = false; // Flag to prevent auto-save during startup
+let isCapturing = false; // Flag to suppress all data-fetching during screenshot capture
 let quillEditor; // Global Quill instance
 
 /**
@@ -647,6 +648,7 @@ function renderEfriendTable(stocks) {
  * Transaction Rank 데이터 로드
  */
 async function loadTransactionRank() {
+    if (isCapturing) { console.log('[Capture] loadTransactionRank() skipped (isCapturing)'); return; }
     const mrktTp = mrktTpSelect.value;
     const stexTp = stexTpSelect.value;
 
@@ -703,6 +705,7 @@ async function loadTransactionRank() {
  * 데이터 로드
  */
 async function loadData() {
+    if (isCapturing) { console.log('[Capture] loadData() skipped (isCapturing)'); return; }
 
     try {
         const activeTab = document.querySelector('.tab-content.active');
@@ -787,6 +790,7 @@ function startAutoRefresh() {
     console.log(`[Rank] 🔄 자동 새로고침 시작 (간격: ${intervalMs}ms, qry_tp: ${selectedOption.value})`);
 
     autoRefreshInterval = setInterval(() => {
+        if (isCapturing) { console.log('[Capture] Auto-refresh skipped (isCapturing)'); return; }
         const now = new Date().toLocaleTimeString();
         console.log(`[Rank] ⚡ 자동 새로고침 실행 (${now})`);
         loadData();
@@ -815,6 +819,7 @@ function startAdrAutoRefresh() {
     console.log(`[ADR] 🔄 자동 새로고침 시작 (간격: ${intervalMs}ms)`);
 
     adrAutoRefreshInterval = setInterval(() => {
+        if (isCapturing) { console.log('[Capture] ADR auto-refresh skipped (isCapturing)'); return; }
         const now = new Date().toLocaleTimeString();
         console.log(`[ADR] ⚡ 자동 새로고침 실행 (${now})`);
         updateAdrFromSource();
@@ -1178,7 +1183,7 @@ function activateTab(tabId) {
     const wasEmpty = initializeTab(tabId);
 
     if (tabId === ADR_TAB_ID) {
-        startAdrAutoRefresh();
+        if (!isCapturing) startAdrAutoRefresh();
     } else if (tabId === MEMO_TAB_ID) {
         // Initialize FullCalendar when memo tab is active
         setTimeout(() => {
@@ -1188,7 +1193,7 @@ function activateTab(tabId) {
             // Try to sync calendar proactively if we have a session
             // [Fix] Removed automatic requestCalendarAccess to prevent browser popup blocking.
             // Sync now relies on the manual sync button (syncCalBtn) or existing accessToken.
-            if (calendar && accessToken) {
+            if (calendar && accessToken && !isCapturing) {
                 calendar.refetchEvents();
             }
         }, 100);
@@ -1196,7 +1201,7 @@ function activateTab(tabId) {
         if (!wasEmpty) {
             redrawTabCharts(tabId);
         }
-    } else if (tabId !== PERM_TAB_ID && wasEmpty) {
+    } else if (tabId !== PERM_TAB_ID && wasEmpty && !isCapturing) {
         loadChartsSequentially(content);
     }
 }
@@ -1261,12 +1266,16 @@ function initializeTab(tabId) {
 
     // 3. Trigger initial load if it was empty
     if (!isInitialized) {
-        if (tabId === ADR_TAB_ID) {
-            setTimeout(() => updateAdrFromSource(), 100);
-        } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
-            refreshOverseasCustomCharts(tabId);
-        } else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
-            refreshExchangeRateCharts(tabId);
+        if (!isCapturing) {
+            if (tabId === ADR_TAB_ID) {
+                setTimeout(() => updateAdrFromSource(), 100);
+            } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
+                refreshOverseasCustomCharts(tabId);
+            } else if (tabData[tabId] && tabData[tabId].type === 'exchange_rate') {
+                refreshExchangeRateCharts(tabId);
+            }
+        } else {
+            console.log(`[Capture] initializeTab(${tabId}) data load skipped (isCapturing)`);
         }
         return true;
     }
@@ -4137,6 +4146,7 @@ function syncZoomToOtherCharts(sourceCanvas, zoomStateParams) {
  * 환율/금리 탭 차트 새로고침
  */
 async function refreshExchangeRateCharts(tabId) {
+    if (isCapturing) { console.log('[Capture] refreshExchangeRateCharts() skipped (isCapturing)'); return; }
     const content = document.getElementById(tabId);
     if (!content) return;
 
@@ -4217,6 +4227,7 @@ async function refreshExchangeRateCharts(tabId) {
  * 실적 탭 새로고침
  */
 function refreshEarningsTab(tabId) {
+    if (isCapturing) { console.log('[Capture] refreshEarningsTab() skipped (isCapturing)'); return; }
     const iframe = document.getElementById(`iframeEarnings_${tabId}`);
     if (iframe) {
         const currentSrc = iframe.src;
@@ -4236,6 +4247,7 @@ function refreshEarningsTab(tabId) {
  * 일반 동적 차트 탭 (6개 iframe) 새로고침
  */
 function refreshDynamicChartsTab(tabId) {
+    if (isCapturing) { console.log('[Capture] refreshDynamicChartsTab() skipped (isCapturing)'); return; }
     const content = document.getElementById(tabId);
     if (!content) return;
 
@@ -4721,6 +4733,7 @@ function openCustomChartModal() {
  * 해외 커스텀 차트 새로고침
  */
 function refreshOverseasCustomCharts(tabId) {
+    if (isCapturing) { console.log('[Capture] refreshOverseasCustomCharts() skipped (isCapturing)'); return; }
     // alert(`[DEBUG] Refreshing tab: ${tabId}`);
     const content = document.getElementById(tabId);
     if (!content) return;
@@ -5703,6 +5716,9 @@ async function captureAllTabs() {
     const btn = document.getElementById('captureAllBtn');
     if (btn) btn.disabled = true;
 
+    isCapturing = true;
+    console.log('[Capture] isCapturing = true');
+
     try {
         for (const tabBtn of allTabBtns) {
             const tabId = tabBtn.dataset.tab;
@@ -5716,6 +5732,8 @@ async function captureAllTabs() {
     } catch (e) {
         console.error('❌ [CaptureAll] Error:', e);
     } finally {
+        isCapturing = false;
+        console.log('[Capture] isCapturing = false');
         if (originalActiveBtn) activateTab(originalActiveBtn.dataset.tab);
         if (btn) btn.disabled = false;
         alert('전체 탭 캡처 완료');
@@ -5752,11 +5770,16 @@ document.body.addEventListener('click', function (e) {
     const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabContent.id}"]`);
     const tabName = tabBtn ? tabBtn.textContent.trim() : 'Capture';
     btn.innerHTML = '⏳';
+    isCapturing = true;
+    console.log('[Capture] isCapturing = true (small btn)');
     captureTabContent(tabContent, tabName).then(() => {
         btn.innerHTML = '✅';
         setTimeout(() => { btn.innerHTML = _captureSVGIcon; }, 1000);
     }).catch(() => {
         btn.innerHTML = _captureSVGIcon;
+    }).finally(() => {
+        isCapturing = false;
+        console.log('[Capture] isCapturing = false (small btn)');
     });
 });
 
