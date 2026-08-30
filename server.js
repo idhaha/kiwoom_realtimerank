@@ -621,11 +621,43 @@ app.get('/api/watchlist_groups', async (req, res) => {
             tokenExpiryTime = 0;
         }
 
-        const rawGroups = response.data.grp_list || response.data.item || response.data.data || response.data.output || response.data.output1 || [];
-        const groups = Array.isArray(rawGroups) ? rawGroups.map(g => ({
+        if (response.data.return_code !== 0 && response.data.return_code !== undefined) {
+            console.error(`❌ ka01300 에러 [${response.data.return_code}]: ${response.data.return_msg}`);
+            return res.status(400).json({
+                success: false,
+                error: response.data.return_msg || `키움 그룹조회 실패 (${response.data.return_code})`,
+                return_code: response.data.return_code
+            });
+        }
+
+        let rawGroups = [];
+        if (Array.isArray(response.data)) {
+            rawGroups = response.data;
+        } else if (Array.isArray(response.data.grp_list)) {
+            rawGroups = response.data.grp_list;
+        } else if (Array.isArray(response.data.item)) {
+            rawGroups = response.data.item;
+        } else if (Array.isArray(response.data.items)) {
+            rawGroups = response.data.items;
+        } else if (Array.isArray(response.data.data)) {
+            rawGroups = response.data.data;
+        } else if (Array.isArray(response.data.output)) {
+            rawGroups = response.data.output;
+        } else if (Array.isArray(response.data.output1)) {
+            rawGroups = response.data.output1;
+        } else {
+            for (const key of Object.keys(response.data)) {
+                if (Array.isArray(response.data[key])) {
+                    rawGroups = response.data[key];
+                    break;
+                }
+            }
+        }
+
+        const groups = rawGroups.map(g => ({
             grp_id: g.arn_grp_id || g.grp_id || g.group_id || g.id || '',
             grp_nm: g.arn_grp_nm || g.grp_nm || g.group_name || g.name || (g.arn_grp_id || g.grp_id || '')
-        })) : [];
+        })).filter(g => g.grp_id);
 
         res.json({
             success: true,
@@ -685,7 +717,44 @@ app.get('/api/watchlist_rank', async (req, res) => {
             tokenExpiryTime = 0;
         }
 
-        const rawItems = response.data.item_list || response.data.items || response.data.watchlist || response.data.data || response.data.output || response.data.output1 || [];
+        if (response.data.return_code !== 0 && response.data.return_code !== undefined) {
+            console.error(`❌ ka01301 에러 [${response.data.return_code}]: ${response.data.return_msg}`);
+            return res.status(400).json({
+                success: false,
+                error: response.data.return_msg || `키움 관심종목조회 실패 (${response.data.return_code})`,
+                return_code: response.data.return_code
+            });
+        }
+
+        let rawItems = [];
+        if (Array.isArray(response.data)) {
+            rawItems = response.data;
+        } else if (Array.isArray(response.data.item_list)) {
+            rawItems = response.data.item_list;
+        } else if (Array.isArray(response.data.item)) {
+            rawItems = response.data.item;
+        } else if (Array.isArray(response.data.items)) {
+            rawItems = response.data.items;
+        } else if (Array.isArray(response.data.data)) {
+            rawItems = response.data.data;
+        } else if (Array.isArray(response.data.output)) {
+            rawItems = response.data.output;
+        } else if (Array.isArray(response.data.output1)) {
+            rawItems = response.data.output1;
+        } else if (Array.isArray(response.data.output2)) {
+            rawItems = response.data.output2;
+        } else if (Array.isArray(response.data.watchlist)) {
+            rawItems = response.data.watchlist;
+        } else if (Array.isArray(response.data.grp_list)) {
+            rawItems = response.data.grp_list;
+        } else {
+            for (const key of Object.keys(response.data)) {
+                if (Array.isArray(response.data[key])) {
+                    rawItems = response.data[key];
+                    break;
+                }
+            }
+        }
 
         console.log(`Step 3: 관심종목 종목별 시장구분(ka10100) 및 거래대금(ka10007) 보정 시작 (${rawItems.length}개)...`);
         const enrichedItems = [];
@@ -694,7 +763,7 @@ app.get('/api/watchlist_rank', async (req, res) => {
         for (let i = 0; i < rawItems.length; i += chunkSize) {
             const chunk = rawItems.slice(i, i + chunkSize);
             const chunkPromises = chunk.map(async (item) => {
-                const stockCode = (item.stk_cd || item.pdno || item.code || item.iscd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
+                const stockCode = (item.stk_cd || item.isu_cd || item.item_cd || item.code || item.pdno || item.iscd || item.shcode || item.jong_cd || item.stck_shrn_iscd || item.arn_stk_cd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
                 if (!stockCode) return null;
 
                 const stockName = item.stk_nm || item.isu_nm || item.prdt_name || item.name || '';
@@ -1389,6 +1458,12 @@ async function getAccessToken(appKey, secretKey) {
             timeout: 5000
         }
     );
+
+    if (response.data.return_code !== undefined && response.data.return_code !== 0) {
+        const errMsg = response.data.return_msg || `키움 인증 실패 (코드: ${response.data.return_code})`;
+        fileLog(`❌ 키움 토큰 발급 실패: ${errMsg}`);
+        throw new Error(errMsg);
+    }
 
     const token = response.data.token || response.data.access_token;
     if (!token) {

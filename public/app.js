@@ -809,6 +809,17 @@ async function loadWatchlistRank() {
 
     try {
         const response = await fetch(`/api/watchlist_rank?grp_id=${encodeURIComponent(grpId)}`);
+        
+        if (!response.ok) {
+            let errorMsg = `HTTP ${response.status}`;
+            try {
+                const errJson = await response.json();
+                if (errJson.error) errorMsg = errJson.error;
+            } catch (e) {}
+            tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">조회 실패: ${errorMsg}</td></tr>`;
+            return;
+        }
+
         const result = await response.json();
 
         if (result.success) {
@@ -817,11 +828,11 @@ async function loadWatchlistRank() {
             renderWatchlistTable(items);
         } else {
             console.error("[Watchlist] API Error:", result.error);
-            tbody.innerHTML = `<tr><td colspan="5" class="align-center error">조회 실패: ${result.error || '통신 오류'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">조회 실패: ${result.error || '통신 오류'}</td></tr>`;
         }
     } catch (e) {
         console.error("[Watchlist] Fetch Fail:", e);
-        tbody.innerHTML = `<tr><td colspan="5" class="align-center error">통신 오류</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">통신 오류: ${e.message}</td></tr>`;
     }
 }
 
