@@ -140,15 +140,15 @@ app.get('/api/stock', async (req, res) => {
         );
 
         if (efriendToken) {
-            fileLog("[eFriend] Starting pagination experiment with tr_cont: 'Y'...");
+            fileLog("[eFriend] CTSC2702R 대주가능 종목 페이징 조회 시작...");
             const fetchAllLendable = async () => {
+                const MAX_PAGES = 50;
                 let allItems = [];
-                let hasMore = true;
                 let fk200 = "";
                 let nk100 = "";
                 let pageCount = 0;
 
-                while (hasMore) { // removed artificial page limit
+                while (pageCount < MAX_PAGES) {
                     try {
                         const response = await axios.get(
                             `${efriendDomain}/uapi/domestic-stock/v1/quotations/lendable-by-company`,
@@ -160,14 +160,14 @@ app.get('/api/stock', async (req, res) => {
                                     "appsecret": efriendSecretKey,
                                     "tr_id": "CTSC2702R",
                                     "custtype": "P",
-                                    "tr_cont": pageCount === 0 ? "" : "Y" // User suggest tr_cont: 'Y'
+                                    // KIS 표준: 첫 조회 공백, 이후 Y(또는 N) — "N"을 첫 요청에 쓰면 0건 응답 발생
+                                    "tr_cont": pageCount === 0 ? "" : "Y"
                                 },
                                 params: {
                                     "EXCG_DVSN_CD": "00",
                                     "PDNO": "",
                                     "THCO_STLN_PSBL_YN": "Y",
                                     "INQR_DVSN_1": "0",
-                                    "INQR_DVSN_2": "0",
                                     "CTX_AREA_FK200": fk200,
                                     "CTX_AREA_NK100": nk100
                                 },
@@ -176,32 +176,53 @@ app.get('/api/stock', async (req, res) => {
                         );
 
                         const data = response.data;
-                        const pageItems = data.output || data.output1 || [];
+                        if (pageCount === 0) {
+                            fileLog(`[eFriend] API response: rt_cd=${data.rt_cd}, msg_cd=${data.msg_cd}, msg1=${(data.msg1 || '').trim()}`);
+                        }
+
+                        if (data.rt_cd && data.rt_cd !== "0") {
+                            fileLog(`[eFriend] API error: rt_cd=${data.rt_cd}, msg1=${(data.msg1 || '').trim()}`);
+                            break;
+                        }
+
+                        const pageItems = Array.isArray(data.output1)
+                            ? data.output1
+                            : (Array.isArray(data.output) ? data.output : []);
                         allItems = allItems.concat(pageItems);
+                        pageCount++;
 
-                        const h_tr_cont = response.headers['tr_cont'] || response.headers['TR_CONT'];
-                        fileLog(`[v2.4.45] Page ${++pageCount} Result: ${pageItems.length} items (Total: ${allItems.length}), Header tr_cont: ${h_tr_cont}`);
+                        const h_tr_cont = (response.headers['tr_cont'] || response.headers['TR_CONT'] || '').toUpperCase();
+                        const fk200Preview = (data.ctx_area_fk200 || "").substring(0, 30);
+                        fileLog(`[eFriend] Page ${pageCount}: ${pageItems.length} items (total: ${allItems.length}), tr_cont=${h_tr_cont || 'N'}, fk200=${fk200Preview}...`);
 
-                        // Use tr_cont header of return context keys to decide hasMore
-                        hasMore = (h_tr_cont && (h_tr_cont.toUpperCase() === 'M' || h_tr_cont.toUpperCase() === 'F')); // ONLY check header for hasMore
                         fk200 = data.ctx_area_fk200 || "";
                         nk100 = data.ctx_area_nk100 || "";
 
-                        if (hasMore) {
-                            await new Promise(r => setTimeout(r, 200));
+                        // Y(사용자 명세) 또는 M(KIS 표준)이면 다음 페이지 존재
+                        const hasMore = (h_tr_cont === 'Y' || h_tr_cont === 'M');
+                        if (!hasMore || pageItems.length === 0) {
+                            break;
                         }
+
+                        await new Promise(r => setTimeout(r, 200));
                     } catch (e) {
-                        fileLog(`[eFriend] Pagination error at page ${pageCount + 1}: ${e.message}`);
-                        hasMore = false;
+                        const errBody = e.response?.data ? JSON.stringify(e.response.data).substring(0, 300) : '';
+                        fileLog(`[eFriend] Pagination error at page ${pageCount + 1}: ${e.message} (collected: ${allItems.length} items) ${errBody}`);
+                        break;
                     }
                 }
+
+                if (pageCount >= MAX_PAGES) {
+                    fileLog(`[eFriend] Warning: reached max page limit (${MAX_PAGES}), collected ${allItems.length} items`);
+                }
+
                 return allItems;
             };
 
             dataPromises.push(
                 fetchAllLendable().then(items => {
                     efriendStocks = items;
-                    fileLog(`[v2.4.45] Final merged items: ${efriendStocks.length}`);
+                    fileLog(`[eFriend] Final: ${efriendStocks.length} lendable stocks collected`);
                 })
             );
         }
@@ -553,6 +574,231 @@ app.get('/api/transaction_rank', async (req, res) => {
 
     } catch (error) {
         console.error("❌ ka10032 에러:", error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            details: error.response?.data || null
+        });
+    }
+});
+
+/**
+ * 관심종목 그룹 리스트(ka01300) API 엔드포인트
+ */
+app.get('/api/watchlist_groups', async (req, res) => {
+    console.log("🚀 [API START] /api/watchlist_groups 요청 처리 시작");
+
+    const appKey = (process.env.KIWOOM_APPKEY || "").trim();
+    const secretKey = (process.env.KIWOOM_SECRETKEY || "").trim();
+
+    try {
+        if (!appKey || !secretKey) {
+            return res.status(500).json({ error: "API 키 설정 필요" });
+        }
+
+        let accessToken = await getAccessToken(appKey, secretKey);
+
+        const response = await axios.post(
+            "https://api.kiwoom.com/api/dostk/watchlist",
+            {},
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${accessToken}`,
+                    "api-id": "ka01300",
+                    "cont-yn": "n",
+                    "next-key": "n"
+                },
+                timeout: 5000
+            }
+        );
+
+        console.log("DEBUG: ka01300 Full Response Data:", JSON.stringify(response.data, null, 2));
+
+        if (response.data.return_code === 3 || (response.data.return_msg && response.data.return_msg.includes("Token이 유효하지 않습니다"))) {
+            console.warn("⚠️ 토큰 만료/유효하지 않음 감지. 캐시를 초기화합니다.");
+            cachedToken = null;
+            tokenExpiryTime = 0;
+        }
+
+        const rawGroups = response.data.grp_list || response.data.item || response.data.data || response.data.output || response.data.output1 || [];
+        const groups = Array.isArray(rawGroups) ? rawGroups.map(g => ({
+            grp_id: g.arn_grp_id || g.grp_id || g.group_id || g.id || '',
+            grp_nm: g.arn_grp_nm || g.grp_nm || g.group_name || g.name || (g.arn_grp_id || g.grp_id || '')
+        })) : [];
+
+        res.json({
+            success: true,
+            data: groups,
+            server_time: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error("❌ ka01300 에러:", error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            details: error.response?.data || null
+        });
+    }
+});
+
+/**
+ * 관심종목 그룹 상세조회(ka01301) 및 하락률 순위 엔드포인트
+ */
+app.get('/api/watchlist_rank', async (req, res) => {
+    console.log("🚀 [API START] /api/watchlist_rank 요청 처리 시작");
+
+    const appKey = (process.env.KIWOOM_APPKEY || "").trim();
+    const secretKey = (process.env.KIWOOM_SECRETKEY || "").trim();
+    const grpId = req.query.grp_id || "074";
+
+    try {
+        if (!appKey || !secretKey) {
+            return res.status(500).json({ error: "API 키 설정 필요" });
+        }
+
+        let accessToken = await getAccessToken(appKey, secretKey);
+
+        console.log(`Step 2: 관심종목 그룹 상세조회 (arn_grp_id=${grpId})...`);
+        const response = await axios.post(
+            "https://api.kiwoom.com/api/dostk/watchlist",
+            {
+                "arn_grp_id": grpId
+            },
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${accessToken}`,
+                    "api-id": "ka01301",
+                    "cont-yn": "n",
+                    "next-key": "n"
+                },
+                timeout: 5000
+            }
+        );
+
+        console.log("DEBUG: ka01301 Full Response Data:", JSON.stringify(response.data, null, 2));
+
+        if (response.data.return_code === 3 || (response.data.return_msg && response.data.return_msg.includes("Token이 유효하지 않습니다"))) {
+            console.warn("⚠️ 토큰 만료/유효하지 않음 감지. 캐시를 초기화합니다.");
+            cachedToken = null;
+            tokenExpiryTime = 0;
+        }
+
+        const rawItems = response.data.item_list || response.data.items || response.data.watchlist || response.data.data || response.data.output || response.data.output1 || [];
+
+        console.log(`Step 3: 관심종목 종목별 시장구분(ka10100) 및 거래대금(ka10007) 보정 시작 (${rawItems.length}개)...`);
+        const enrichedItems = [];
+        const chunkSize = 1;
+
+        for (let i = 0; i < rawItems.length; i += chunkSize) {
+            const chunk = rawItems.slice(i, i + chunkSize);
+            const chunkPromises = chunk.map(async (item) => {
+                const stockCode = (item.stk_cd || item.pdno || item.code || item.iscd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
+                if (!stockCode) return null;
+
+                const stockName = item.stk_nm || item.isu_nm || item.prdt_name || item.name || '';
+                let marketType = 'Q';
+                let trdeAmtMillion = parseInt(item.trde_amt || item.trde_prica || item.acml_tr_pbmn || 0) || 0;
+                let flucRt = item.fluc_rt || item.flu_rt || item.prdy_ctrt || item.base_comp_chgr || item.chg_rt || '0';
+
+                try {
+                    // 0. 이름 기반 필터링 (최우선)
+                    const isEtfName = (stockName || "").startsWith("KODEX") || (stockName || "").startsWith("TIGER");
+                    if (isEtfName) return null;
+
+                    // 1. 시장구분 (Realtime Query Rank와 동일한 ka10100 로직)
+                    if (marketCache[stockCode]) {
+                        const cached = marketCache[stockCode];
+                        if (!['0', '10'].includes(String(cached.code))) {
+                            return null;
+                        }
+                        marketType = cached.type;
+                    } else {
+                        try {
+                            const basicInfoResponse = await axios.post(
+                                "https://api.kiwoom.com/api/dostk/stkinfo",
+                                { "stk_cd": stockCode },
+                                {
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                        "Authorization": `Bearer ${accessToken}`,
+                                        "api-id": "ka10100",
+                                    },
+                                    timeout: 3000
+                                }
+                            );
+                            const basicInfo = basicInfoResponse.data;
+                            const mktCode = String(basicInfo.marketCode || "");
+                            const marketName = basicInfo.marketName || "";
+
+                            if (!['0', '10'].includes(mktCode)) {
+                                marketCache[stockCode] = { type: '?', code: mktCode };
+                                return null;
+                            }
+
+                            if (marketName && (marketName.includes("거래소") || marketName === "KOSPI")) {
+                                marketType = 'K';
+                            }
+                            marketCache[stockCode] = { type: marketType, code: mktCode };
+                        } catch (e) {
+                            fileLog(`[Warning] ka10100 failed for ${stockName} (${stockCode}): ${e.message}`);
+                        }
+                    }
+
+                    // 2. 종목별상세거래대금 (ka10007) - Realtime Query Rank와 동일
+                    try {
+                        const detailResponse = await axios.post(
+                            "https://api.kiwoom.com/api/dostk/mrkcond",
+                            { "stk_cd": `${stockCode}_AL` },
+                            {
+                                headers: {
+                                    "Content-Type": "application/json",
+                                    "Authorization": `Bearer ${accessToken}`,
+                                    "api-id": "ka10007",
+                                },
+                                timeout: 3000
+                            }
+                        );
+                        const detail = detailResponse.data;
+                        if (detail.trde_prica) {
+                            trdeAmtMillion = parseInt(detail.trde_prica) || 0;
+                        }
+                        if (detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt) {
+                            flucRt = detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt;
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+
+                    return {
+                        ...item,
+                        stk_cd: stockCode,
+                        stk_nm: stockName,
+                        mkt_type: marketType,
+                        fluc_rt: flucRt,
+                        trde_amt: trdeAmtMillion
+                    };
+                } catch (err) {
+                    return null;
+                }
+            });
+
+            const processed = await Promise.all(chunkPromises);
+            enrichedItems.push(...processed.filter(p => p !== null));
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        res.json({
+            success: true,
+            grp_id: grpId,
+            data: enrichedItems,
+            server_time: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error("❌ ka01301 에러:", error.message);
         res.status(500).json({
             success: false,
             error: error.message,

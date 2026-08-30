@@ -444,6 +444,10 @@ const transactionBody = document.getElementById('transactionBody');
 const mrktTpSelect = document.getElementById('mrktTp');
 const stexTpSelect = document.getElementById('stexTp');
 
+const watchlistBody = document.getElementById('watchlistBody');
+const watchlistGroupSelect = document.getElementById('watchlistGroupSelect');
+const watchlistGroupNameInput = document.getElementById('watchlistGroupNameInput');
+
 // --- State Variables ---
 let tabData = {};
 let activeTabId = PERM_TAB_ID;
@@ -702,6 +706,126 @@ async function loadTransactionRank() {
 }
 
 /**
+ * 관심종목 하락률 순위 테이블 렌더링
+ */
+function renderWatchlistTable(stocks) {
+    const tbody = document.getElementById('watchlistBody');
+    if (!tbody) return;
+
+    if (!Array.isArray(stocks) || stocks.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    조회된 관심종목 데이터가 없습니다.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    // 2. 하락등락률이 큰 순서대로 보여줘 (오름차순: 가장 큰 마이너스 등락률부터)
+    const sortedStocks = [...stocks].sort((a, b) => {
+        const rateA = parseFloat(a.fluc_rt || a.flu_rt || a.base_comp_chgr || a.prdy_ctrt || 0);
+        const rateB = parseFloat(b.fluc_rt || b.flu_rt || b.base_comp_chgr || b.prdy_ctrt || 0);
+        return rateA - rateB;
+    });
+
+    tbody.innerHTML = sortedStocks.slice(0, 20).map((stock, index) => {
+        const changeRate = stock.fluc_rt || stock.flu_rt || stock.base_comp_chgr || stock.prdy_ctrt || '0';
+        let trdeAmtRaw = stock.trde_amt || stock.trde_prica || stock.acml_tr_pbmn || '0';
+        let trdeAmtNum = parseInt(String(trdeAmtRaw).replace(/[^0-9]/g, '')) || 0;
+        const trdeAmtMillion = (trdeAmtNum > 100000000) ? Math.round(trdeAmtNum / 1000000) : trdeAmtNum;
+
+        const marketLabel = stock.mkt_type || '-';
+
+        return `
+            <tr class="fade-in">
+                <td class="align-right">${index + 1}</td>
+                <td class="market-type">${marketLabel}</td>
+                <td>${stock.stk_nm || stock.isu_nm || '-'}</td>
+                <td class="align-right num-cell ${getPriceClass(changeRate)}">
+                    ${formatChangeRate(changeRate)}
+                </td>
+                <td class="align-right num-cell">${formatNumber(trdeAmtMillion)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+/**
+ * 관심종목 그룹 목록 로드
+ */
+async function loadWatchlistGroups() {
+    try {
+        const response = await fetch('/api/watchlist_groups');
+        const result = await response.json();
+        const select = document.getElementById('watchlistGroupSelect');
+        const input = document.getElementById('watchlistGroupNameInput');
+
+        const savedGrp = localStorage.getItem('watchlist_selected_group') || (input ? input.value.trim() : '') || '074';
+
+        if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+            const matched = result.data.find(g => String(g.grp_id) === String(savedGrp) || String(g.grp_nm) === String(savedGrp));
+            const selectedVal = matched ? matched.grp_id : savedGrp;
+
+            if (select) {
+                select.innerHTML = result.data.map(g => `
+                    <option value="${g.grp_id}" ${String(g.grp_id) === String(selectedVal) ? 'selected' : ''}>
+                        ${g.grp_nm ? `${g.grp_nm} (${g.grp_id})` : g.grp_id}
+                    </option>
+                `).join('');
+
+                if (!matched && savedGrp) {
+                    const customOpt = document.createElement('option');
+                    customOpt.value = savedGrp;
+                    customOpt.textContent = `${savedGrp} (직접입력)`;
+                    customOpt.selected = true;
+                    customOpt.dataset.custom = 'true';
+                    select.appendChild(customOpt);
+                }
+            }
+            if (input && savedGrp) {
+                input.value = savedGrp;
+            }
+        }
+    } catch (e) {
+        console.warn("[Watchlist] Failed to fetch groups:", e.message);
+    }
+}
+
+/**
+ * 관심종목 하락률 순위 데이터 로드
+ */
+async function loadWatchlistRank() {
+    if (isCapturing) { console.log('[Capture] loadWatchlistRank() skipped (isCapturing)'); return; }
+
+    const input = document.getElementById('watchlistGroupNameInput');
+    const select = document.getElementById('watchlistGroupSelect');
+    const tbody = document.getElementById('watchlistBody');
+    if (!tbody) return;
+
+    let grpId = (input && input.value.trim()) || (select && select.value) || '074';
+    console.log(`[Watchlist] Fetching Watchlist Rank (grp_id=${grpId})...`);
+
+    try {
+        const response = await fetch(`/api/watchlist_rank?grp_id=${encodeURIComponent(grpId)}`);
+        const result = await response.json();
+
+        if (result.success) {
+            const items = result.data || [];
+            console.log(`[Watchlist] Items loaded: ${items.length}`);
+            renderWatchlistTable(items);
+        } else {
+            console.error("[Watchlist] API Error:", result.error);
+            tbody.innerHTML = `<tr><td colspan="5" class="align-center error">조회 실패: ${result.error || '통신 오류'}</td></tr>`;
+        }
+    } catch (e) {
+        console.error("[Watchlist] Fetch Fail:", e);
+        tbody.innerHTML = `<tr><td colspan="5" class="align-center error">통신 오류</td></tr>`;
+    }
+}
+
+/**
  * 데이터 로드
  */
 async function loadData() {
@@ -795,6 +919,7 @@ function startAutoRefresh() {
         console.log(`[Rank] ⚡ 자동 새로고침 실행 (${now})`);
         loadData();
         loadTransactionRank();
+        loadWatchlistRank();
     }, intervalMs);
 }
 
@@ -837,6 +962,8 @@ refreshIntervalSelect.addEventListener('change', (e) => {
     console.log('[Rank] 새로고침 설정 변경');
     lastSavedSettings.rankInterval = e.target.value;
     loadData();
+    loadTransactionRank();
+    loadWatchlistRank();
     startAutoRefresh();
     saveAppData();
 });
@@ -845,7 +972,54 @@ manualRefreshBtn.addEventListener('click', () => {
     console.log('수동 새로고침 실행');
     loadData();
     loadTransactionRank();
+    loadWatchlistRank();
 });
+
+if (watchlistGroupSelect) {
+    watchlistGroupSelect.addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (watchlistGroupNameInput) watchlistGroupNameInput.value = val;
+        localStorage.setItem('watchlist_selected_group', val);
+        saveAppData();
+        loadWatchlistRank();
+    });
+}
+
+if (watchlistGroupNameInput) {
+    const handleWatchlistInputChange = () => {
+        const val = watchlistGroupNameInput.value.trim();
+        if (val) {
+            localStorage.setItem('watchlist_selected_group', val);
+            if (watchlistGroupSelect) {
+                const opt = Array.from(watchlistGroupSelect.options).find(o => o.value === val);
+                if (opt) {
+                    watchlistGroupSelect.value = val;
+                } else {
+                    let customOpt = Array.from(watchlistGroupSelect.options).find(o => o.dataset.custom === 'true');
+                    if (!customOpt) {
+                        customOpt = document.createElement('option');
+                        customOpt.dataset.custom = 'true';
+                        watchlistGroupSelect.appendChild(customOpt);
+                    }
+                    customOpt.value = val;
+                    customOpt.textContent = `${val} (직접입력)`;
+                    watchlistGroupSelect.value = val;
+                }
+            }
+            saveAppData();
+            loadWatchlistRank();
+        }
+    };
+
+    watchlistGroupNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            handleWatchlistInputChange();
+            watchlistGroupNameInput.blur();
+        }
+    });
+    watchlistGroupNameInput.addEventListener('change', handleWatchlistInputChange);
+    watchlistGroupNameInput.addEventListener('blur', handleWatchlistInputChange);
+}
 
 if (globalRefreshBtn) {
     globalRefreshBtn.addEventListener('click', () => {
@@ -968,12 +1142,17 @@ function getSerializedState(sourceData = null) {
         if (savedDelta) memoDelta = JSON.parse(savedDelta);
     }
 
+    const watchlistInput = document.getElementById('watchlistGroupNameInput');
+    const watchlistSelect = document.getElementById('watchlistGroupSelect');
+    const watchlistGroupId = (watchlistInput && watchlistInput.value.trim()) || (watchlistSelect && watchlistSelect.value) || localStorage.getItem('watchlist_selected_group') || '074';
+
     return {
         activeTabId: activeTabId,
         tabs: capturedTabs,
         contents: dataToSerialize,
         rankInterval: refreshIntervalSelect ? refreshIntervalSelect.value : "2",
         adrInterval: document.getElementById('adrRefreshInterval')?.value,
+        watchlistGroupId: watchlistGroupId,
         memoHtml: memoHtml,
         memoDelta: memoDelta,
         updatedAt: Date.now()
@@ -1138,6 +1317,30 @@ function applyData(data) {
                     quillEditor.setContents(data.memoDelta);
                 } else if (data.memoHtml) {
                     quillEditor.root.innerHTML = data.memoHtml;
+                }
+            }
+        }
+
+        // Restore Watchlist Group ID
+        if (data.watchlistGroupId) {
+            localStorage.setItem('watchlist_selected_group', data.watchlistGroupId);
+            const input = document.getElementById('watchlistGroupNameInput');
+            const select = document.getElementById('watchlistGroupSelect');
+            if (input) input.value = data.watchlistGroupId;
+            if (select) {
+                const opt = Array.from(select.options).find(o => o.value === data.watchlistGroupId);
+                if (opt) {
+                    select.value = data.watchlistGroupId;
+                } else {
+                    let customOpt = Array.from(select.options).find(o => o.dataset.custom === 'true');
+                    if (!customOpt) {
+                        customOpt = document.createElement('option');
+                        customOpt.dataset.custom = 'true';
+                        select.appendChild(customOpt);
+                    }
+                    customOpt.value = data.watchlistGroupId;
+                    customOpt.textContent = `${data.watchlistGroupId} (직접입력)`;
+                    select.value = data.watchlistGroupId;
                 }
             }
         }
@@ -4286,6 +4489,7 @@ async function refreshAllTabs() {
     // 1. 순위 탭
     loadData();
     loadTransactionRank();
+    loadWatchlistRank();
 
     // 2. ADR 탭
     updateAdrFromSource();
@@ -5180,6 +5384,30 @@ function applyFullStateBackup(data) {
     if (data.memoHtml) localStorage.setItem('memoContent_html', data.memoHtml);
     if (data.memoDelta) localStorage.setItem('memoContent_delta', JSON.stringify(data.memoDelta));
 
+    // 5.1 관심종목 그룹 복구
+    if (data.watchlistGroupId) {
+        localStorage.setItem('watchlist_selected_group', data.watchlistGroupId);
+        const input = document.getElementById('watchlistGroupNameInput');
+        const select = document.getElementById('watchlistGroupSelect');
+        if (input) input.value = data.watchlistGroupId;
+        if (select) {
+            const opt = Array.from(select.options).find(o => o.value === data.watchlistGroupId);
+            if (opt) {
+                select.value = data.watchlistGroupId;
+            } else {
+                let customOpt = Array.from(select.options).find(o => o.dataset.custom === 'true');
+                if (!customOpt) {
+                    customOpt = document.createElement('option');
+                    customOpt.dataset.custom = 'true';
+                    select.appendChild(customOpt);
+                }
+                customOpt.value = data.watchlistGroupId;
+                customOpt.textContent = `${data.watchlistGroupId} (직접입력)`;
+                select.value = data.watchlistGroupId;
+            }
+        }
+    }
+
     // 6. 데이터 저장 및 서버와 동기화
     saveAppData();
 
@@ -5222,10 +5450,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         ensurePermanentTabs();
         activateTab(PERM_TAB_ID);
+
+        const savedWatchlistGrp = localStorage.getItem('watchlist_selected_group');
+        if (savedWatchlistGrp) {
+            const input = document.getElementById('watchlistGroupNameInput');
+            const select = document.getElementById('watchlistGroupSelect');
+            if (input) input.value = savedWatchlistGrp;
+            if (select) {
+                const opt = Array.from(select.options).find(o => o.value === savedWatchlistGrp);
+                if (opt) select.value = savedWatchlistGrp;
+            }
+        }
     }
 
     loadData();
     loadTransactionRank();
+    loadWatchlistGroups();
+    loadWatchlistRank();
     startAutoRefresh();
     setupBulkSettingsHandlers();
 

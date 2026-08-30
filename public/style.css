@@ -62,22 +62,27 @@ body {
 
 .container {
     max-width: 1700px;
-    /* 3단 레이아웃을 위해 너비 확장 */
     margin: 0 auto;
+}
+
+#tab_rank {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+}
+
+#tab_rank .container {
+    max-width: 100%;
+    min-width: 1750px;
+    padding-bottom: 20px;
 }
 
 .grid-container {
     display: grid;
-    grid-template-columns: 1.1fr 1.1fr 1.3fr;
+    grid-template-columns: 1fr 1fr 1.15fr 1fr;
     gap: 1.25rem;
     margin-top: 1rem;
     align-items: start;
-}
-
-@media (max-width: 900px) {
-    .grid-container {
-        grid-template-columns: 1fr;
-    }
 }
 
 .panel {
@@ -327,9 +332,11 @@ table tbody td[colspan] {
 #transactionTable thead,
 #stockTable thead,
 #efriendStockTable thead,
+#watchlistTable thead,
 #transactionTable tbody tr,
 #stockTable tbody tr,
-#efriendStockTable tbody tr {
+#efriendStockTable tbody tr,
+#watchlistTable tbody tr {
     display: table;
     width: 100%;
     table-layout: fixed;

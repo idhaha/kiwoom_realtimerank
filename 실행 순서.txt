@@ -1,0 +1,33 @@
+
+1. 코드 수정
+
+2. 로컬로 테스트
+http://localhost:3001/에서 테스트ㅜ
+
+만일 포트가 사용중이라고 나오면, 해당 포트가 사용중인 PID를 찾아서 Kill해줌
+netstat -ano | findstr :3001
+taskkill /f /pid PID번호
+
+3. git 반영
+git checkout -b "br_oracle"
+git add .
+git commit -m "capture the current screen without auto-update"
+git tag -a v2.6 -m "capture the current screen without auto-update"
+git push origin br_oracle --tags
+
+
+4. 서버 접속
+PS D:\Program\Kiwoom> ssh -i C:\Users\yg.gb5pro\.ssh\id_rsa ubuntu@134.185.111.202 
+
+5. 서버에 코드 적용후 재시작
+ubuntu@instance-20260127-2105:~/kiwoom_realtimerank$ ~/update-kiwoom.sh
+
+코드반영 없이 프로세스 무중단으로 환경변수만 적용하여 프로세스를 리로드 하려면 
+ubuntu@instance-20260127-2105:~/kiwoom_realtimerank$ pm2 reload kiwoom-service --update-env
+
+* 환경변수 편집
+ubuntu@instance-20260127-2105:~/kiwoom_realtimerank$ nano .env
+그냥 나가려면 Ctrl + X
+수정한 내용을 저장하고 나가려면 Ctrl + O → Enter → Ctrl + X
+저장하지 않고 나가려면 Ctrl + X → N
+
