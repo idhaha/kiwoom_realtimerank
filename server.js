@@ -849,7 +849,15 @@ app.get('/api/watchlist_rank', async (req, res) => {
                         trde_amt: trdeAmtMillion
                     };
                 } catch (err) {
-                    return null;
+                    fileLog(`[Warning] Enrichment catch for ${stockCode}: ${err.message}`);
+                    return {
+                        ...item,
+                        stk_cd: stockCode,
+                        stk_nm: stockName || stockCode,
+                        mkt_type: marketType,
+                        fluc_rt: flucRt,
+                        trde_amt: trdeAmtMillion
+                    };
                 }
             });
 
@@ -859,6 +867,8 @@ app.get('/api/watchlist_rank', async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 100));
         }
 
+        fileLog(`Step 4: 관심종목 최종 보정 완료 (총 ${enrichedItems.length}개 반환)`);
+
         res.json({
             success: true,
             grp_id: grpId,
@@ -867,11 +877,122 @@ app.get('/api/watchlist_rank', async (req, res) => {
         });
 
     } catch (error) {
+        fileLog(`❌ ka01301 에러: ${error.message}`);
         console.error("❌ ka01301 에러:", error.message);
         res.status(500).json({
             success: false,
             error: error.message,
             details: error.response?.data || null
+        });
+    }
+});
+
+/**
+ * 관심종목 전체 디버깅용 엔드포인트
+ * 브라우저나 curl로 http://localhost:3001/api/watchlist_debug?grp_id=074 호출 시
+ * 키움 API와의 원본 요청/응답 전체를 JSON으로 확인 가능
+ */
+app.get('/api/watchlist_debug', async (req, res) => {
+    const appKey = (process.env.KIWOOM_APPKEY || "").trim();
+    const secretKey = (process.env.KIWOOM_SECRETKEY || "").trim();
+    const grpId = req.query.grp_id || "074";
+
+    const debugLogs = [];
+    const log = (msg) => {
+        debugLogs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+        console.log(`[WatchlistDebug] ${msg}`);
+    };
+
+    try {
+        log(`1. 토큰 발급 시작 (AppKey: ${appKey.substring(0, 8)}...)`);
+        const tokenRes = await axios.post(
+            "https://api.kiwoom.com/oauth2/token",
+            {
+                grant_type: "client_credentials",
+                appkey: appKey,
+                secretkey: secretKey
+            },
+            {
+                headers: { "Content-Type": "application/json" },
+                timeout: 10000
+            }
+        );
+
+        log(`Token 응답 return_code: ${tokenRes.data.return_code}, return_msg: ${tokenRes.data.return_msg || 'OK'}`);
+        const token = tokenRes.data.token || tokenRes.data.access_token;
+
+        if (!token) {
+            return res.json({
+                success: false,
+                step: "token",
+                tokenResponse: tokenRes.data,
+                logs: debugLogs
+            });
+        }
+
+        log("2. ka01300 (그룹 리스트) 호출...");
+        let groupResData = null;
+        try {
+            const grpRes = await axios.post(
+                "https://api.kiwoom.com/api/dostk/watchlist",
+                {},
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`,
+                        "api-id": "ka01300",
+                        "cont-yn": "n",
+                        "next-key": "n"
+                    },
+                    timeout: 10000
+                }
+            );
+            groupResData = grpRes.data;
+            log(`ka01300 응답 수신 완료 (Status: ${grpRes.status})`);
+        } catch (e) {
+            groupResData = { error: e.message, response: e.response?.data };
+            log(`ka01300 실패: ${e.message}`);
+        }
+
+        log(`3. ka01301 (그룹 ${grpId} 상세조회) 호출...`);
+        let detailResData = null;
+        try {
+            const dRes = await axios.post(
+                "https://api.kiwoom.com/api/dostk/watchlist",
+                { "arn_grp_id": String(grpId) },
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`,
+                        "api-id": "ka01301",
+                        "cont-yn": "n",
+                        "next-key": "n"
+                    },
+                    timeout: 10000
+                }
+            );
+            detailResData = dRes.data;
+            log(`ka01301 응답 수신 완료 (Status: ${dRes.status})`);
+        } catch (e) {
+            detailResData = { error: e.message, response: e.response?.data };
+            log(`ka01301 실패: ${e.message}`);
+        }
+
+        res.json({
+            success: true,
+            tested_grp_id: grpId,
+            token_sample: token ? `${token.substring(0, 15)}...` : null,
+            ka01300_groups_raw: groupResData,
+            ka01301_detail_raw: detailResData,
+            logs: debugLogs
+        });
+    } catch (e) {
+        log(`전체 디버그 실패: ${e.message}`);
+        res.status(500).json({
+            success: false,
+            error: e.message,
+            response: e.response?.data,
+            logs: debugLogs
         });
     }
 });
