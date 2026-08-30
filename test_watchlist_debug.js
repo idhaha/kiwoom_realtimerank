@@ -78,7 +78,6 @@ async function runWatchlistDebug() {
         );
 
         console.log("📥 Status:", resA.status);
-        console.log("📥 Response Body:", JSON.stringify(resA.data, null, 2));
 
         const keys = Object.keys(resA.data || {});
         let groups = [];
@@ -99,12 +98,12 @@ async function runWatchlistDebug() {
     }
 
     // ----------------------------------------------------
-    // Step 3: 관심종목 그룹 상세조회 (ka01301) 테스트
+    // Step 3: 관심종목 그룹 상세조회 (ka01301) + ka10095 일괄 조회
     // ----------------------------------------------------
     console.log("\n--------------------------------------------------");
-    console.log("3️⃣ [Step 3] 관심종목 그룹 상세조회(ka01301) 테스트...");
+    console.log("3️⃣ [Step 3] 관심종목 그룹 상세조회(ka01301) + ka10095 일괄 조회 테스트...");
 
-    const targetGrpIds = foundGroupIds.length > 0 ? foundGroupIds.slice(0, 5) : ["074", "074 "];
+    const targetGrpIds = foundGroupIds.length > 0 ? foundGroupIds.slice(0, 3) : ["074", "074 "];
 
     for (const testGrp of targetGrpIds) {
         console.log(`\n👉 그룹 ID: "${testGrp}" 상세조회 시도...`);
@@ -126,8 +125,7 @@ async function runWatchlistDebug() {
                 }
             );
 
-            console.log(`📥 [그룹 ${testGrp}] Status:`, resDetail.status);
-            console.log(`📥 [그룹 ${testGrp}] Response Body:`, JSON.stringify(resDetail.data, null, 2));
+            console.log(`📥 [그룹 ${testGrp}] Status:`, resDetail.status, `return_code: ${resDetail.data.return_code}`);
 
             const detailKeys = Object.keys(resDetail.data || {});
             let items = [];
@@ -144,75 +142,68 @@ async function runWatchlistDebug() {
 
             if (items.length > 0) {
                 console.log(`\n📊 [그룹 ${testGrp}] 발견된 종목 수: ${items.length}개`);
-                console.log(`📊 종목 보정 (시장구분 ka10100 & 거래대금/등락률 ka10007) 시작...`);
+                
+                const stockCodes = items.map(item => (item.cod2 || item.stk_cd || item.code || "").replace(/[^0-9a-zA-Z]/g, '')).filter(Boolean);
+                
+                console.log(`🚀 ka10095 관심종목 일괄 조회 (${stockCodes.length}개)...`);
+                const batchCdString = stockCodes.map(c => `${c}_AL`).join('|');
+                
+                let batchMap = {};
+                try {
+                    const batchRes = await axios.post(
+                        "https://api.kiwoom.com/api/dostk/stkinfo",
+                        { "stk_cd": batchCdString },
+                        {
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${accessToken}`,
+                                "api-id": "ka10095",
+                            },
+                            timeout: 7000
+                        }
+                    );
+                    const batchList = batchRes.data?.atn_stk_infr || batchRes.data?.data || batchRes.data?.output || [];
+                    console.log(`✅ ka10095 일괄 조회 성공 (${batchList.length}개 종목 데이터 수신)`);
+                    
+                    for (const bItem of batchList) {
+                        const bCode = (bItem.stk_cd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
+                        if (bCode) {
+                            batchMap[bCode] = {
+                                name: bItem.stk_nm || bCode,
+                                drop_rate: parseFloat(bItem.flu_rt || bItem.fluc_rt || bItem.base_comp_chgr || 0) || 0,
+                                trade_amount: parseInt(bItem.trde_prica || bItem.trde_amt || 0) || 0
+                            };
+                        }
+                    }
+                } catch (e) {
+                    console.error("❌ ka10095 일괄 조회 실패:", e.response?.data || e.message);
+                }
 
                 const enrichedList = [];
-                for (let i = 0; i < Math.min(items.length, 10); i++) {
-                    const item = items[i];
-                    const code = (item.cod2 || item.stk_cd || item.isu_cd || item.code || "").replace(/[^0-9a-zA-Z]/g, '');
-                    if (!code) continue;
-
-                    let name = code;
+                for (const code of stockCodes) {
+                    const b = batchMap[code] || {};
+                    let name = b.name || code;
                     let mkt = 'Q';
-                    let trdeAmt = 0;
-                    let flucRt = '0';
+                    let dropRate = b.drop_rate !== undefined ? b.drop_rate : 0;
+                    let trdeAmt = b.trade_amount !== undefined ? b.trade_amount : 0;
 
-                    // ka10100
-                    try {
-                        const infoRes = await axios.post(
-                            "https://api.kiwoom.com/api/dostk/stkinfo",
-                            { "stk_cd": code },
-                            {
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    "Authorization": `Bearer ${accessToken}`,
-                                    "api-id": "ka10100"
-                                },
-                                timeout: 3000
-                            }
-                        );
-                        const b = infoRes.data;
-                        name = b.stk_nm || b.name || b.isu_nm || name;
-                        const mktNm = b.marketName || b.mkt_nm || '';
-                        if (mktNm.includes("거래소") || mktNm.includes("KOSPI")) mkt = 'K';
-                    } catch (e) {}
-
-                    // ka10007
-                    try {
-                        const mrkRes = await axios.post(
-                            "https://api.kiwoom.com/api/dostk/mrkcond",
-                            { "stk_cd": `${code}_AL` },
-                            {
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    "Authorization": `Bearer ${accessToken}`,
-                                    "api-id": "ka10007"
-                                },
-                                timeout: 3000
-                            }
-                        );
-                        const d = mrkRes.data;
-                        trdeAmt = parseInt(d.trde_prica) || 0;
-                        flucRt = d.flu_rt || d.fluc_rt || d.base_comp_chgr || d.prdy_ctrt || '0';
-                        if (!name && d.stk_nm) name = d.stk_nm;
-                    } catch (e) {}
+                    // ETF 제외
+                    if (name.startsWith("KODEX") || name.startsWith("TIGER")) continue;
 
                     enrichedList.push({
                         code,
                         name,
                         market: mkt,
-                        drop_rate: parseFloat(flucRt) || 0,
+                        drop_rate: dropRate,
                         trade_amount: trdeAmt
                     });
-
-                    await new Promise(r => setTimeout(r, 100));
                 }
 
                 // 하락률 순 정렬 (오름차순: 마이너스가 큰 순서)
                 enrichedList.sort((a, b) => a.drop_rate - b.drop_rate);
 
                 console.log("\n==================================================");
-                console.log(`🏆 [그룹 ${testGrp}] 관심종목 하락률 순위 결과 (상위 10개)`);
+                console.log(`🏆 [그룹 ${testGrp}] 관심종목 하락률 순위 결과 (전체 ${enrichedList.length}개)`);
                 console.log("==================================================");
                 console.table(enrichedList.map((stk, idx) => ({
                     "순위": idx + 1,

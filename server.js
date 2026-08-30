@@ -758,7 +758,52 @@ app.get('/api/watchlist_rank', async (req, res) => {
             }
         }
 
-        fileLog(`Step 3: 관심종목 종목별 시장구분(ka10100) 및 거래대금(ka10007) 보정 시작 (${rawItems.length}개)...`);
+        fileLog(`Step 3: 관심종목 종목별 데이터 보정 시작 (${rawItems.length}개)...`);
+        
+        // 1. 모든 종목 코드 추출
+        const stockCodes = rawItems.map(item => (item.cod2 || item.stk_cd || item.isu_cd || item.item_cd || item.code || item.pdno || item.iscd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "")).filter(Boolean);
+
+        // 2. ka10095 (관심종목정보요청)를 통한 일괄 시세/거래대금/종목명 조회 (한 번의 요청으로 최대 100개 종목 조회 가능)
+        const batchMap = {};
+        if (stockCodes.length > 0) {
+            try {
+                const batchCdString = stockCodes.map(c => `${c}_AL`).join('|');
+                fileLog(`Step 3-A: ka10095 관심종목 일괄 조회 시도 (${stockCodes.length}개 종목)...`);
+                const batchResponse = await axios.post(
+                    "https://api.kiwoom.com/api/dostk/stkinfo",
+                    { "stk_cd": batchCdString },
+                    {
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${accessToken}`,
+                            "api-id": "ka10095",
+                        },
+                        timeout: 7000
+                    }
+                );
+
+                const batchList = batchResponse.data?.atn_stk_infr || batchResponse.data?.data || batchResponse.data?.output || [];
+                fileLog(`Step 3-A: ka10095 응답 수신 완료 (${batchList.length}개 종목 데이터 수신)`);
+
+                for (const bItem of batchList) {
+                    const bCode = (bItem.stk_cd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
+                    if (bCode) {
+                        batchMap[bCode] = {
+                            stk_nm: bItem.stk_nm || '',
+                            fluc_rt: bItem.flu_rt || bItem.fluc_rt || bItem.base_comp_chgr || '0',
+                            trde_amt: parseInt(bItem.trde_prica || bItem.trde_amt || 0) || 0
+                        };
+                        // 이름 캐싱
+                        if (bItem.stk_nm && (!marketCache[bCode] || !marketCache[bCode].name)) {
+                            marketCache[bCode] = { ...(marketCache[bCode] || { type: 'Q' }), name: bItem.stk_nm };
+                        }
+                    }
+                }
+            } catch (batchErr) {
+                fileLog(`[Warning] ka10095 일괄 조회 실패, 개별 조회로 전환: ${batchErr.message}`);
+            }
+        }
+
         const enrichedItems = [];
         const chunkSize = 1;
 
@@ -773,11 +818,19 @@ app.get('/api/watchlist_rank', async (req, res) => {
                 let trdeAmtMillion = parseInt(item.trde_amt || item.trde_prica || item.acml_tr_pbmn || 0) || 0;
                 let flucRt = item.fluc_rt || item.flu_rt || item.prdy_ctrt || item.base_comp_chgr || item.chg_rt || '0';
 
+                // ka10095 일괄 데이터 우선 적용
+                if (batchMap[stockCode]) {
+                    const b = batchMap[stockCode];
+                    if (b.stk_nm) stockName = b.stk_nm;
+                    if (b.fluc_rt) flucRt = b.fluc_rt;
+                    if (b.trde_amt !== undefined) trdeAmtMillion = b.trde_amt;
+                }
+
                 try {
-                    // 1. 시장구분 및 종목명 (ka10100)
+                    // 1. 시장구분 및 종목명 (ka10100) - 캐시 우선 확인
                     if (marketCache[stockCode]) {
                         const cached = marketCache[stockCode];
-                        if (cached.name) stockName = cached.name;
+                        if (cached.name && !stockName) stockName = cached.name;
                         if (cached.type) marketType = cached.type;
                     } else {
                         try {
@@ -798,7 +851,7 @@ app.get('/api/watchlist_rank', async (req, res) => {
                             const marketName = basicInfo.marketName || basicInfo.mkt_nm || "";
                             const fetchedName = basicInfo.stk_nm || basicInfo.name || basicInfo.isu_nm || basicInfo.item_nm || "";
 
-                            if (fetchedName) stockName = fetchedName;
+                            if (fetchedName && !stockName) stockName = fetchedName;
 
                             if (marketName && (marketName.includes("거래소") || marketName === "KOSPI" || marketName.includes("KOSPI"))) {
                                 marketType = 'K';
@@ -816,32 +869,34 @@ app.get('/api/watchlist_rank', async (req, res) => {
                     const isEtfName = (stockName || "").startsWith("KODEX") || (stockName || "").startsWith("TIGER");
                     if (isEtfName) return null;
 
-                    // 2. 종목별상세거래대금 및 등락률 (ka10007)
-                    try {
-                        const detailResponse = await axios.post(
-                            "https://api.kiwoom.com/api/dostk/mrkcond",
-                            { "stk_cd": `${stockCode}_AL` },
-                            {
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    "Authorization": `Bearer ${accessToken}`,
-                                    "api-id": "ka10007",
-                                },
-                                timeout: 3000
+                    // 2. 만약 batchMap에 없었던 경우만 개별 ka10007 호출 (시세표성정보요청)
+                    if (!batchMap[stockCode] || (!trdeAmtMillion && flucRt === '0')) {
+                        try {
+                            const detailResponse = await axios.post(
+                                "https://api.kiwoom.com/api/dostk/mrkcond",
+                                { "stk_cd": `${stockCode}_AL` },
+                                {
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                        "Authorization": `Bearer ${accessToken}`,
+                                        "api-id": "ka10007",
+                                    },
+                                    timeout: 3000
+                                }
+                            );
+                            const detail = detailResponse.data;
+                            if (detail.trde_prica) {
+                                trdeAmtMillion = parseInt(detail.trde_prica) || 0;
                             }
-                        );
-                        const detail = detailResponse.data;
-                        if (detail.trde_prica) {
-                            trdeAmtMillion = parseInt(detail.trde_prica) || 0;
+                            if (detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt) {
+                                flucRt = detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt;
+                            }
+                            if (!stockName && (detail.stk_nm || detail.isu_nm || detail.name)) {
+                                stockName = detail.stk_nm || detail.isu_nm || detail.name;
+                            }
+                        } catch (e) {
+                            fileLog(`[Warning] ka10007 individual fallback failed for (${stockCode}): ${e.message}`);
                         }
-                        if (detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt) {
-                            flucRt = detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt;
-                        }
-                        if (!stockName && (detail.stk_nm || detail.isu_nm || detail.name)) {
-                            stockName = detail.stk_nm || detail.isu_nm || detail.name;
-                        }
-                    } catch (e) {
-                        // ignore
                     }
 
                     return {
@@ -868,7 +923,8 @@ app.get('/api/watchlist_rank', async (req, res) => {
             const processed = await Promise.all(chunkPromises);
             enrichedItems.push(...processed.filter(p => p !== null));
 
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // ka10100 / ka10007 호출이 발생한 경우 레이트 리밋 방지 대기
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         fileLog(`Step 4: 관심종목 최종 보정 완료 (총 ${enrichedItems.length}개 반환)`);
