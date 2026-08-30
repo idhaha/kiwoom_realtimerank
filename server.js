@@ -729,6 +729,8 @@ app.get('/api/watchlist_rank', async (req, res) => {
         let rawItems = [];
         if (Array.isArray(response.data)) {
             rawItems = response.data;
+        } else if (Array.isArray(response.data.nofj)) {
+            rawItems = response.data.nofj;
         } else if (Array.isArray(response.data.item_list)) {
             rawItems = response.data.item_list;
         } else if (Array.isArray(response.data.item)) {
@@ -756,33 +758,27 @@ app.get('/api/watchlist_rank', async (req, res) => {
             }
         }
 
-        console.log(`Step 3: 관심종목 종목별 시장구분(ka10100) 및 거래대금(ka10007) 보정 시작 (${rawItems.length}개)...`);
+        fileLog(`Step 3: 관심종목 종목별 시장구분(ka10100) 및 거래대금(ka10007) 보정 시작 (${rawItems.length}개)...`);
         const enrichedItems = [];
         const chunkSize = 1;
 
         for (let i = 0; i < rawItems.length; i += chunkSize) {
             const chunk = rawItems.slice(i, i + chunkSize);
             const chunkPromises = chunk.map(async (item) => {
-                const stockCode = (item.stk_cd || item.isu_cd || item.item_cd || item.code || item.pdno || item.iscd || item.shcode || item.jong_cd || item.stck_shrn_iscd || item.arn_stk_cd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
+                const stockCode = (item.cod2 || item.stk_cd || item.isu_cd || item.item_cd || item.code || item.pdno || item.iscd || item.shcode || item.jong_cd || item.stck_shrn_iscd || item.arn_stk_cd || "").replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/, "");
                 if (!stockCode) return null;
 
-                const stockName = item.stk_nm || item.isu_nm || item.prdt_name || item.name || '';
+                let stockName = item.stk_nm || item.isu_nm || item.prdt_name || item.name || '';
                 let marketType = 'Q';
                 let trdeAmtMillion = parseInt(item.trde_amt || item.trde_prica || item.acml_tr_pbmn || 0) || 0;
                 let flucRt = item.fluc_rt || item.flu_rt || item.prdy_ctrt || item.base_comp_chgr || item.chg_rt || '0';
 
                 try {
-                    // 0. 이름 기반 필터링 (최우선)
-                    const isEtfName = (stockName || "").startsWith("KODEX") || (stockName || "").startsWith("TIGER");
-                    if (isEtfName) return null;
-
-                    // 1. 시장구분 (Realtime Query Rank와 동일한 ka10100 로직)
+                    // 1. 시장구분 및 종목명 (ka10100)
                     if (marketCache[stockCode]) {
                         const cached = marketCache[stockCode];
-                        if (!['0', '10'].includes(String(cached.code))) {
-                            return null;
-                        }
-                        marketType = cached.type;
+                        if (cached.name) stockName = cached.name;
+                        if (cached.type) marketType = cached.type;
                     } else {
                         try {
                             const basicInfoResponse = await axios.post(
@@ -798,24 +794,29 @@ app.get('/api/watchlist_rank', async (req, res) => {
                                 }
                             );
                             const basicInfo = basicInfoResponse.data;
-                            const mktCode = String(basicInfo.marketCode || "");
-                            const marketName = basicInfo.marketName || "";
+                            const mktCode = String(basicInfo.marketCode || basicInfo.mkt_cd || "");
+                            const marketName = basicInfo.marketName || basicInfo.mkt_nm || "";
+                            const fetchedName = basicInfo.stk_nm || basicInfo.name || basicInfo.isu_nm || basicInfo.item_nm || "";
 
-                            if (!['0', '10'].includes(mktCode)) {
-                                marketCache[stockCode] = { type: '?', code: mktCode };
-                                return null;
-                            }
+                            if (fetchedName) stockName = fetchedName;
 
-                            if (marketName && (marketName.includes("거래소") || marketName === "KOSPI")) {
+                            if (marketName && (marketName.includes("거래소") || marketName === "KOSPI" || marketName.includes("KOSPI"))) {
                                 marketType = 'K';
+                            } else if (marketName && (marketName.includes("코스닥") || marketName === "KOSDAQ" || marketName.includes("KOSDAQ"))) {
+                                marketType = 'Q';
                             }
-                            marketCache[stockCode] = { type: marketType, code: mktCode };
+
+                            marketCache[stockCode] = { name: stockName, type: marketType, code: mktCode };
                         } catch (e) {
-                            fileLog(`[Warning] ka10100 failed for ${stockName} (${stockCode}): ${e.message}`);
+                            fileLog(`[Warning] ka10100 failed for (${stockCode}): ${e.message}`);
                         }
                     }
 
-                    // 2. 종목별상세거래대금 (ka10007) - Realtime Query Rank와 동일
+                    // 0. 이름 기반 ETF 필터링
+                    const isEtfName = (stockName || "").startsWith("KODEX") || (stockName || "").startsWith("TIGER");
+                    if (isEtfName) return null;
+
+                    // 2. 종목별상세거래대금 및 등락률 (ka10007)
                     try {
                         const detailResponse = await axios.post(
                             "https://api.kiwoom.com/api/dostk/mrkcond",
@@ -836,6 +837,9 @@ app.get('/api/watchlist_rank', async (req, res) => {
                         if (detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt) {
                             flucRt = detail.flu_rt || detail.fluc_rt || detail.base_comp_chgr || detail.prdy_ctrt;
                         }
+                        if (!stockName && (detail.stk_nm || detail.isu_nm || detail.name)) {
+                            stockName = detail.stk_nm || detail.isu_nm || detail.name;
+                        }
                     } catch (e) {
                         // ignore
                     }
@@ -843,7 +847,7 @@ app.get('/api/watchlist_rank', async (req, res) => {
                     return {
                         ...item,
                         stk_cd: stockCode,
-                        stk_nm: stockName,
+                        stk_nm: stockName || stockCode,
                         mkt_type: marketType,
                         fluc_rt: flucRt,
                         trde_amt: trdeAmtMillion
