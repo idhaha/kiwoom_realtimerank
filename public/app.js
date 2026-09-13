@@ -1100,22 +1100,23 @@ function ensurePermanentTabs() {
         createTabContentElement(MEMO_TAB_ID);
     }
 
-    // Earnings Tab
-    if (!document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`)) {
-        const btn = document.createElement('button');
-        btn.className = 'tab-btn perm-tab';
-        btn.dataset.tab = EARNINGS_TAB_ID;
-        btn.textContent = '실적';
-        btn.draggable = false;
-        btn.dataset.perm = 'true';
-        btn.title = '고정 탭 (실적 발표 캘린더)';
+    // Earnings (증시캘린더) Tab
+    let earningsBtn = document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`);
+    if (!earningsBtn) {
+        earningsBtn = document.createElement('button');
+        earningsBtn.className = 'tab-btn perm-tab';
+        earningsBtn.dataset.tab = EARNINGS_TAB_ID;
+        earningsBtn.draggable = false;
+        earningsBtn.dataset.perm = 'true';
 
         const memoBtn = document.querySelector(`.tab-btn[data-tab="${MEMO_TAB_ID}"]`);
-        if (memoBtn && memoBtn.nextSibling) tabsWrapper.insertBefore(btn, memoBtn.nextSibling);
-        else tabsWrapper.appendChild(btn);
+        if (memoBtn && memoBtn.nextSibling) tabsWrapper.insertBefore(earningsBtn, memoBtn.nextSibling);
+        else tabsWrapper.appendChild(earningsBtn);
 
         createTabContentElement(EARNINGS_TAB_ID);
     }
+    earningsBtn.textContent = '증시캘린더';
+    earningsBtn.title = '고정 탭 (증시 캘린더)';
 }
 
 /**
@@ -1613,7 +1614,7 @@ function createChartGrid(tabId) {
             </div>`;
     }
 
-    // 2. Earnings Tab
+    // 2. Earnings Tab (증시캘린더)
     if (tabId === EARNINGS_TAB_ID) {
         const perm = "clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share";
         const sand = "allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation";
@@ -1621,7 +1622,7 @@ function createChartGrid(tabId) {
             <div class="container overseas-container">
                 <header>
                     <div class="header-single-line">
-                        <h1><strong>실적 캘린더</strong></h1>
+                        <h1><strong>증시캘린더</strong></h1>
                         <div class="header-controls">
                             <button id="refreshEarnings_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
@@ -1633,7 +1634,7 @@ function createChartGrid(tabId) {
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
-                    <iframe id="iframeEarnings_${tabId}" src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                    <iframe id="iframeEarnings_${tabId}" src="https://www.tossinvest.com/calendar" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
                 </div>
             </div>`;
     }
