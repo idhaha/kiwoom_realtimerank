@@ -1289,7 +1289,14 @@ function applyData(data) {
         data.tabs.forEach(t => {
             if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID || t.id === MEMO_TAB_ID) {
                 const btn = document.querySelector(`.tab-btn[data-tab="${t.id}"]`);
-                if (btn) btn.textContent = t.name;
+                if (btn) {
+                    if (t.id === EARNINGS_TAB_ID) {
+                        btn.textContent = '증시캘린더';
+                        btn.title = '고정 탭 (증시 캘린더)';
+                    } else {
+                        btn.textContent = t.name;
+                    }
+                }
                 return;
             }
             createTabButtonElement(t.id, t.name);
@@ -1623,8 +1630,9 @@ function createChartGrid(tabId) {
                 <header>
                     <div class="header-single-line">
                         <h1><strong>증시캘린더</strong></h1>
-                        <div class="header-controls">
-                            <button id="refreshEarnings_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
+                        <div class="header-controls" style="display: flex; gap: 8px;">
+                            <button onclick="window.open('https://www.tossinvest.com/calendar', '_blank')" class="btn-secondary" style="height: 38px; padding: 0 15px; font-weight: 500;">토스 캘린더 ↗</button>
+                            <button id="refreshEarnings_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">새로고침</button>
                         </div>
                     </div>
                     <div class="status-info">
@@ -1634,7 +1642,7 @@ function createChartGrid(tabId) {
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
-                    <iframe id="iframeEarnings_${tabId}" src="https://www.tossinvest.com/calendar" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                    <iframe id="iframeEarnings_${tabId}" src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
                 </div>
             </div>`;
     }
