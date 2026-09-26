@@ -1072,7 +1072,37 @@ app.get('/api/toss_calendar', async (req, res) => {
         });
         let html = response.data;
         if (typeof html === 'string') {
-            html = html.replace('<head>', '<head><base href="https://www.tossinvest.com/">');
+            const calendarProxyBootstrap = `<base href="https://www.tossinvest.com/"><script>
+                (() => {
+                    const proxyPrefix = '/api/toss_calendar_proxy?url=';
+                    const originalFetch = window.fetch.bind(window);
+                    const rewriteUrl = (value) => {
+                        let url;
+                        try { url = new URL(value, window.location.href); } catch (_) { return value; }
+                        if (url.origin === window.location.origin && (url.pathname.startsWith('/api/') || url.pathname === '/graphql')) {
+                            url = new URL(url.pathname + url.search + url.hash, 'https://www.tossinvest.com');
+                        }
+                        if (url.protocol === 'https:' && (/(^|\\.)tossinvest\\.com$/i.test(url.hostname) || /(^|\\.)toss\\.im$/i.test(url.hostname))) {
+                            return proxyPrefix + encodeURIComponent(url.href);
+                        }
+                        return value;
+                    };
+                    window.fetch = (input, init) => {
+                        if (input instanceof Request) {
+                            const rewritten = rewriteUrl(input.url);
+                            return rewritten === input.url
+                                ? originalFetch(input, init)
+                                : originalFetch(new Request(rewritten, input), init);
+                        }
+                        return originalFetch(rewriteUrl(input), init);
+                    };
+                    const originalOpen = XMLHttpRequest.prototype.open;
+                    XMLHttpRequest.prototype.open = function(method, url, ...args) {
+                        return originalOpen.call(this, method, rewriteUrl(url), ...args);
+                    };
+                })();
+            </script>`;
+            html = html.replace(/<head([^>]*)>/i, `<head$1>${calendarProxyBootstrap}`);
         }
         res.removeHeader('X-Frame-Options');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1080,6 +1110,46 @@ app.get('/api/toss_calendar', async (req, res) => {
     } catch (error) {
         console.error("❌ 토스 캘린더 프록시 에러:", error.message);
         res.status(500).send(`캘린더 로드 실패: ${error.message}`);
+    }
+});
+
+// 캘린더 앱의 비동기 API 요청을 같은 출처에서 전달한다. 대상 호스트를
+// Toss 도메인으로 제한해 임의 URL 프록시로 사용되지 않도록 한다.
+app.all('/api/toss_calendar_proxy', async (req, res) => {
+    try {
+        const targetUrl = new URL(req.query.url || '');
+        const isTossHost = /(^|\.)tossinvest\.com$/i.test(targetUrl.hostname) || /(^|\.)toss\.im$/i.test(targetUrl.hostname);
+        if (targetUrl.protocol !== 'https:' || !isTossHost) {
+            return res.status(400).send('허용되지 않은 토스 캘린더 프록시 주소입니다.');
+        }
+
+        const headers = {
+            'User-Agent': req.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': req.get('accept') || '*/*',
+            'Accept-Language': req.get('accept-language') || 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Origin': 'https://www.tossinvest.com',
+            'Referer': 'https://www.tossinvest.com/calendar'
+        };
+        if (req.get('content-type')) headers['Content-Type'] = req.get('content-type');
+
+        const response = await axios({
+            url: targetUrl.href,
+            method: req.method,
+            headers,
+            data: ['GET', 'HEAD'].includes(req.method) ? undefined : req.body,
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            maxRedirects: 0,
+            maxContentLength: 20 * 1024 * 1024,
+            validateStatus: () => true
+        });
+
+        if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
+        if (response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
+        res.status(response.status).send(response.data);
+    } catch (error) {
+        console.error('❌ 토스 캘린더 API 프록시 에러:', error.message);
+        res.status(502).send('토스 캘린더 데이터를 가져오지 못했습니다.');
     }
 });
 

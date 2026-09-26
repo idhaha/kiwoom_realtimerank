@@ -456,8 +456,9 @@ flowchart LR
 1. **토스 캘린더 프록시**:
    - iframe은 같은 출처의 `/api/toss_calendar`를 요청한다.
    - Express 서버가 `https://www.tossinvest.com/calendar`를 User-Agent 및 한국어 Accept-Language 헤더와 함께 10초 제한으로 가져와 HTML로 반환한다.
-   - 프록시는 `<head>`에 `https://www.tossinvest.com/`를 가리키는 `<base>`를 삽입해 상대 경로 정적 자원이 토스 도메인에서 로드되도록 한다. 응답 HTML 자체만 프록시하며, 토스 페이지에서 이후 호출하는 API/스크립트 요청은 브라우저가 해당 원본 주소로 접근한다.
-   - 원격 HTML 구조가 달라져 `<head>`가 없거나 하위 API/스크립트가 별도 정책을 요구하면 표시가 완전하지 않을 수 있다.
+   - 프록시는 `<head>`에 `https://www.tossinvest.com/`를 가리키는 `<base>`와 요청 주소 변환 스크립트를 삽입한다. 정적 리소스는 토스 도메인에서 로드하며, 토스 도메인으로 향하는 `fetch`/XHR과 앱 도메인 기준 `/api/*`, `/graphql` 요청은 `/api/toss_calendar_proxy`를 경유한다.
+   - API 프록시는 HTTPS의 `*.tossinvest.com` 및 `*.toss.im` 호스트만 허용하고 최대 15초, 응답 최대 20MB로 제한한다. 요청 원문 호스트의 Origin/Referer와 브라우저 User-Agent/Accept 정보를 전달한다.
+   - 원격 HTML 구조가 달라지거나 API가 다른 도메인을 사용하고 브라우저 CORS를 허용하지 않는 경우, 로그인이 필요한 데이터/API, 브라우저 쿠키를 요구하는 기능은 표시가 완전하지 않을 수 있다.
 2. **iframe 보안 및 샌드박스 정책**:
    - `allow`: `"clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share"`
    - `sandbox`: `"allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation"`
