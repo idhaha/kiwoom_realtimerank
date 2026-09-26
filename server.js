@@ -1092,7 +1092,7 @@ app.get('/api/toss_calendar', async (req, res) => {
                             const rewritten = rewriteUrl(input.url);
                             return rewritten === input.url
                                 ? originalFetch(input, init)
-                                : originalFetch(new Request(rewritten, input), init);
+                                : originalFetch(new Request(rewritten, new Request(input, init)));
                         }
                         return originalFetch(rewriteUrl(input), init);
                     };
@@ -1116,8 +1116,9 @@ app.get('/api/toss_calendar', async (req, res) => {
 // 캘린더 앱의 비동기 API 요청을 같은 출처에서 전달한다. 대상 호스트를
 // Toss 도메인으로 제한해 임의 URL 프록시로 사용되지 않도록 한다.
 app.all('/api/toss_calendar_proxy', async (req, res) => {
+    let targetUrl;
     try {
-        const targetUrl = new URL(req.query.url || '');
+        targetUrl = new URL(req.query.url || '');
         const isTossHost = /(^|\.)tossinvest\.com$/i.test(targetUrl.hostname) || /(^|\.)toss\.im$/i.test(targetUrl.hostname);
         if (targetUrl.protocol !== 'https:' || !isTossHost) {
             return res.status(400).send('허용되지 않은 토스 캘린더 프록시 주소입니다.');
@@ -1148,11 +1149,18 @@ app.all('/api/toss_calendar_proxy', async (req, res) => {
             validateStatus: () => true
         });
 
+        const contentType = response.headers['content-type'] || '';
+        res.setHeader('X-Toss-Proxy-Status', String(response.status));
+        res.setHeader('X-Toss-Proxy-Content-Type', contentType);
+        console.log('[TossCalendar] ' + req.method + ' ' + targetUrl.hostname + targetUrl.pathname + ' -> ' + response.status + ' (' + (contentType || 'content-type 없음') + ')');
         if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
         if (response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
+        if (response.headers['location']) res.setHeader('Location', response.headers['location']);
         res.status(response.status).send(response.data);
     } catch (error) {
-        console.error('❌ 토스 캘린더 API 프록시 에러:', error.message);
+        const reason = error.response?.status || error.code || error.message;
+        console.error('[TossCalendar] proxy error:', targetUrl ? targetUrl.hostname + targetUrl.pathname : 'URL parsing failed', reason);
+        res.setHeader('X-Toss-Proxy-Error', String(reason).replace(/[^a-zA-Z0-9_.:-]/g, ' ').slice(0, 160));
         res.status(502).send('토스 캘린더 데이터를 가져오지 못했습니다.');
     }
 });

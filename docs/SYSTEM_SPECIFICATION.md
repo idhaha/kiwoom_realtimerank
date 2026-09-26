@@ -36,7 +36,16 @@
 
 # 1. 고정 탭 (Permanent Tabs) 상세 사양
 
-고정 탭은 애플리케이션 시작 시 상시 로드되며, 사용자가 임의로 삭제하거나 이름을 변경할 수 없는 핵심 시스템 탭입니다.
+고정 탭은 애플리케이션 시작 시 상시 로드되는 핵심 시스템 탭입니다. 고정 ID와 기능은 삭제할 수 없고 탭 순서도 사용자가 변경할 수 없습니다. 탭 이름 편집 UI는 공통으로 동작하지만 이름 저장 규칙은 탭별로 다릅니다.
+
+### 1.0.1 탭 이름 편집 및 저장 정책
+
+* 탭 버튼을 더블클릭하면 이름 편집 입력란으로 바뀐다. 입력 후 `Enter` 또는 포커스 이탈(blur)로 편집을 마친다. 이름이 빈 문자열이면 편집 전 이름을 유지한다.
+* 편집 완료 시 탭 이름을 현재 화면과 설정 스냅샷에 반영하고 `saveAppData()`를 호출한다.
+* `Rank`, `ADR`, `증시캘린더`는 저장/복원 시 시스템 기본 이름으로 정규화된다. 현재 화면에서는 편집 직후 입력한 문구가 보일 수 있으나, 설정에는 기본 이름이 저장되고 다음 실행 시 기본 이름으로 표시된다.
+* `메모`는 고정 기능 탭이지만 사용자 지정 이름을 허용한다. 편집한 이름은 설정에 저장되어 다음 실행에도 유지된다.
+* 동적 탭 이름은 탭 ID와 별도로 설정의 `tabs[].name`에 저장되며, 사용자 변경 이름을 다음 실행에 복원한다.
+* 따라서 탭 이름 변경이 영구 반영되는지는 탭 종류에 따라 다르다. 현재 영구 사용자 지정 이름을 지원하는 고정 탭은 메모이며, 동적 탭은 모두 사용자 지정 이름을 유지한다.
 
 ```mermaid
 flowchart TD
@@ -457,7 +466,7 @@ flowchart LR
    - iframe은 같은 출처의 `/api/toss_calendar`를 요청한다.
    - Express 서버가 `https://www.tossinvest.com/calendar`를 User-Agent 및 한국어 Accept-Language 헤더와 함께 10초 제한으로 가져와 HTML로 반환한다.
    - 프록시는 `<head>`에 `https://www.tossinvest.com/`를 가리키는 `<base>`와 요청 주소 변환 스크립트를 삽입한다. 정적 리소스는 토스 도메인에서 로드하며, 토스 도메인으로 향하는 요청과 iframe의 현재 출처 기준 루트 상대 `fetch`/XHR은 `/api/toss_calendar_proxy`를 경유한다.
-   - API 프록시는 HTTPS의 `*.tossinvest.com` 및 `*.toss.im` 호스트만 허용하고 최대 15초, 응답 최대 20MB로 제한한다. 요청 원문 호스트의 Origin/Referer와 브라우저 User-Agent/Accept 정보를 전달한다.
+   - API 프록시는 HTTPS의 `*.tossinvest.com` 및 `*.toss.im` 호스트만 허용하고 최대 15초, 응답 최대 20MB로 제한한다. 요청 원문 호스트의 Origin/Referer와 브라우저 User-Agent/Accept 정보를 전달한다. 프록시 응답에는 토스 원본 HTTP 상태와 콘텐츠 형식 진단 헤더를 붙이고, 실패 시 원인을 제한된 문자열의 오류 헤더 및 서버 로그에 남긴다.
    - 원격 HTML 구조가 달라지거나 API가 다른 도메인을 사용하고 브라우저 CORS를 허용하지 않는 경우, 로그인이 필요한 데이터/API, 브라우저 쿠키를 요구하는 기능은 표시가 완전하지 않을 수 있다.
 2. **iframe 보안 및 샌드박스 정책**:
    - `allow`: `"clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share"`
