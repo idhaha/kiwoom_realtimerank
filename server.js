@@ -1060,7 +1060,7 @@ app.get('/api/watchlist_debug', async (req, res) => {
 /**
  * 토스증권 캘린더 프록시 엔드포인트 (X-Frame-Options 우회 및 임베드용)
  */
-app.get('/api/toss_calendar', async (req, res) => {
+app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
     try {
         const response = await axios.get('https://www.tossinvest.com/calendar', {
             headers: {
