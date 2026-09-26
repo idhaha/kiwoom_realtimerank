@@ -1076,11 +1076,17 @@ app.get('/api/toss_calendar', async (req, res) => {
         if (typeof html === 'string') {
             const calendarProxyBootstrap = `<base href="https://www.tossinvest.com/"><script>
                 (() => {
-                    const proxyPrefix = '/api/toss_calendar_proxy?url=';
+                    const proxyPath = '/api/toss_calendar_proxy';
+                    const proxyPrefix = window.location.origin + proxyPath + '?url=';
                     const originalFetch = window.fetch.bind(window);
                     const rewriteUrl = (value) => {
                         let url;
                         try { url = new URL(value, window.location.href); } catch (_) { return value; }
+                        // The Toss <base> can resolve our relative proxy URL to Toss itself.
+                        // Always pin existing proxy requests back to the dashboard origin.
+                        if (url.pathname.startsWith(proxyPath)) {
+                            return window.location.origin + url.pathname + url.search + url.hash;
+                        }
                         if (url.origin === window.location.origin && !url.pathname.startsWith('/api/toss_calendar_proxy')) {
                             url = new URL(url.pathname + url.search + url.hash, 'https://www.tossinvest.com');
                         }
