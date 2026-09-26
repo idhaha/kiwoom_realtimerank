@@ -1086,7 +1086,7 @@ function ensurePermanentTabs() {
         const btn = document.createElement('button');
         btn.className = 'tab-btn perm-tab';
         btn.dataset.tab = MEMO_TAB_ID;
-        btn.textContent = '📝 메모';
+        btn.textContent = '메모';
         btn.draggable = false;
         btn.dataset.perm = 'true';
         btn.title = '고정 탭 (메모)';
@@ -1711,7 +1711,7 @@ function createChartGrid(tabId) {
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
-                    <iframe id="iframeEarnings_${tabId}" src="https://kr.tradingview.com/embed-widget/events/?locale=kr#%7B%22colorTheme%22%3A%22light%22%2C%22isTransparent%22%3Afalse%2C%22width%22%3A%22100%25%22%2C%22height%22%3A%22100%25%22%2C%22importanceFilter%22%3A%22-1%2C0%2C1%22%2C%22countryFilter%22%3A%22kr%2Cus%22%7D" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                    <iframe id="iframeEarnings_${tabId}" src="/api/toss_calendar" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
                 </div>
             </div>`;
     }

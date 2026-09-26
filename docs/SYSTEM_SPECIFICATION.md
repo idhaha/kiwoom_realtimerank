@@ -444,38 +444,26 @@ flowchart LR
 | :--- | :--- | :--- | :--- |
 | **상단 헤더** | `#tab_earnings header` | Header | '증시캘린더' 타이틀, [토스 캘린더 ↗] 링크 버튼, [새로고침] 버튼, 상태 표시줄 |
 | **토스 캘린더 링크**| `button[onclick]` | `<button>` | `https://www.tossinvest.com/calendar`를 새 창(`_blank`)으로 열기 |
-| **새로고침 버튼** | `#refreshEarnings_tab_earnings` | `<button>` | 임베디드 TradingView iframe을 깜빡임 없이 안전하게 리로드 |
+| **새로고침 버튼** | `#refreshEarnings_tab_earnings` | `<button>` | 임베디드 토스 캘린더 프록시 iframe을 깜빡임 없이 안전하게 리로드 |
 | **상태 표시줄** | `#earningsLastUpdate_*`, `#earningsStatusText_*` | `<span>` | 최근 갱신 시각 및 처리 상태 표기 |
 | **위젯 컨테이너** | `.overseas-content-scroll` | Div | 반응형 전체 높이 100% 스크롤 래퍼 (`.full-tab`) |
-| **TradingView iframe**| `#iframeEarnings_tab_earnings` | `<iframe>` | 트레이딩뷰 공식 이벤트 위젯 임베드 |
+| **토스 캘린더 iframe**| `#iframeEarnings_tab_earnings` | `<iframe>` | `/api/toss_calendar`를 통해 토스증권 캘린더 페이지 표시 |
 
 ---
 
 ### 1.4.3 임베디드 위젯 및 연동 사양
 
-1. **TradingView Events Widget 임베드 구성**:
-   - URL: `https://kr.tradingview.com/embed-widget/events/?locale=kr#{JSON_PARAM}`
-   - 위젯 파라미터 JSON:
-     ```json
-     {
-       "colorTheme": "light",
-       "isTransparent": false,
-       "width": "100%",
-       "height": "100%",
-       "importanceFilter": "-1,0,1",
-       "countryFilter": "kr,us"
-     }
-     ```
-   - 주요 파라미터 기능:
-     - `countryFilter: "kr,us"`: 한국과 미국의 주요 이벤트만 필터링하여 국내 주식 및 미국 주식 투자자 맞춤 제공.
-     - `importanceFilter: "-1,0,1"`: 모든 중요도(낮음, 보통, 높음) 이벤트 전체 포함.
-     - `locale: "kr"`: 한국어 인터페이스 및 한국 시간 기준 표기.
+1. **토스 캘린더 프록시**:
+   - iframe은 같은 출처의 `/api/toss_calendar`를 요청한다.
+   - Express 서버가 `https://www.tossinvest.com/calendar`를 User-Agent 및 한국어 Accept-Language 헤더와 함께 10초 제한으로 가져와 HTML로 반환한다.
+   - 프록시는 `<head>`에 `https://www.tossinvest.com/`를 가리키는 `<base>`를 삽입해 상대 경로 정적 자원이 토스 도메인에서 로드되도록 한다. 응답 HTML 자체만 프록시하며, 토스 페이지에서 이후 호출하는 API/스크립트 요청은 브라우저가 해당 원본 주소로 접근한다.
+   - 원격 HTML 구조가 달라져 `<head>`가 없거나 하위 API/스크립트가 별도 정책을 요구하면 표시가 완전하지 않을 수 있다.
 2. **iframe 보안 및 샌드박스 정책**:
    - `allow`: `"clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share"`
    - `sandbox`: `"allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation"`
-   - 외부 금융 서비스 임베드 시 보안 위협을 차단하면서 위젯 내부의 스크립트 실행과 팝업 동작을 완벽히 보장.
+   - 스크립트·동일 출처 요청·폼·팝업 등을 허용한다. 원격 사이트와 브라우저 정책에 따라 일부 동작은 제한될 수 있다.
 3. **토스 캘린더 연동**:
-   - 상단 헤더의 `토스 캘린더 ↗` 버튼 클릭 시 `https://www.tossinvest.com/calendar`로 즉시 연결되어, 국내 투자자에게 가장 친숙한 모바일/웹 UI 실적 캘린더를 병행 확인 가능.
+   - 상단 헤더의 `토스 캘린더 ↗` 버튼은 원본 `https://www.tossinvest.com/calendar`를 새 창으로 연다. 본문 iframe의 기본 화면도 토스 캘린더다.
 
 ---
 
