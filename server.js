@@ -1096,28 +1096,15 @@ app.get('/api/toss_calendar', async (req, res) => {
                         }
                         return originalFetch(rewriteUrl(input), init);
                     };
-                    const originalPushState = history.pushState.bind(history);
-                    const originalReplaceState = history.replaceState.bind(history);
-                    const preserveSameOriginHistory = (original) => (state, unused, url) => {
-                        if (typeof url === 'string') {
-                            try {
-                                const parsed = new URL(url, window.location.href);
-                                if (parsed.origin !== window.location.origin) {
-                                    url = parsed.pathname + parsed.search + parsed.hash;
-                                }
-                            } catch (_) {}
-                        }
-                        return original(state, unused, url);
-                    };
-                    history.pushState = preserveSameOriginHistory(originalPushState);
-                    history.replaceState = preserveSameOriginHistory(originalReplaceState);
                     const originalOpen = XMLHttpRequest.prototype.open;
                     XMLHttpRequest.prototype.open = function(method, url, ...args) {
                         return originalOpen.call(this, method, rewriteUrl(url), ...args);
                     };
                 })();
             </script>`;
-            html = html.replace(/<head([^>]*)>/i, `<head$1>${calendarProxyBootstrap}`);
+            // Keep Toss's bootstrap / browser checks intact. Install request and
+            // history wrappers after the page scripts have initialized.
+            html = html.replace(/<\/body>/i, `${calendarProxyBootstrap}</body>`);
         }
         res.removeHeader('X-Frame-Options');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
