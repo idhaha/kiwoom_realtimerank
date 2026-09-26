@@ -1072,7 +1072,7 @@ app.get('/api/toss_calendar', async (req, res) => {
         });
         let html = response.data;
         if (typeof html === 'string') {
-            const calendarProxyBootstrap = `<base href="https://www.tossinvest.com/"><script>
+            const calendarProxyBootstrap = `<script>
                 (() => {
                     const proxyPrefix = '/api/toss_calendar_proxy?url=';
                     const originalFetch = window.fetch.bind(window);
@@ -1096,6 +1096,21 @@ app.get('/api/toss_calendar', async (req, res) => {
                         }
                         return originalFetch(rewriteUrl(input), init);
                     };
+                    const originalPushState = history.pushState.bind(history);
+                    const originalReplaceState = history.replaceState.bind(history);
+                    const preserveSameOriginHistory = (original) => (state, unused, url) => {
+                        if (typeof url === 'string') {
+                            try {
+                                const parsed = new URL(url, window.location.href);
+                                if (parsed.origin !== window.location.origin) {
+                                    url = parsed.pathname + parsed.search + parsed.hash;
+                                }
+                            } catch (_) {}
+                        }
+                        return original(state, unused, url);
+                    };
+                    history.pushState = preserveSameOriginHistory(originalPushState);
+                    history.replaceState = preserveSameOriginHistory(originalReplaceState);
                     const originalOpen = XMLHttpRequest.prototype.open;
                     XMLHttpRequest.prototype.open = function(method, url, ...args) {
                         return originalOpen.call(this, method, rewriteUrl(url), ...args);
