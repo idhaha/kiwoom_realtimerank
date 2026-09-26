@@ -1041,7 +1041,6 @@ if (globalRefreshBtn) {
 // 페이지 언로드 시 정리
 window.addEventListener('beforeunload', () => {
     stopAutoRefresh();
-    saveAppData();
 });
 
 // ==========================================================
@@ -2006,8 +2005,6 @@ async function updateAdrFromSource() {
         const last = new Date().toLocaleString();
         if (adrStatusTextElem) adrStatusTextElem.textContent = "업데이트 완료";
         if (adrLastUpdateElem) adrLastUpdateElem.textContent = last;
-
-        saveAppData();
 
         if (parsed.kospi.length === 0 && parsed.kosdaq.length === 0) {
             console.warn("⚠️ [ADR] No data parsed!");
@@ -5542,8 +5539,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (finalData) {
         applyData(finalData);
-        // 로컬스토리지나 서버의 '(복구)' 이름을 원래 이름으로 교정한 후 안전하게 재동기화
-        setTimeout(() => saveAppData(), 3000);
+        // 서버 데이터를 성공적으로 적용한 경우 로컬스토리지에도 보관 (서버로 역전송 방지)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(finalData));
     } else {
         ensurePermanentTabs();
         activateTab(PERM_TAB_ID);
