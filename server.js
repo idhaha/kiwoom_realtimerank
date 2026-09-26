@@ -1104,6 +1104,15 @@ app.get('/api/toss_calendar', async (req, res) => {
                         }
                         return originalFetch(rewriteUrl(input), init);
                     };
+                    if (window.SharedWorker) {
+                        const NativeSharedWorker = window.SharedWorker;
+                        window.SharedWorker = new Proxy(NativeSharedWorker, {
+                            construct(target, args) {
+                                const workerUrl = rewriteUrl(args[0]);
+                                return Reflect.construct(target, [workerUrl, ...args.slice(1)]);
+                            }
+                        });
+                    }
                     const wrapHistoryMethod = (method) => {
                         const original = method.bind(history);
                         return (state, unused, value) => {
