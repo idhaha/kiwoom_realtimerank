@@ -1133,6 +1133,23 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     XMLHttpRequest.prototype.open = function(method, url, ...args) {
                         return originalOpen.call(this, method, rewriteUrl(url), ...args);
                     };
+                    // Toss registers its service worker at /service-worker.js.
+                    // Since this proxied document has the dashboard origin,
+                    // register a same-origin relay URL instead of the Toss URL
+                    // resolved through the <base> element.
+                    if (navigator.serviceWorker && navigator.serviceWorker.register) {
+                        const serviceWorkerContainer = navigator.serviceWorker;
+                        const originalRegister = serviceWorkerContainer.register.bind(serviceWorkerContainer);
+                        serviceWorkerContainer.register = (scriptURL, options) => {
+                            try {
+                                const workerUrl = new URL(String(scriptURL), document.baseURI);
+                                if (workerUrl.hostname === 'www.tossinvest.com' && workerUrl.pathname === '/service-worker.js') {
+                                    scriptURL = window.location.origin + workerUrl.pathname + workerUrl.search;
+                                }
+                            } catch (_) {}
+                            return originalRegister(scriptURL, options);
+                        };
+                    }
                 })();
             </script>`;
             // Resolve Toss's relative resources on Toss, and install same-origin
@@ -1151,6 +1168,33 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
     } catch (error) {
         console.error("❌ 토스 캘린더 프록시 에러:", error.message);
         res.status(500).send(`캘린더 로드 실패: ${error.message}`);
+    }
+});
+
+// Relay Toss's root-scoped Service Worker from this origin so the proxied
+// calendar can register it without violating the browser's same-origin rule.
+app.get('/service-worker.js', async (req, res) => {
+    try {
+        const response = await axios.get('https://www.tossinvest.com/service-worker.js', {
+            headers: {
+                'User-Agent': req.get('user-agent') || 'Mozilla/5.0',
+                'Accept': req.get('accept') || '*/*',
+                'Accept-Language': req.get('accept-language') || 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.tossinvest.com/calendar'
+            },
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            maxContentLength: 5 * 1024 * 1024,
+            validateStatus: () => true
+        });
+
+        res.setHeader('Content-Type', response.headers['content-type'] || 'application/javascript; charset=utf-8');
+        res.setHeader('Service-Worker-Allowed', '/');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.status(response.status).send(response.data);
+    } catch (error) {
+        console.error('[TossCalendar] service worker proxy error:', error.code || error.message);
+        res.status(502).send('토스 캘린더 서비스 워커를 가져오지 못했습니다.');
     }
 });
 
