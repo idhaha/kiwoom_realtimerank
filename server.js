@@ -1064,9 +1064,11 @@ app.get('/api/toss_calendar', async (req, res) => {
     try {
         const response = await axios.get('https://www.tossinvest.com/calendar', {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+                // Toss checks the requesting browser version; forward the actual
+                // browser UA instead of presenting the server as stale Chrome 120.
+                'User-Agent': req.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+                'Accept': req.get('accept') || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': req.get('accept-language') || 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
             },
             timeout: 10000
         });
