@@ -1119,6 +1119,90 @@ function ensurePermanentTabs() {
     earningsBtn.title = '고정 탭 (증시 캘린더)';
 }
 
+// 알려진 기본 탭 매핑표 (기존 설정 복구 및 안전장치용)
+const DEFAULT_KNOWN_TAB_NAMES = {
+    "tab_rank": "Rank",
+    "tab_adr": "ADR",
+    "tab_memo": "일정",
+    "tab_earnings": "증시캘린더",
+    "tab_custom_1770648933891": "금리/환율",
+    "tab_custom_1770648933583": "금융",
+    "tab_custom_1771462815745": "주요국지수",
+    "tab_custom_1770648933964": "반도체",
+    "tab_custom_1771469181683": "AI/클라우드",
+    "tab_custom_1771469182054": "원전/전력",
+    "tab_custom_1771469182091": "철강/광물",
+    "tab_custom_1770648933776": "로봇",
+    "tab_custom_1770648933647": "2차전지",
+    "tab_custom_1770648933746": "방산",
+    "tab_custom_1771469182325": "조선",
+    "tab_custom_1771469181713": "우주",
+    "tab_custom_1771469181933": "코인/STO",
+    "tab_custom_1771469181563": "신재생/오일",
+    "tab_custom_1770648933551": "스마트폰/컴퓨터",
+    "tab_custom_1770648933942": "바이오",
+    "tab_custom_1771469182120": "SW",
+    "tab_grid_1772975037033": "차트 1"
+};
+
+/**
+ * 탭 이름 해석 및 안전 복원 함수
+ * '(복구)' 같은 비정상 이름이 붙었거나 누락된 탭 이름을 원래의 진짜 제목으로 복원
+ */
+function resolveTabName(tabId, candidateName = null, tabObj = null) {
+    if (tabId === PERM_TAB_ID) return 'Rank';
+    if (tabId === ADR_TAB_ID) return 'ADR';
+    if (tabId === MEMO_TAB_ID) return (candidateName && !candidateName.includes("(복구)")) ? candidateName : '일정';
+    if (tabId === EARNINGS_TAB_ID) return '증시캘린더';
+
+    // 1. 이미 유효하고 '(복구)'가 없는 후보 이름인 경우
+    if (candidateName && typeof candidateName === 'string' && !candidateName.includes("(복구)") && candidateName.trim() !== "") {
+        return candidateName.trim();
+    }
+
+    // 2. tabObj 또는 tabData[tabId]에 유효한 name 속성이 있는 경우
+    const item = tabObj || (typeof tabData !== 'undefined' ? tabData[tabId] : null);
+    if (item && item.name && typeof item.name === 'string' && !item.name.includes("(복구)") && item.name.trim() !== "") {
+        return item.name.trim();
+    }
+
+    // 3. 기저에 정의된 탭 ID별 정규 이름 테이블 대조
+    if (DEFAULT_KNOWN_TAB_NAMES[tabId]) {
+        return DEFAULT_KNOWN_TAB_NAMES[tabId];
+    }
+
+    // 4. item.config에서 첫 번째 섹션 헤더 <섹션명> 추출 시도 (예: <반도체>, <금리> 등)
+    if (item && item.config) {
+        const match = item.config.match(/<([^,>\n\r]+)(?:,[^>]+)?>/);
+        if (match && match[1].trim()) {
+            return match[1].trim();
+        }
+    }
+
+    // 5. DOM 버튼 텍스트 확인 (단, '(복구)'가 없는 경우)
+    const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+    if (btn && btn.textContent && !btn.textContent.includes("(복구)") && btn.textContent.trim() !== "") {
+        return btn.textContent.trim();
+    }
+
+    // 6. 차트 그리드 탭인 경우
+    if (tabId && tabId.startsWith('tab_grid_')) {
+        return "차트";
+    }
+
+    // 7. 최후 기본값 ('(복구)'라는 접미사는 절대 사용하지 않음)
+    const type = item?.type;
+    if (type === 'exchange_rate') return "금리/환율";
+    if (type === 'overseas_custom') return "해외종목";
+
+    if (candidateName && typeof candidateName === 'string') {
+        const cleaned = candidateName.replace(/\(복구\)/g, '').trim();
+        if (cleaned) return cleaned;
+    }
+
+    return "해외종목";
+}
+
 /**
  * 현재 애플리케이션의 전체 상태를 객체로 반환 (저장 및 내보내기용)
  */
@@ -1126,17 +1210,24 @@ function getSerializedState(sourceData = null) {
     const dataToSerialize = sourceData || tabData;
     const capturedTabs = [];
     document.querySelectorAll('.tab-btn:not(.add-tab-btn)').forEach(btn => {
-        capturedTabs.push({ id: btn.dataset.tab, name: btn.textContent });
+        const id = btn.dataset.tab;
+        const name = resolveTabName(id, btn.textContent, dataToSerialize[id]);
+        capturedTabs.push({ id: id, name: name });
+        if (dataToSerialize[id] && typeof dataToSerialize[id] === 'object' && !Array.isArray(dataToSerialize[id])) {
+            dataToSerialize[id].name = name;
+        }
     });
 
     // Fallback/Recover dynamic tabs from tabData
     Object.keys(dataToSerialize).forEach(key => {
-        const type = dataToSerialize[key]?.type;
-        const isDynamic = (type === 'overseas_custom' || type === 'exchange_rate');
+        const item = dataToSerialize[key];
+        const isDynamic = item && (item.type === 'overseas_custom' || item.type === 'exchange_rate' || Array.isArray(item));
         if (isDynamic && !capturedTabs.find(t => t.id === key)) {
-            const btn = document.querySelector(`.tab-btn[data-tab="${key}"]`);
-            const name = btn ? btn.textContent : (type === 'exchange_rate' ? "환율/금리(복구)" : "해외종목(복구)");
+            const name = resolveTabName(key, item?.name, item);
             capturedTabs.push({ id: key, name: name });
+            if (item && typeof item === 'object' && !Array.isArray(item)) {
+                item.name = name;
+            }
         }
     });
 
@@ -1287,6 +1378,12 @@ function applyData(data) {
         tabData = data.contents || {};
 
         data.tabs.forEach(t => {
+            const fixedName = resolveTabName(t.id, t.name, tabData[t.id]);
+            t.name = fixedName;
+            if (tabData[t.id] && typeof tabData[t.id] === 'object' && !Array.isArray(tabData[t.id])) {
+                tabData[t.id].name = fixedName;
+            }
+
             if (t.id === PERM_TAB_ID || t.id === ADR_TAB_ID || t.id === EARNINGS_TAB_ID || t.id === MEMO_TAB_ID) {
                 const btn = document.querySelector(`.tab-btn[data-tab="${t.id}"]`);
                 if (btn) {
@@ -1294,12 +1391,12 @@ function applyData(data) {
                         btn.textContent = '증시캘린더';
                         btn.title = '고정 탭 (증시 캘린더)';
                     } else {
-                        btn.textContent = t.name;
+                        btn.textContent = fixedName;
                     }
                 }
                 return;
             }
-            createTabButtonElement(t.id, t.name);
+            createTabButtonElement(t.id, fixedName);
             createTabContentElement(t.id);
         });
 
@@ -1509,11 +1606,15 @@ function initializeTab(tabId) {
 
 
 function createTabButtonElement(id, name) {
+    const fixedName = resolveTabName(id, name, typeof tabData !== 'undefined' ? tabData[id] : null);
     const btn = document.createElement("button");
     btn.className = "tab-btn";
     btn.dataset.tab = id;
-    btn.textContent = name;
+    btn.textContent = fixedName;
     btn.draggable = true;
+    if (typeof tabData !== 'undefined' && tabData[id] && typeof tabData[id] === 'object' && !Array.isArray(tabData[id])) {
+        tabData[id].name = fixedName;
+    }
     // Always append to tabsWrapper now
     if (tabsWrapper) tabsWrapper.appendChild(btn);
     return btn;
@@ -1642,7 +1743,7 @@ function createChartGrid(tabId) {
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
-                    <iframe id="iframeEarnings_${tabId}" src="https://kr.investing.com/earnings-calendar/" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                    <iframe id="iframeEarnings_${tabId}" src="https://kr.tradingview.com/embed-widget/events/?locale=kr#%7B%22colorTheme%22%3A%22light%22%2C%22isTransparent%22%3Afalse%2C%22width%22%3A%22100%25%22%2C%22height%22%3A%22100%25%22%2C%22importanceFilter%22%3A%22-1%2C0%2C1%22%2C%22countryFilter%22%3A%22kr%2Cus%22%7D" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
                 </div>
             </div>`;
     }
@@ -2719,7 +2820,15 @@ tabContainer.addEventListener("dblclick", function (e) {
     const input = document.createElement("input");
     input.type = "text"; input.value = originalName; input.className = "tab-rename-input";
     btn.textContent = ""; btn.appendChild(input); input.focus(); input.select();
-    const finishEditing = () => { btn.textContent = input.value.trim() || originalName; saveAppData(); };
+    const finishEditing = () => {
+        const newName = input.value.trim() || originalName;
+        btn.textContent = newName;
+        const tabId = btn.dataset.tab;
+        if (typeof tabData !== 'undefined' && tabData[tabId] && typeof tabData[tabId] === 'object' && !Array.isArray(tabData[tabId])) {
+            tabData[tabId].name = newName;
+        }
+        saveAppData();
+    };
     input.addEventListener("blur", finishEditing);
     input.addEventListener("keypress", (ev) => { if (ev.key === "Enter") input.blur(); });
 });
@@ -5378,7 +5487,9 @@ function applyFullStateBackup(data) {
     if (data.tabs && Array.isArray(data.tabs)) {
         data.tabs.forEach(tab => {
             if (tab.id !== PERM_TAB_ID && tab.id !== ADR_TAB_ID && tab.id !== EARNINGS_TAB_ID && tab.id !== MEMO_TAB_ID) {
-                createTabButtonElement(tab.id, tab.name);
+                const fixedName = resolveTabName(tab.id, tab.name, tabData[tab.id]);
+                tab.name = fixedName;
+                createTabButtonElement(tab.id, fixedName);
                 createTabContentElement(tab.id);
             }
         });
@@ -5452,7 +5563,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const localData = loadFromLocalStorage();
 
     let finalData = null;
-    if (serverData) {
+    if (serverData && serverData.tabs && serverData.tabs.length > 0) {
         // [v28] Prioritize server data ALWAYS for consistency across PCs
         console.log("☁️ 서버 데이터를 우선적으로 사용합니다.");
         finalData = serverData;
@@ -5462,11 +5573,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (finalData) {
         applyData(finalData);
-        // If local was newer than server, or server was missing, force sync this local content to server
-        if (finalData === localData) {
-            console.log("📡 로컬 데이터가 최신입니다. 서버에 백업합니다.");
-            setTimeout(() => saveAppData(), 5000); // 5s delay to ensure full load
-        }
+        // 로컬스토리지나 서버의 '(복구)' 이름을 원래 이름으로 교정한 후 안전하게 재동기화
+        setTimeout(() => saveAppData(), 3000);
     } else {
         ensurePermanentTabs();
         activateTab(PERM_TAB_ID);

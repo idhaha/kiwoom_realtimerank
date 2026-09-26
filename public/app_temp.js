@@ -846,7 +846,7 @@ function getSerializedState(sourceData = null) {
         const isDynamic = (type === 'overseas_custom' || type === 'exchange_rate');
         if (isDynamic && !capturedTabs.find(t => t.id === key)) {
             const btn = document.querySelector(`.tab-btn[data-tab="${key}"]`);
-            const name = btn ? btn.textContent : (type === 'exchange_rate' ? "환율/금리(복구)" : "해외종목(복구)");
+            const name = btn ? btn.textContent : (type === 'exchange_rate' ? "환율/금리" : "해외종목");
             capturedTabs.push({ id: key, name: name });
         }
     });
