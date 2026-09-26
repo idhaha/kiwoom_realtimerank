@@ -1743,7 +1743,7 @@ function createChartGrid(tabId) {
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
-                    <iframe id="iframeEarnings_${tabId}" src="https://www.tossinvest.com/calendar" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                    <iframe id="iframeEarnings_${tabId}" src="/calendar" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
                 </div>
             </div>`;
     }
