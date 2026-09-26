@@ -1138,6 +1138,9 @@ app.get('/api/toss_calendar', async (req, res) => {
             // Resolve Toss's relative resources on Toss, and install same-origin
             // History wrappers before the Next.js router initializes.
             html = html.replace(/<head([^>]*)>/i, `<head$1>${calendarProxyBootstrap}`);
+            // The PWA manifest is not needed in the embedded calendar. Removing
+            // it avoids a cross-origin manifest fetch under the Toss <base> URL.
+            html = html.replace(/<link\b(?=[^>]*\brel=["']manifest["'])[^>]*>/gi, '');
         }
         res.removeHeader('X-Frame-Options');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
