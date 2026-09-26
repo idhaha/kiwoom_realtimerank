@@ -1072,7 +1072,7 @@ app.get('/api/toss_calendar', async (req, res) => {
         });
         let html = response.data;
         if (typeof html === 'string') {
-            const calendarProxyBootstrap = `<script>
+            const calendarProxyBootstrap = `<base href="https://www.tossinvest.com/"><script>
                 (() => {
                     const proxyPrefix = '/api/toss_calendar_proxy?url=';
                     const originalFetch = window.fetch.bind(window);
@@ -1096,18 +1096,37 @@ app.get('/api/toss_calendar', async (req, res) => {
                         }
                         return originalFetch(rewriteUrl(input), init);
                     };
+                    const wrapHistoryMethod = (method) => {
+                        const original = method.bind(history);
+                        return (state, unused, value) => {
+                            if (typeof value === 'string') {
+                                try {
+                                    const parsed = new URL(value, document.baseURI);
+                                    if (parsed.origin !== window.location.origin) {
+                                        value = parsed.pathname + parsed.search + parsed.hash;
+                                    }
+                                } catch (_) {}
+                            }
+                            return original(state, unused, value);
+                        };
+                    };
+                    history.pushState = wrapHistoryMethod(history.pushState);
+                    history.replaceState = wrapHistoryMethod(history.replaceState);
                     const originalOpen = XMLHttpRequest.prototype.open;
                     XMLHttpRequest.prototype.open = function(method, url, ...args) {
                         return originalOpen.call(this, method, rewriteUrl(url), ...args);
                     };
                 })();
             </script>`;
-            // Keep Toss's bootstrap / browser checks intact. Install request and
-            // history wrappers after the page scripts have initialized.
-            html = html.replace(/<\/body>/i, `${calendarProxyBootstrap}</body>`);
+            // Resolve Toss's relative resources on Toss, and install same-origin
+            // History wrappers before the Next.js router initializes.
+            html = html.replace(/<head([^>]*)>/i, `<head$1>${calendarProxyBootstrap}`);
         }
         res.removeHeader('X-Frame-Options');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         res.send(html);
     } catch (error) {
         console.error("❌ 토스 캘린더 프록시 에러:", error.message);
