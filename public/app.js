@@ -1119,35 +1119,9 @@ function ensurePermanentTabs() {
     earningsBtn.title = '고정 탭 (증시 캘린더)';
 }
 
-// 알려진 기본 탭 매핑표 (기존 설정 복구 및 안전장치용)
-const DEFAULT_KNOWN_TAB_NAMES = {
-    "tab_rank": "Rank",
-    "tab_adr": "ADR",
-    "tab_memo": "일정",
-    "tab_earnings": "증시캘린더",
-    "tab_custom_1770648933891": "금리/환율",
-    "tab_custom_1770648933583": "금융",
-    "tab_custom_1771462815745": "주요국지수",
-    "tab_custom_1770648933964": "반도체",
-    "tab_custom_1771469181683": "AI/클라우드",
-    "tab_custom_1771469182054": "원전/전력",
-    "tab_custom_1771469182091": "철강/광물",
-    "tab_custom_1770648933776": "로봇",
-    "tab_custom_1770648933647": "2차전지",
-    "tab_custom_1770648933746": "방산",
-    "tab_custom_1771469182325": "조선",
-    "tab_custom_1771469181713": "우주",
-    "tab_custom_1771469181933": "코인/STO",
-    "tab_custom_1771469181563": "신재생/오일",
-    "tab_custom_1770648933551": "스마트폰/컴퓨터",
-    "tab_custom_1770648933942": "바이오",
-    "tab_custom_1771469182120": "SW",
-    "tab_grid_1772975037033": "차트 1"
-};
-
 /**
- * 탭 이름 해석 및 안전 복원 함수
- * '(복구)' 같은 비정상 이름이 붙었거나 누락된 탭 이름을 원래의 진짜 제목으로 복원
+ * 탭 이름 해석 및 안전 처리 함수
+ * candidateName 또는 tabData[tabId].name을 기반으로 올바른 탭 이름을 반환
  */
 function resolveTabName(tabId, candidateName = null, tabObj = null) {
     if (tabId === PERM_TAB_ID) return 'Rank';
@@ -1166,12 +1140,7 @@ function resolveTabName(tabId, candidateName = null, tabObj = null) {
         return item.name.trim();
     }
 
-    // 3. 기저에 정의된 탭 ID별 정규 이름 테이블 대조
-    if (DEFAULT_KNOWN_TAB_NAMES[tabId]) {
-        return DEFAULT_KNOWN_TAB_NAMES[tabId];
-    }
-
-    // 4. item.config에서 첫 번째 섹션 헤더 <섹션명> 추출 시도 (예: <반도체>, <금리> 등)
+    // 3. item.config에서 첫 번째 섹션 헤더 <섹션명> 추출 시도 (예: <반도체>, <금리> 등)
     if (item && item.config) {
         const match = item.config.match(/<([^,>\n\r]+)(?:,[^>]+)?>/);
         if (match && match[1].trim()) {
@@ -1179,18 +1148,18 @@ function resolveTabName(tabId, candidateName = null, tabObj = null) {
         }
     }
 
-    // 5. DOM 버튼 텍스트 확인 (단, '(복구)'가 없는 경우)
+    // 4. DOM 버튼 텍스트 확인 (단, '(복구)'가 없는 경우)
     const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
     if (btn && btn.textContent && !btn.textContent.includes("(복구)") && btn.textContent.trim() !== "") {
         return btn.textContent.trim();
     }
 
-    // 6. 차트 그리드 탭인 경우
+    // 5. 차트 그리드 탭인 경우
     if (tabId && tabId.startsWith('tab_grid_')) {
         return "차트";
     }
 
-    // 7. 최후 기본값 ('(복구)'라는 접미사는 절대 사용하지 않음)
+    // 6. 최후 기본값 ('(복구)'라는 접미사는 절대 사용하지 않음)
     const type = item?.type;
     if (type === 'exchange_rate') return "금리/환율";
     if (type === 'overseas_custom') return "해외종목";
