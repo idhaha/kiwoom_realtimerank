@@ -1079,7 +1079,7 @@ app.get('/api/toss_calendar', async (req, res) => {
                     const rewriteUrl = (value) => {
                         let url;
                         try { url = new URL(value, window.location.href); } catch (_) { return value; }
-                        if (url.origin === window.location.origin && (url.pathname.startsWith('/api/') || url.pathname === '/graphql')) {
+                        if (url.origin === window.location.origin && !url.pathname.startsWith('/api/toss_calendar_proxy')) {
                             url = new URL(url.pathname + url.search + url.hash, 'https://www.tossinvest.com');
                         }
                         if (url.protocol === 'https:' && (/(^|\\.)tossinvest\\.com$/i.test(url.hostname) || /(^|\\.)toss\\.im$/i.test(url.hostname))) {
@@ -1123,7 +1123,11 @@ app.all('/api/toss_calendar_proxy', async (req, res) => {
             return res.status(400).send('허용되지 않은 토스 캘린더 프록시 주소입니다.');
         }
 
+        const forwardedHeaders = Object.fromEntries(
+            Object.entries(req.headers).filter(([name]) => name.startsWith('x-') && name !== 'x-forwarded-for' && name !== 'x-forwarded-host' && name !== 'x-forwarded-proto')
+        );
         const headers = {
+            ...forwardedHeaders,
             'User-Agent': req.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': req.get('accept') || '*/*',
             'Accept-Language': req.get('accept-language') || 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',

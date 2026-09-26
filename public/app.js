@@ -1098,7 +1098,6 @@ function ensurePermanentTabs() {
 
         createTabContentElement(MEMO_TAB_ID);
     }
-
     // Earnings (증시캘린더) Tab
     let earningsBtn = document.querySelector(`.tab-btn[data-tab="${EARNINGS_TAB_ID}"]`);
     if (!earningsBtn) {
@@ -1125,7 +1124,13 @@ function ensurePermanentTabs() {
 function resolveTabName(tabId, candidateName = null, tabObj = null) {
     if (tabId === PERM_TAB_ID) return 'Rank';
     if (tabId === ADR_TAB_ID) return 'ADR';
-    if (tabId === MEMO_TAB_ID) return (candidateName && !candidateName.includes("(복구)")) ? candidateName : '일정';
+    if (tabId === MEMO_TAB_ID) {
+        const memoName = (candidateName && typeof candidateName === 'string') ? candidateName.trim() : '';
+        if (memoName && !memoName.includes('(복구)')) return memoName;
+        const memoItem = tabObj || (typeof tabData !== 'undefined' ? tabData[tabId] : null);
+        if (memoItem && typeof memoItem.name === 'string' && memoItem.name.trim() && !memoItem.name.includes('(복구)')) return memoItem.name.trim();
+        return '메모';
+    }
     if (tabId === EARNINGS_TAB_ID) return '증시캘린더';
 
     // 1. 이미 유효하고 '(복구)'가 없는 후보 이름인 경우
@@ -1169,6 +1174,27 @@ function resolveTabName(tabId, candidateName = null, tabObj = null) {
     }
 
     return "해외종목";
+}
+
+// Remove a legacy leading icon from the saved Memo tab title once. The marker
+// is persisted with settings so later user renames (including emoji titles)
+// remain unchanged on subsequent launches.
+function migrateMemoTabIconOnce(data) {
+    if (!data || data.memoTabIconMigrationV1) return false;
+
+    const memoTab = Array.isArray(data.tabs) ? data.tabs.find(tab => tab.id === MEMO_TAB_ID) : null;
+    const memoContent = data.contents && data.contents[MEMO_TAB_ID];
+    const savedName = (memoTab && memoTab.name) || (memoContent && memoContent.name);
+    if (typeof savedName === 'string' && savedName.trim()) {
+        const cleanedName = savedName.trim().replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '');
+        if (memoTab) memoTab.name = cleanedName;
+        if (memoContent && typeof memoContent === 'object' && !Array.isArray(memoContent)) {
+            memoContent.name = cleanedName;
+        }
+    }
+
+    data.memoTabIconMigrationV1 = true;
+    return true;
 }
 
 /**
@@ -1226,6 +1252,7 @@ function getSerializedState(sourceData = null) {
         watchlistGroupId: watchlistGroupId,
         memoHtml: memoHtml,
         memoDelta: memoDelta,
+        memoTabIconMigrationV1: true,
         updatedAt: Date.now()
     };
 }
@@ -1340,6 +1367,7 @@ function applyData(data) {
     if (!data || !data.tabs) return;
 
     isInitializing = true; // Block auto-save during application
+    const memoNameMigrationNeeded = migrateMemoTabIconOnce(data);
     try {
         ensurePermanentTabs(); // Always ensure permanent tabs first
         resetDynamicTabs();
@@ -1433,6 +1461,10 @@ function applyData(data) {
         setTimeout(() => {
             isInitializing = false;
             console.log("🔓 [InitialLoad] System ready. Auto-save enabled.");
+            if (memoNameMigrationNeeded) {
+                console.log("🧹 [Migration] Memo tab title migration completed.");
+                saveAppData();
+            }
         }, 500);
     }
 }
@@ -5434,6 +5466,7 @@ function bulkImportSettings(file) {
  */
 function applyFullStateBackup(data) {
     console.log("🔄 [Restore] Full state restoration started...");
+    migrateMemoTabIconOnce(data);
 
     // 1. 데이터 교체 (Contents)
     tabData = data.contents || {};
