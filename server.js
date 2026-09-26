@@ -1101,12 +1101,10 @@ app.get('/api/toss_calendar', async (req, res) => {
                     const wrapHistoryMethod = (method) => {
                         const original = method.bind(history);
                         return (state, unused, value) => {
-                            if (typeof value === 'string') {
+                            if (value != null) {
                                 try {
-                                    const parsed = new URL(value, document.baseURI);
-                                    if (parsed.origin !== window.location.origin) {
-                                        value = parsed.pathname + parsed.search + parsed.hash;
-                                    }
+                                    const parsed = new URL(String(value), document.baseURI);
+                                    value = parsed.pathname + parsed.search + parsed.hash;
                                 } catch (_) {}
                             }
                             return original(state, unused, value);
