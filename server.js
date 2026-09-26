@@ -1203,6 +1203,37 @@ app.all('/api/toss_calendar_proxy', async (req, res) => {
     }
 });
 
+// Toss's SharedWorker imports sibling webpack chunks by absolute /assets path.
+// The worker runs under the dashboard origin, so relay only those JS chunks here.
+app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
+    try {
+        const targetUrl = new URL(req.originalUrl, 'https://www.tossinvest.com');
+        if (!/^\/assets\/v2\/_next\/static\/chunks\/[a-z0-9._%/-]+\.js$/i.test(targetUrl.pathname)) {
+            return res.status(404).send('Toss calendar asset not found.');
+        }
+
+        const response = await axios.get(targetUrl.href, {
+            headers: {
+                'User-Agent': req.get('user-agent') || 'Mozilla/5.0',
+                'Accept': req.get('accept') || '*/*',
+                'Accept-Language': req.get('accept-language') || 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.tossinvest.com/calendar'
+            },
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            maxContentLength: 10 * 1024 * 1024,
+            validateStatus: () => true
+        });
+
+        if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
+        if (response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
+        res.status(response.status).send(response.data);
+    } catch (error) {
+        console.error('[TossCalendar] worker chunk proxy error:', error.code || error.message);
+        res.status(502).send('토스 캘린더 워커 스크립트를 가져오지 못했습니다.');
+    }
+});
+
 /**
  * ADR 데이터 프록시 API (CORS 방지용)
  */
