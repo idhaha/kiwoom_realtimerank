@@ -1104,7 +1104,9 @@ app.get('/api/toss_calendar', async (req, res) => {
                             if (value != null) {
                                 try {
                                     const parsed = new URL(String(value), document.baseURI);
-                                    value = parsed.pathname + parsed.search + parsed.hash;
+                                    // An absolute path is still resolved against the Toss <base>.
+                                    // Pin History API updates to this iframe's actual origin.
+                                    value = window.location.origin + parsed.pathname + parsed.search + parsed.hash;
                                 } catch (_) {}
                             }
                             return original(state, unused, value);
