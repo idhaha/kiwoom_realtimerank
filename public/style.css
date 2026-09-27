@@ -344,12 +344,18 @@ input:checked+.slider:before {
 
 #transactionTable thead th:nth-child(4),
 #transactionTable tbody td:nth-child(4) {
-    width: 16%;
+    width: 18%;
 }
 
 #transactionTable thead th:nth-child(5),
 #transactionTable tbody td:nth-child(5) {
-    width: 24%;
+    width: 22%;
+}
+
+/* 실시간 조회 순위에서 등락률과 거래대금 사이의 빈 간격을 줄인다. */
+#stockTable thead th:nth-child(4),
+#stockTable tbody td:nth-child(4) {
+    width: 100px;
 }
 
 #transactionTable thead th:nth-child(6),

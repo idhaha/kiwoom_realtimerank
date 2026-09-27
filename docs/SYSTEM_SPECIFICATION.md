@@ -1,6 +1,6 @@
 # 키움 실시간 랭킹 시스템 사양서 (System Specification)
 
-> **문서 버전**: v1.0.5  
+> **문서 버전**: v1.0.6  
 > **최초 작성일**: 2026-09-26  
 > **최근 업데이트**: 2026-09-27  
 > **대상 시스템**: 키움증권 실시간 종목 순위 및 종합 대시보드 웹서비스 (`kiwoom_realtimerank`)
@@ -8,7 +8,8 @@
 ---
 
 ## 📌 업데이트 룰
-1. 검증이 완료된 내용만 업데이트 한다.
+1. 이 사양서에는 검증이 완료된 내용만 업데이트 한다.
+2. git에는 사용자가 수동으로 업데이트 하므로 AI가 자동으로 업데이트 하지 않는다.
 
 
 ## 📌 문서 개요 및 목적
@@ -62,6 +63,7 @@ flowchart TD
     Panel1 -.-> KiwoomAPI1["키움 ka10032 (rkinfo)"]
     Panel2 -.-> KiwoomAPI2["키움 ka00198 (stkinfo)<br/>+ ka10100 + ka10007"]
     Panel3 -.-> EfriendAPI["한투 CTSC2702R<br/>+ FHKST01010100"]
+    Panel3 -.-> KiwoomMarketAPI["시장구분: 키움 ka10100<br/>+ 서버 시장 캐시"]
     Panel4 -.-> KiwoomAPI3["키움 ka10095 (watchlist)<br/>+ ka10100 + ka10007"]
 ```
 
@@ -147,11 +149,12 @@ flowchart TD
   1. 대주 가능 종목을 `GET {EFRIEND_DOMAIN}/uapi/domestic-stock/v1/quotations/lendable-by-company`로 조회한다. 헤더는 `content-type: application/json; charset=utf-8`, `authorization: Bearer <access_token>`, `appkey`, `appsecret`, `tr_id: CTSC2702R`, `custtype: P`를 보낸다. 첫 요청은 `tr_cont`를 빈 값, 이후 요청은 `Y`로 둔다. URL 쿼리 파라미터는 `EXCG_DVSN_CD=00`, `PDNO=`(빈 값), `THCO_STLN_PSBL_YN=Y`, `INQR_DVSN_1=0`, `CTX_AREA_FK200`, `CTX_AREA_NK100`이다. 제한 시간은 10초다.
   2. 응답 `output1` 배열(없으면 `output`)을 누적한다. 응답 헤더 `tr_cont`가 `Y` 또는 `M`이고 항목이 있을 때 `ctx_area_fk200`, `ctx_area_nk100` 커서를 다음 요청에 전달한다. 최대 50페이지까지 조회하며 페이지 사이에 200ms 대기한다. 페이지 오류가 발생하면 이미 받은 항목으로 계속한다.
   3. 각 종목에 대해 현재가를 `GET {EFRIEND_DOMAIN}/uapi/domestic-stock/v1/quotations/inquire-price`로 조회한다. 헤더는 `content-type: application/json; charset=utf-8`, `authorization: Bearer <access_token>`, `appkey`, `appsecret`, `tr_id: FHKST01010100`, `custtype: P`; 쿼리 파라미터는 `FID_COND_MRKT_DIV_CODE=J`, `FID_INPUT_ISCD=<pdno>`이다. `pdno`가 6자리이고 `5` 또는 `7`로 시작하면 조회 코드 앞에 `Q`를 붙인다. 제한 시간은 3초다.
-  4. 현재가 응답 `output.prdy_ctrt`, `output.stck_prpr`, `output.rprs_mrkt_kor_name`을 원본 대주 데이터에 병합한다. 종목 10개씩 병렬 조회하고 묶음 사이에 50ms 대기한다. 현재가 조회 실패 시 등락률은 `0.00`, 현재가는 원본 `bfdy_clpr`, 시장명은 빈 값으로 대체한다.
+  4. 현재가 응답 `output.prdy_ctrt`, `output.stck_prpr`을 원본 대주 데이터에 병합한다. 종목 10개씩 병렬 조회하고 묶음 사이에 50ms 대기한다. 현재가 조회 실패 시 등락률은 `0.00`, 현재가는 원본 `bfdy_clpr`를 사용한다. 이 API 응답의 시장명은 시장구분 표시에 사용하지 않는다.
+  5. 각 종목의 시장구분은 Kiwoom `ka10100` 주식기본정보 또는 Rank 화면의 같은 API 로직으로 만들어진 서버 메모리 시장 캐시에서 가져온다. 캐시에 유효한 `marketCode`가 없으면 `POST https://api.kiwoom.com/api/dostk/stkinfo`를 호출하고, 본문은 `{ "stk_cd": "<pdno에서 정리한 종목코드>" }`, 헤더는 `Content-Type: application/json`, `Authorization: Bearer <Kiwoom access_token>`, `api-id: ka10100`, 제한 시간은 3초다. `marketCode=0`은 K, `marketCode=10`은 Q로 표시하며 `marketName` 해석은 기존 Kiwoom 시장판별 로직을 따른다. 종목별 API 호출 사이에는 100ms 대기한다. 조회 실패 또는 KOSPI/KOSDAQ으로 판별할 수 없는 코드는 대주가능 종목 자체에서 제외하지 않고 시장을 `-`로 표시한다.
 * **서버 응답 및 정렬**: `output1`/`output`의 원본 필드를 유지한 종목 배열을 `data.efriend`에 반환한다. 브라우저는 `prdy_ctrt` 기준 내림차순(상승률 높은 순)으로 정렬하고 화면 순번을 부여한다.
 * **표시 컬럼 및 포맷팅**:
   1. **순위**: 1부터 순차 인덱스
-  2. **시장**: `rprs_mrkt_kor_name` 분석 후 K / Q 표기 (판별되지 않으면 `-`)
+  2. **시장**: 서버에서 보강한 Kiwoom `ka10100` `mkt_type`을 K / Q로 표기한다. eFriend `rprs_mrkt_kor_name`은 사용하지 않으며 Kiwoom에서도 판별되지 않으면 `-`를 표시한다.
   3. **종목명 (`prdt_name`)**: 종목명
   4. **등락률 (`prdy_ctrt`)**: 등락 색상 적용
   5. **매매가능수량 (`trad_psbl_qty2`)**: 0 초과 시 `price-up` 하이라이트
@@ -792,4 +795,4 @@ TXT 다운로드를 먼저 요청하고, JSON 다운로드는 약 100ms 뒤에 �
 6. **가져오기 분류 휴리스틱**: TXT 탭 종류는 이름 문자열 포함 여부로 정한다. 파일 형식에 탭 종류 메타데이터가 없어 사용자가 의도한 타입과 달라질 수 있다.
 7. **실시간 시세 데이터**: 설정 스냅샷은 입력·탭 구성과 일부 UI 설정을 저장하며, 원격 시세/캔버스의 전체 데이터나 iframe 내부 세션을 완전 백업하지 않는다.
 
-> **구현 대조 메모 (2026-09-26)**: 3장은 `public/app.js`, `server.js`, `public/index.html`, `user_settings.json`의 실제 저장/복원 흐름을 기준으로 기록했다. 설정 저장·동기화 사양까지 작성 완료했다. 문서의 1~3장 작성 범위가 현재 요청한 전체 항목을 충족한다.
+> **구현 대조 메모 (2026-09-27)**: 3장은 `public/app.js`, `server.js`, `public/index.html`, `user_settings.json`의 실제 저장/복원 흐름을 기준으로 기록했다. 설정 저장·동기화 사양까지 작성 완료했다. Rank 패널 3의 시장구분은 실서버 동작 확인 후 eFriend 시장명 의존을 제거하고 Kiwoom `ka10100`/시장 캐시 경로를 사용하도록 갱신했다.
