@@ -1201,6 +1201,15 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
             // The PWA manifest is not needed in the embedded calendar. Removing
             // it avoids a cross-origin manifest fetch under the Toss <base> URL.
             html = html.replace(/<link\b(?=[^>]*\brel=["']manifest["'])[^>]*>/gi, '');
+            // Route the calendar page bundle through this host temporarily so
+            // diagnostics can observe its data hook and request function.
+            const forwardedProto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
+            const forwardedHost = req.get('x-forwarded-host') || req.get('host');
+            const publicOrigin = forwardedProto + '://' + forwardedHost;
+            html = html.replace(
+                /(src=["'])(\/assets\/v2\/_next\/static\/chunks\/pages\/calendar-[^"']+\.js)(["'])/i,
+                (_match, prefix, chunkPath, suffix) => prefix + publicOrigin + chunkPath + suffix
+            );
         }
         res.removeHeader('X-Frame-Options');
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1315,9 +1324,29 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
             validateStatus: () => true
         });
 
+        let responseBody = response.data;
+        const isCalendarPageChunk = /\/pages\/calendar-[^/]+\.js$/i.test(targetUrl.pathname);
+        if (isCalendarPageChunk && response.status === 200) {
+            let script = Buffer.from(response.data).toString('utf8');
+            const hookMarker = 'ei=()=>{let{category';
+            const queryMarker = 'queryFn:()=>X.FH.post(`${J.Q.CERT}${er(t,n)}`),refetchOnWindowFocus';
+            if (script.includes(hookMarker) && script.includes(queryMarker)) {
+                script = script
+                    .replace(hookMarker, 'ei=()=>{console.info("[TossCalendarTrace] monthly hook invoked");let{category')
+                    .replace(
+                        queryMarker,
+                        'queryFn:()=>{console.info("[TossCalendarTrace] monthly query function invoked",t,n);return X.FH.post(`${J.Q.CERT}${er(t,n)}`)},refetchOnWindowFocus'
+                    );
+                responseBody = script;
+                res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+            } else {
+                console.warn('[TossCalendarTrace] calendar bundle markers not found; Toss may have changed its bundle');
+            }
+        }
+
         if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
-        if (response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
-        res.status(response.status).send(response.data);
+        if (!isCalendarPageChunk && response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
+        res.status(response.status).send(responseBody);
     } catch (error) {
         console.error('[TossCalendar] worker chunk proxy error:', error.code || error.message);
         res.status(502).send('토스 캘린더 워커 스크립트를 가져오지 못했습니다.');
