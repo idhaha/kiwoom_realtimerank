@@ -1372,6 +1372,7 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
             const hookMarker = 'ei=()=>{let{category';
             const queryMarker = 'queryFn:()=>X.FH.post(`${J.Q.CERT}${er(t,n)}`),refetchOnWindowFocus';
             const queryStatusMarker = 'i=(0,j.E)({queries:r}),s=i.map(e=>e.data);';
+            const aiSummaryQueryMarker = 'queryFn:()=>X.FH.get(`${J.Q.CERT}${nD}`),...nk.us});nw.getKey';
             if (script.includes(hookMarker) && script.includes(queryMarker) && script.includes(queryStatusMarker)) {
                 script = script
                     .replace(hookMarker, 'ei=()=>{console.info("[TossCalendarTrace] monthly hook invoked");let{category')
@@ -1383,6 +1384,14 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
                         queryStatusMarker,
                         'i=(0,j.E)({queries:r}),s=(console.info("[TossCalendarTrace] monthly query states",i.map(query=>({status:query.status,fetchStatus:query.fetchStatus,error:query.error?.message}))),i.map(e=>e.data));'
                     );
+                if (script.includes(aiSummaryQueryMarker)) {
+                    script = script.replace(
+                        aiSummaryQueryMarker,
+                        'queryFn:()=>{const targetUrl=`${J.Q.CERT}${nD}`;const proxyUrl=`${window.location.origin}/api/toss_calendar_proxy?url=${encodeURIComponent(targetUrl)}`;console.info("[TossCalendarTrace] weekly AI summary request",{targetUrl});let status;const request=window.fetch(proxyUrl).then(async response=>{status=response.status;if(!response.ok)throw new Error(`Calendar proxy HTTP ${response.status}`);const payload=await response.json();return payload?.result??payload});request.then(data=>console.info("[TossCalendarTrace] weekly AI summary resolved",{status,title:data?.title}),error=>console.error("[TossCalendarTrace] weekly AI summary rejected",{status,message:error?.message}));return request},...nk.us});nw.getKey'
+                    );
+                } else {
+                    console.warn('[TossCalendarTrace] AI summary query marker not found; Toss may have changed its bundle');
+                }
                 responseBody = script;
                 res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
         } else {
