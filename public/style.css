@@ -313,6 +313,42 @@ input:checked+.slider:before {
     /* 매매가능금액(원) */
 }
 
+#transactionTable {
+    width: 100%;
+    table-layout: fixed;
+}
+
+#transactionTable thead th:nth-child(1),
+#transactionTable tbody td:nth-child(1) {
+    width: 8%;
+}
+
+#transactionTable thead th:nth-child(2),
+#transactionTable tbody td:nth-child(2) {
+    width: 8%;
+}
+
+#transactionTable thead th:nth-child(3),
+#transactionTable tbody td:nth-child(3) {
+    width: 26%;
+}
+
+#transactionTable thead th:nth-child(4),
+#transactionTable tbody td:nth-child(4) {
+    width: 16%;
+}
+
+#transactionTable thead th:nth-child(5),
+#transactionTable tbody td:nth-child(5) {
+    width: 27%;
+}
+
+#transactionTable thead th:nth-child(6),
+#transactionTable tbody td:nth-child(6) {
+    width: 15%;
+    white-space: nowrap;
+}
+
 /* Colspan fix for empty messages */
 table tbody td[colspan] {
     width: 100% !important;
