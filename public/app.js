@@ -669,7 +669,7 @@ async function loadTransactionRank() {
             console.log("Transaction Items:", items.length);
 
             if (items.length === 0) {
-                transactionBody.innerHTML = `<tr><td colspan="5" class="align-center">데이터 없음</td></tr>`;
+                transactionBody.innerHTML = `<tr><td colspan="6" class="align-center">데이터 없음</td></tr>`;
                 return;
             }
 
@@ -691,17 +691,18 @@ async function loadTransactionRank() {
                             ${formatChangeRate(changeRate)}
                         </td>
                         <td class="align-right num-cell">${formatNumber(trdeAmtMillion)}</td>
+                        <td class="align-right num-cell">${stock.concentration_rate != null && Number.isFinite(Number(stock.concentration_rate)) ? `${Number(stock.concentration_rate)}%` : '-'}</td>
                     </tr>
                 `;
             }).join('');
 
         } else {
             console.error("Trans Rank Error:", result.error);
-            transactionBody.innerHTML = `<tr><td colspan="5" class="align-center error">통신 오류</td></tr>`;
+            transactionBody.innerHTML = `<tr><td colspan="6" class="align-center error">통신 오류</td></tr>`;
         }
     } catch (e) {
         console.error("Trans Rank Fetch Fail:", e);
-        transactionBody.innerHTML = `<tr><td colspan="5" class="align-center error">통신 오류</td></tr>`;
+        transactionBody.innerHTML = `<tr><td colspan="6" class="align-center error">통신 오류</td></tr>`;
     }
 }
 

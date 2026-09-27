@@ -566,9 +566,56 @@ app.get('/api/transaction_rank', async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 100));
         }
 
+        // 시장 전체 거래대금은 KOSPI/KOSDAQ별 1회씩 조회해 순위 종목에 배분한다.
+        // ka20001: 업종현재거래량요청, trde_prica를 분모로 사용한다.
+        const marketTurnover = {};
+        for (const market of [
+            { type: 'K', mrkt_tp: '0', inds_cd: '001' },
+            { type: 'Q', mrkt_tp: '1', inds_cd: '101' },
+        ]) {
+            if (!enrichedItems.some(item => item.mkt_type === market.type)) continue;
+            try {
+                const marketResponse = await axios.post(
+                    "https://api.kiwoom.com/api/dostk/sect",
+                    { mrkt_tp: market.mrkt_tp, inds_cd: market.inds_cd },
+                    {
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${accessToken}`,
+                            "api-id": "ka20001",
+                        },
+                        timeout: 5000
+                    }
+                );
+                const rawTurnover = marketResponse.data?.trde_prica;
+                const turnover = Number(String(rawTurnover ?? '').replace(/,/g, ''));
+                if (Number.isFinite(turnover) && turnover > 0) {
+                    marketTurnover[market.type] = turnover;
+                } else {
+                    console.warn(`⚠️ ka20001 ${market.type} 시장 거래대금 응답에 유효한 trde_prica가 없습니다.`);
+                }
+            } catch (marketError) {
+                console.warn(`⚠️ ka20001 ${market.type} 시장 거래대금 조회 실패:`, marketError.response?.data || marketError.message);
+            }
+        }
+
+        const dataWithConcentration = enrichedItems.map(item => {
+            const marketAmount = marketTurnover[item.mkt_type];
+            const stockAmount = Number(String(item.trde_prica ?? item.trde_amt ?? '').replace(/,/g, ''));
+            const concentrationRate = Number.isFinite(stockAmount) && marketAmount > 0
+                ? Math.round(stockAmount / marketAmount * 100)
+                : null;
+            return {
+                ...item,
+                market_trde_prica: marketAmount ?? null,
+                concentration_rate: concentrationRate,
+            };
+        });
+
         res.json({
             success: true,
-            data: enrichedItems,
+            data: dataWithConcentration,
+            market_turnover: marketTurnover,
             server_time: new Date().toISOString()
         });
 

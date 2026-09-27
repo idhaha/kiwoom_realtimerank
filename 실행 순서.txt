@@ -11,10 +11,10 @@ taskkill /f /pid PID번호
 3. git 반영
 git checkout -b "br_oracle"
 git add .
-git commit -m "changed the color of fixed tab"
-git tag -a v2.8.36 -m "changed the color of fixed tab"
+git commit -m "changed txt of save/load"
+git tag -a v2.8.37 -m "changed txt of save/load"
 git push origin br_oracle
-git push origin v2.8.36
+git push origin v2.8.37
 
 4. 서버 접속
 PS D:\Program\Kiwoom> ssh -i C:\Users\yg.gb5pro\.ssh\id_rsa ubuntu@134.185.111.202 
