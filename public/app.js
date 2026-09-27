@@ -618,15 +618,15 @@ function renderEfriendTable(stocks) {
         // 시장 구분: KOSPI/KS 포함 시 K, KOSDAQ/KSQ 포함 시 Q, 그 외 -
         const mrktName = (stock.rprs_mrkt_kor_name || '').toUpperCase();
         console.log(`[Market Name Log] Stock: ${prdtName}, Raw mrktName: "${stock.rprs_mrkt_kor_name}", Processed: "${mrktName}"`); // Added log for user
-        let marketLabel = '-';
-        if (mrktName.includes('KOSPI') || mrktName.includes('KSP') || mrktName === 'KOSPI200' || mrktName === '유가증권' || mrktName.startsWith('KS')) {
+        let marketLabel = stock.mkt_type || '-';
+        if (!stock.mkt_type && (mrktName.includes('KOSPI') || mrktName.includes('KSP') || mrktName === 'KOSPI200' || mrktName === '유가증권' || mrktName.startsWith('KS'))) {
             // "KSQ"가 포함되어 있으면 KOSDAQ 처리하므로 "KS"로 먼저 시작하거나 명확하게 KOSPI 등락이 있는 경우
             if (mrktName.includes('KSQ') || mrktName.includes('KOSDAQ')) {
                 marketLabel = 'Q';
             } else {
                 marketLabel = 'K';
             }
-        } else if (mrktName.includes('KOSDAQ') || mrktName.includes('KSQ') || mrktName === '코스닥') {
+        } else if (!stock.mkt_type && (mrktName.includes('KOSDAQ') || mrktName.includes('KSQ') || mrktName === '코스닥')) {
             marketLabel = 'Q';
         }
 
@@ -686,7 +686,7 @@ async function loadTransactionRank() {
                     <tr class="fade-in">
                         <td class="align-right">${stock.rank || (index + 1)}</td>
                         <td class="market-type">${marketLabel}</td>
-                        <td>${stock.stk_nm || stock.isu_nm || '-'}</td>
+                        <td title="${stock.stk_nm || stock.isu_nm || '-'}">${stock.stk_nm || stock.isu_nm || '-'}</td>
                         <td class="align-right num-cell ${getPriceClass(changeRate)}">
                             ${formatChangeRate(changeRate)}
                         </td>

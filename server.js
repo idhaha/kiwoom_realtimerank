@@ -10,6 +10,17 @@ const puppeteer = require('puppeteer');
 // 전역 시장구분 캐시 (종목코드: 'K'/'Q') - 429 에러 방지용
 const marketCache = {};
 
+function resolveKiwoomMarketType(basicInfo, fallback = 'Q') {
+    const marketName = String(basicInfo?.marketName || basicInfo?.mkt_nm || '').toUpperCase();
+    if (marketName.includes('KOSDAQ') || marketName.includes('KSQ') || marketName.includes('코스닥')) return 'Q';
+    if (marketName.includes('거래소') || marketName.includes('KOSPI') || marketName.includes('KSP') || marketName.includes('코스피') || marketName.includes('유가증권')) return 'K';
+
+    const marketCode = String(basicInfo?.marketCode || basicInfo?.mkt_cd || '');
+    if (marketCode === '0') return 'K';
+    if (marketCode === '10') return 'Q';
+    return fallback;
+}
+
 // 디버그 로그 파일 설정
 const LOG_FILE = path.join(__dirname, 'server_debug.log');
 
@@ -332,13 +343,14 @@ app.get('/api/stock', async (req, res) => {
                     }
 
                     // 1. 주식기본정보요청 (ka10100) - 시장구분 (marketName)
-                    if (marketCache[stock.stk_cd]) {
-                        const cached = marketCache[stock.stk_cd];
+                    const cachedMarket = marketCache[stock.stk_cd];
+                    if (cachedMarket && cachedMarket.code != null && String(cachedMarket.code) !== '') {
+                        const cached = cachedMarket;
                         // 시장코드 필터링 (0, 10만 허용)
                         if (!['0', '10'].includes(String(cached.code))) {
                             return null;
                         }
-                        marketType = cached.type;
+                        marketType = ['K', 'Q'].includes(cached.type) ? cached.type : resolveKiwoomMarketType(cached, marketType);
                     } else {
                         try {
                             const basicInfoResponse = await axios.post(
@@ -354,8 +366,7 @@ app.get('/api/stock', async (req, res) => {
                                 }
                             );
                             const basicInfo = basicInfoResponse.data;
-                            const mktCode = String(basicInfo.marketCode || "");
-                            const marketName = basicInfo.marketName || "";
+                            const mktCode = String(basicInfo.marketCode || basicInfo.mkt_cd || "");
 
                             // marketCode 필터링 (0:KOSPI, 10:KOSDAQ)
                             if (!['0', '10'].includes(mktCode)) {
@@ -364,9 +375,7 @@ app.get('/api/stock', async (req, res) => {
                                 return null;
                             }
 
-                            if (marketName && (marketName.includes("거래소") || marketName === "KOSPI")) {
-                                marketType = 'K';
-                            }
+                            marketType = resolveKiwoomMarketType(basicInfo, marketType);
                             marketCache[stock.stk_cd] = { type: marketType, code: mktCode };
                         } catch (e) {
                             fileLog(`[Warning] ka10100 failed for ${stock.stk_nm}: ${e.message}`);
@@ -507,12 +516,13 @@ app.get('/api/transaction_rank', async (req, res) => {
                     if (isEtfName) return null;
 
                     // 1. 시장구분 및 marketCode 필터링 (캐시 확인)
-                    if (marketCache[stockCode]) {
-                        const cached = marketCache[stockCode];
+                    const cachedMarket = marketCache[stockCode];
+                    if (cachedMarket && cachedMarket.code != null && String(cachedMarket.code) !== '') {
+                        const cached = cachedMarket;
                         if (!['0', '10'].includes(String(cached.code))) {
                             return null;
                         }
-                        marketType = cached.type;
+                        marketType = cached.type || resolveKiwoomMarketType(cached, marketType);
                     } else {
                         // 캐시에 없는 경우, 정확한 필터링을 위해 무조건 ka10100 호출
                         // (KODEX 등이 marketCode 0으로 들어오는 경우를 거르기 위함)
@@ -530,8 +540,7 @@ app.get('/api/transaction_rank', async (req, res) => {
                                 }
                             );
                             const basicInfo = basicInfoResponse.data;
-                            const mktCode = String(basicInfo.marketCode || "");
-                            const mktName = basicInfo.marketName || "";
+                            const mktCode = String(basicInfo.marketCode || basicInfo.mkt_cd || "");
 
                             // marketCode 필터링 (0: KOSPI, 10: KOSDAQ)
                             if (!['0', '10'].includes(mktCode)) {
@@ -539,9 +548,7 @@ app.get('/api/transaction_rank', async (req, res) => {
                                 return null;
                             }
 
-                            if (mktName && (mktName.includes("거래소") || mktName === "KOSPI")) {
-                                marketType = 'K';
-                            }
+                            marketType = resolveKiwoomMarketType(basicInfo, marketType);
                             marketCache[stockCode] = { type: marketType, code: mktCode };
                         } catch (e) {
                             // API 실패 시엔 이름 필터링만 적용된 채로 진행 (최소한의 안전장치)
@@ -842,7 +849,7 @@ app.get('/api/watchlist_rank', async (req, res) => {
                         };
                         // 이름 캐싱
                         if (bItem.stk_nm && (!marketCache[bCode] || !marketCache[bCode].name)) {
-                            marketCache[bCode] = { ...(marketCache[bCode] || { type: 'Q' }), name: bItem.stk_nm };
+                            marketCache[bCode] = { ...(marketCache[bCode] || {}), name: bItem.stk_nm };
                         }
                     }
                 }
@@ -861,7 +868,7 @@ app.get('/api/watchlist_rank', async (req, res) => {
                 if (!stockCode) return null;
 
                 let stockName = item.stk_nm || item.isu_nm || item.prdt_name || item.name || '';
-                let marketType = 'Q';
+                let marketType = null;
                 let trdeAmtMillion = parseInt(item.trde_amt || item.trde_prica || item.acml_tr_pbmn || 0) || 0;
                 let flucRt = item.fluc_rt || item.flu_rt || item.prdy_ctrt || item.base_comp_chgr || item.chg_rt || '0';
 
@@ -875,10 +882,11 @@ app.get('/api/watchlist_rank', async (req, res) => {
 
                 try {
                     // 1. 시장구분 및 종목명 (ka10100) - 캐시 우선 확인
-                    if (marketCache[stockCode]) {
-                        const cached = marketCache[stockCode];
+                    const cachedMarket = marketCache[stockCode];
+                    if (cachedMarket && cachedMarket.code != null && String(cachedMarket.code) !== '') {
+                        const cached = cachedMarket;
                         if (cached.name && !stockName) stockName = cached.name;
-                        if (cached.type) marketType = cached.type;
+                        marketType = ['K', 'Q'].includes(cached.type) ? cached.type : resolveKiwoomMarketType(cached, marketType);
                     } else {
                         try {
                             const basicInfoResponse = await axios.post(
@@ -895,16 +903,11 @@ app.get('/api/watchlist_rank', async (req, res) => {
                             );
                             const basicInfo = basicInfoResponse.data;
                             const mktCode = String(basicInfo.marketCode || basicInfo.mkt_cd || "");
-                            const marketName = basicInfo.marketName || basicInfo.mkt_nm || "";
                             const fetchedName = basicInfo.stk_nm || basicInfo.name || basicInfo.isu_nm || basicInfo.item_nm || "";
 
                             if (fetchedName && !stockName) stockName = fetchedName;
 
-                            if (marketName && (marketName.includes("거래소") || marketName === "KOSPI" || marketName.includes("KOSPI"))) {
-                                marketType = 'K';
-                            } else if (marketName && (marketName.includes("코스닥") || marketName === "KOSDAQ" || marketName.includes("KOSDAQ"))) {
-                                marketType = 'Q';
-                            }
+                            marketType = resolveKiwoomMarketType(basicInfo, marketType);
 
                             marketCache[stockCode] = { name: stockName, type: marketType, code: mktCode };
                         } catch (e) {

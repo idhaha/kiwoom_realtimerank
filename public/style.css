@@ -86,7 +86,7 @@ body {
 }
 
 #tab_rank .grid-container {
-    grid-template-columns: 1fr 1fr 1.15fr;
+    grid-template-columns: 1.2fr 1fr 1.15fr;
 }
 
 .panel {
@@ -325,16 +325,21 @@ input:checked+.slider:before {
 #transactionTable thead th:nth-child(1),
 #transactionTable tbody td:nth-child(1) {
     width: 8%;
+    white-space: nowrap;
 }
 
 #transactionTable thead th:nth-child(2),
 #transactionTable tbody td:nth-child(2) {
     width: 8%;
+    white-space: nowrap;
 }
 
 #transactionTable thead th:nth-child(3),
 #transactionTable tbody td:nth-child(3) {
-    width: 26%;
+    width: 30%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #transactionTable thead th:nth-child(4),
@@ -344,12 +349,12 @@ input:checked+.slider:before {
 
 #transactionTable thead th:nth-child(5),
 #transactionTable tbody td:nth-child(5) {
-    width: 27%;
+    width: 24%;
 }
 
 #transactionTable thead th:nth-child(6),
 #transactionTable tbody td:nth-child(6) {
-    width: 15%;
+    width: 14%;
     white-space: nowrap;
 }
 
