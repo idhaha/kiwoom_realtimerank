@@ -1079,6 +1079,13 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     const proxyPath = '/api/toss_calendar_proxy';
                     const proxyPrefix = window.location.origin + proxyPath + '?url=';
                     const originalFetch = window.fetch.bind(window);
+                    const traceMonthlyRequest = (transport, originalUrl, rewrittenUrl) => {
+                        try {
+                            if (/calendar\/monthly/i.test(String(originalUrl)) || /calendar\/monthly/i.test(String(rewrittenUrl))) {
+                                console.info('[TossCalendarTrace] monthly request', { transport, originalUrl: String(originalUrl), rewrittenUrl: String(rewrittenUrl) });
+                            }
+                        } catch (_) {}
+                    };
                     const rewriteUrl = (value) => {
                         let url;
                         try { url = new URL(value, window.location.href); } catch (_) { return value; }
@@ -1098,11 +1105,14 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     window.fetch = (input, init) => {
                         if (input instanceof Request) {
                             const rewritten = rewriteUrl(input.url);
+                            traceMonthlyRequest('fetch', input.url, rewritten);
                             return rewritten === input.url
                                 ? originalFetch(input, init)
                                 : originalFetch(new Request(rewritten, new Request(input, init)));
                         }
-                        return originalFetch(rewriteUrl(input), init);
+                        const rewritten = rewriteUrl(input);
+                        traceMonthlyRequest('fetch', input, rewritten);
+                        return originalFetch(rewritten, init);
                     };
                     if (window.SharedWorker) {
                         const NativeSharedWorker = window.SharedWorker;
@@ -1131,7 +1141,9 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     history.replaceState = wrapHistoryMethod(history.replaceState);
                     const originalOpen = XMLHttpRequest.prototype.open;
                     XMLHttpRequest.prototype.open = function(method, url, ...args) {
-                        return originalOpen.call(this, method, rewriteUrl(url), ...args);
+                        const rewritten = rewriteUrl(url);
+                        traceMonthlyRequest('xhr', url, rewritten);
+                        return originalOpen.call(this, method, rewritten, ...args);
                     };
                     // Toss registers its service worker at /service-worker.js.
                     // Since this proxied document has the dashboard origin,
@@ -1141,6 +1153,8 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                         const serviceWorkerContainer = navigator.serviceWorker;
                         const originalRegister = serviceWorkerContainer.register.bind(serviceWorkerContainer);
                         const registerTossWorkerLocally = (scriptURL, options = {}) => {
+                            const requestedScriptURL = String(scriptURL);
+                            let requestedScope = options.scope || '(default)';
                             try {
                                 const workerUrl = new URL(String(scriptURL), document.baseURI);
                                 if (workerUrl.hostname === 'www.tossinvest.com' && workerUrl.pathname === '/service-worker.js') {
@@ -1155,7 +1169,20 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                                 }
                                 options = rewrittenOptions;
                             } catch (_) {}
-                            return originalRegister(scriptURL, options);
+                            const registration = originalRegister(scriptURL, options);
+                            if (/service-worker\.js/i.test(requestedScriptURL)) {
+                                console.info('[TossCalendarTrace] service worker registration requested', {
+                                    requestedScriptURL,
+                                    requestedScope,
+                                    rewrittenScriptURL: String(scriptURL),
+                                    rewrittenScope: options.scope || '(default)'
+                                });
+                                registration.then(
+                                    result => console.info('[TossCalendarTrace] service worker registered', result.scope),
+                                    error => console.error('[TossCalendarTrace] service worker registration failed', error)
+                                );
+                            }
+                            return registration;
                         };
                         try {
                             Object.defineProperty(serviceWorkerContainer, 'register', {
