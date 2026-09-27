@@ -1081,7 +1081,7 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     const originalFetch = window.fetch.bind(window);
                     const traceMonthlyRequest = (transport, originalUrl, rewrittenUrl) => {
                         try {
-                            if (/calendar\/monthly/i.test(String(originalUrl)) || /calendar\/monthly/i.test(String(rewrittenUrl))) {
+                            if (/calendar\\/monthly/i.test(String(originalUrl)) || /calendar\\/monthly/i.test(String(rewrittenUrl))) {
                                 console.info('[TossCalendarTrace] monthly request', { transport, originalUrl: String(originalUrl), rewrittenUrl: String(rewrittenUrl) });
                             }
                         } catch (_) {}
