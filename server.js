@@ -1235,7 +1235,10 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
             </script>`;
             // Resolve Toss's relative resources on Toss, and install same-origin
             // History wrappers before the Next.js router initializes.
-            html = html.replace(/<head([^>]*)>/i, `<head$1>${calendarProxyBootstrap}`);
+            html = html.replace(
+                /<head([^>]*)>/i,
+                `<head$1><style id="kiwoom-calendar-view-toggle-fix">[role="radiogroup"]:has(button[value="MONTH"]){position:sticky!important;right:8px!important;z-index:20!important}</style>${calendarProxyBootstrap}`
+            );
             // The PWA manifest is not needed in the embedded calendar. Removing
             // it avoids a cross-origin manifest fetch under the Toss <base> URL.
             html = html.replace(/<link\b(?=[^>]*\brel=["']manifest["'])[^>]*>/gi, '');
