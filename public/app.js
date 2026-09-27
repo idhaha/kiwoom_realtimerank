@@ -1228,15 +1228,17 @@ function getSerializedState(sourceData = null) {
     const activeContent = document.querySelector('.tab-content.active');
     const activeTabId = activeContent ? activeContent.id : (capturedTabs.length > 0 ? capturedTabs[0].id : PERM_TAB_ID);
 
-    let memoHtml = '';
+    // General application saves must use the last explicitly saved memo,
+    // never the editor's potentially unsaved draft.
+    const memoHtml = localStorage.getItem('memoContent_html') || '';
     let memoDelta = null;
-    if (quillEditor) {
-        memoHtml = quillEditor.root.innerHTML;
-        memoDelta = quillEditor.getContents();
-    } else {
-        memoHtml = localStorage.getItem('memoContent_html') || '';
-        const savedDelta = localStorage.getItem('memoContent_delta');
-        if (savedDelta) memoDelta = JSON.parse(savedDelta);
+    const savedDelta = localStorage.getItem('memoContent_delta');
+    if (savedDelta) {
+        try {
+            memoDelta = JSON.parse(savedDelta);
+        } catch (error) {
+            console.warn('[Memo] Ignoring invalid locally saved Delta:', error);
+        }
     }
 
     const watchlistInput = document.getElementById('watchlistGroupNameInput');
@@ -1418,20 +1420,7 @@ function applyData(data) {
             activateTab(targetId);
         }
 
-        // Restore Memo content from server data
-        if (data.memoHtml || data.memoDelta) {
-            console.log("📝 [applyData] Restoring Memo from server data...");
-            if (data.memoHtml) localStorage.setItem('memoContent_html', data.memoHtml);
-            if (data.memoDelta) localStorage.setItem('memoContent_delta', typeof data.memoDelta === 'string' ? data.memoDelta : JSON.stringify(data.memoDelta));
-
-            if (quillEditor) {
-                if (data.memoDelta) {
-                    quillEditor.setContents(data.memoDelta);
-                } else if (data.memoHtml) {
-                    quillEditor.root.innerHTML = data.memoHtml;
-                }
-            }
-        }
+        applyMemoState(data);
 
         // Restore Watchlist Group ID
         if (data.watchlistGroupId) {
@@ -1467,6 +1456,49 @@ function applyData(data) {
             }
         }, 500);
     }
+}
+
+function applyMemoState(data) {
+    if (!data || (!Object.prototype.hasOwnProperty.call(data, 'memoHtml') && !Object.prototype.hasOwnProperty.call(data, 'memoDelta'))) {
+        return false;
+    }
+
+    const html = typeof data.memoHtml === 'string' ? data.memoHtml : '';
+    let delta = data.memoDelta;
+    if (typeof delta === 'string') {
+        try { delta = JSON.parse(delta); } catch { delta = null; }
+    }
+    if (!delta || !Array.isArray(delta.ops)) delta = null;
+
+    localStorage.setItem('memoContent_html', html);
+    if (delta) localStorage.setItem('memoContent_delta', JSON.stringify(delta));
+    else localStorage.removeItem('memoContent_delta');
+
+    if (quillEditor) {
+        if (delta) quillEditor.setContents(delta);
+        else if (html) quillEditor.root.innerHTML = html;
+        else quillEditor.setText('');
+    }
+    return true;
+}
+
+async function saveMemoToServer(memoHtml, memoDelta) {
+    const snapshot = getSerializedState();
+    snapshot.memoHtml = memoHtml;
+    snapshot.memoDelta = memoDelta;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+
+    const response = await fetch('/api/settings/memo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memoHtml, memoDelta, initialSettings: snapshot })
+    });
+    if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || `Server responded with ${response.status}`);
+    }
+    const result = await response.json();
+    if (!result.success) throw new Error(result.error || '메모 저장에 실패했습니다.');
 }
 
 function resetDynamicTabs() {
@@ -5504,15 +5536,8 @@ function applyFullStateBackup(data) {
     }
 
     // 5. 메모 복구
-    if (quillEditor) {
-        if (data.memoDelta) {
-            quillEditor.setContents(data.memoDelta);
-        } else if (data.memoHtml) {
-            quillEditor.root.innerHTML = data.memoHtml;
-        }
-    }
-    if (data.memoHtml) localStorage.setItem('memoContent_html', data.memoHtml);
-    if (data.memoDelta) localStorage.setItem('memoContent_delta', JSON.stringify(data.memoDelta));
+    const backupHasMemo = Object.prototype.hasOwnProperty.call(data, 'memoHtml') || Object.prototype.hasOwnProperty.call(data, 'memoDelta');
+    if (backupHasMemo) applyMemoState(data);
 
     // 5.1 관심종목 그룹 복구
     if (data.watchlistGroupId) {
@@ -5538,8 +5563,16 @@ function applyFullStateBackup(data) {
         }
     }
 
-    // 6. 데이터 저장 및 서버와 동기화
+    // 6. 설정 저장과 메모 저장은 서버에서 별도 경로로 처리
     saveAppData();
+    if (backupHasMemo) {
+        let restoredDelta = data.memoDelta;
+        if (typeof restoredDelta === 'string') {
+            try { restoredDelta = JSON.parse(restoredDelta); } catch { restoredDelta = null; }
+        }
+        saveMemoToServer(typeof data.memoHtml === 'string' ? data.memoHtml : '', restoredDelta)
+            .catch(error => console.error('❌ [Restore] Memo server save failed:', error));
+    }
 
     // 7. 활성 탭 전환
     const targetTabId = data.activeTabId || PERM_TAB_ID;
@@ -5831,7 +5864,7 @@ function initMemoEditor() {
             });
         }
 
-        // Wire Refresh Button – fetch latest memo from server
+        // Load only the saved memo from the server; do not re-apply all app settings.
         const refreshBtn = document.getElementById('memoRefreshBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', async () => {
@@ -5840,16 +5873,15 @@ function initMemoEditor() {
                 refreshBtn.disabled = true;
                 try {
                     const serverData = await loadAppDataFromServer();
-                    if (serverData) {
-                        applyData(serverData);
-                        if (statusEl) statusEl.textContent = '새로고침 완료 ✓';
-                        console.log("🔄 [Memo] Refreshed from server");
+                    if (applyMemoState(serverData)) {
+                        if (statusEl) statusEl.textContent = '서버에서 불러오기 완료 ✓';
+                        console.log("📥 [Memo] Loaded saved memo from server");
                     } else {
-                        if (statusEl) statusEl.textContent = '서버 데이터 없음';
+                        if (statusEl) statusEl.textContent = '서버에 저장된 메모가 없습니다.';
                     }
                 } catch (e) {
-                    if (statusEl) statusEl.textContent = '새로고침 실패 ✗';
-                    console.error("❌ [Memo] Refresh failed:", e);
+                    if (statusEl) statusEl.textContent = '서버에서 불러오기 실패 ✗';
+                    console.error("❌ [Memo] Server load failed:", e);
                 } finally {
                     refreshBtn.disabled = false;
                     setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
@@ -5904,7 +5936,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-function saveMemo() {
+async function saveMemo() {
     if (!quillEditor) return;
     const content = quillEditor.getContents();
     const html = quillEditor.root.innerHTML;
@@ -5913,15 +5945,24 @@ function saveMemo() {
     localStorage.setItem('memoContent_delta', JSON.stringify(content));
 
     const status = document.getElementById('memoStatus');
-    if (status) {
-        status.textContent = '✅ 저장됨 (서버 동기화 중...)';
-        setTimeout(() => {
-            status.textContent = '';
-        }, 2000);
-    }
+    const saveBtn = document.getElementById('memoSaveBtn');
+    if (saveBtn) saveBtn.disabled = true;
+    if (status) status.textContent = '서버로 저장 중...';
 
-    console.log('💾 메모 로컬 저장 완료 -> 서버 동기화 시작');
-    saveAppData(); // Trigger server sync
+    try {
+        await saveMemoToServer(html, content);
+        if (status) status.textContent = '서버 저장 완료 ✓';
+        console.log('💾 [Memo] Explicit server save completed');
+    } catch (error) {
+        if (status) status.textContent = '서버 저장 실패 ✗';
+        console.error('❌ [Memo] Server save failed; local copy retained:', error);
+        alert(`메모를 서버에 저장하지 못했습니다. 이 브라우저에는 임시 보관했습니다.\n${error.message}`);
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+        setTimeout(() => {
+            if (status) status.textContent = '';
+        }, 3000);
+    }
 }
 
 function saveMemoAuto() {

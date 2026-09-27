@@ -1,8 +1,8 @@
 # 키움 실시간 랭킹 시스템 사양서 (System Specification)
 
-> **문서 버전**: v1.0.0  
+> **문서 버전**: v1.0.1  
 > **최초 작성일**: 2026-09-26  
-> **최근 업데이트**: 2026-09-26  
+> **최근 업데이트**: 2026-09-27  
 > **대상 시스템**: 키움증권 실시간 종목 순위 및 종합 대시보드 웹서비스 (`kiwoom_realtimerank`)
 
 ---
@@ -24,7 +24,7 @@
    - 1.1 Rank 탭 (실시간 순위 / 거래대금 / 대주 / 관심종목 하락률) *(작성 완료)*
    - 1.2 ADR 탭 (KOSPI / KOSDAQ 등락비율 차트) *(작성 완료)*
    - 1.3 메모 탭 (Google Calendar 연동 & Rich Text Memo) *(작성 완료)*
-   - 1.4 증시캘린더 탭 (실적 발표 및 글로벌 경제 캘린더) *(작성 완료)*
+   - 1.4 증시캘린더 탭 (토스증권 캘린더 임베드, 일정 및 AI 요약) *(작성 완료)*
 2. **동적/실시간 탭 (Dynamic Tabs) 통합 상세 사양** *(작성 완료)*
    - 2.1 종류 및 탭 생명주기
    - 2.2 기본 차트 그리드 조작
@@ -439,14 +439,18 @@ flowchart TD
 ### 1.4.1 개요
 * **탭 식별자**: `tab_earnings` (`EARNINGS_TAB_ID`)
 * **탭 명칭**: `증시캘린더` (고정)
-* **목적**: 국내(KR) 및 미국(US) 주요 기업의 실적 발표(Earnings), 통화정책 회의(FOMC/금통위), 고용/물가 지표(CPI, NFP 등) 글로벌 주요 증시 이벤트를 실시간 인터랙티브 위젯과 원클릭 외부 전문 서비스 연동으로 모니터링.
+* **목적**: 토스증권 캘린더를 탭 안에 표시해 국내·해외 경제 일정과 기업 실적 일정을 주별 또는 월별로 확인하고, 주간 AI 요약을 조회한다.
+* **데이터 출처**: 토스증권 웹 페이지 및 토스증권 캘린더 API. Rank/ADR의 키움·한국투자증권 시세 API와는 별도 경로다.
 
 ```mermaid
 flowchart LR
-    EarningsTab["증시캘린더 탭 (tab_earnings)"]
-    EarningsTab --> TVWidget["TradingView 경제 캘린더 임베드<br/>(kr.tradingview.com/embed-widget/events)"]
+    EarningsTab["증시캘린더 탭 (tab_earnings)"] --> Iframe["같은 출처 iframe (/calendar)"]
+    Iframe --> Page["토스증권 /calendar HTML 및 정적 리소스"]
+    Iframe --> MonthlyAPI["월별 일정 API (POST)"]
+    Iframe --> SummaryAPI["주간 AI 요약 API (GET)"]
+    Iframe --> ImageProxy["이미지/아이콘 프록시"]
     EarningsTab --> TossBtn["토스 증권 캘린더 새 창<br/>(tossinvest.com/calendar)"]
-    EarningsTab --> Refresh["안전 iframe 새로고침 핸들러<br/>(about:blank 버퍼링)"]
+    EarningsTab --> Refresh["iframe 새로고침"]
 ```
 
 ---
@@ -455,55 +459,77 @@ flowchart LR
 
 | 영역 | 컴포넌트 ID / 클래스 | 유형 | 기능 설명 |
 | :--- | :--- | :--- | :--- |
-| **상단 헤더** | `#tab_earnings header` | Header | '증시캘린더' 타이틀, [토스 캘린더 ↗] 링크 버튼, [새로고침] 버튼, 상태 표시줄 |
-| **토스 캘린더 링크**| `button[onclick]` | `<button>` | `https://www.tossinvest.com/calendar`를 새 창(`_blank`)으로 열기 |
-| **새로고침 버튼** | `#refreshEarnings_tab_earnings` | `<button>` | 임베디드 토스 캘린더 프록시 iframe을 깜빡임 없이 안전하게 리로드 |
-| **상태 표시줄** | `#earningsLastUpdate_*`, `#earningsStatusText_*` | `<span>` | 최근 갱신 시각 및 처리 상태 표기 |
-| **위젯 컨테이너** | `.overseas-content-scroll` | Div | 반응형 전체 높이 100% 스크롤 래퍼 (`.full-tab`) |
-| **토스 캘린더 iframe**| `#iframeEarnings_tab_earnings` | `<iframe>` | `/api/toss_calendar`를 통해 토스증권 캘린더 페이지 표시 |
+| **상단 헤더** | `#tab_earnings header` | Header | 증시캘린더 제목, 토스 캘린더 외부 열기, 새로고침, 상태 표시 |
+| **토스 캘린더 링크** | `button[onclick]` | `<button>` | `https://www.tossinvest.com/calendar`를 새 창으로 연다. |
+| **새로고침 버튼** | `#refreshEarnings_tab_earnings` | `<button>` | 캘린더 iframe을 다시 로드한다. |
+| **상태 표시줄** | `#earningsLastUpdate_tab_earnings`, `#earningsStatusText_tab_earnings` | `<span>` | 초기 `-`, `대기 중...` 표시. 새로고침 후 상태와 시각을 표시한다. |
+| **iframe 컨테이너** | `.overseas-content-scroll` | Div | 남은 탭 높이를 사용하며 iframe 영역에서 자체 스크롤을 허용하지 않는다. |
+| **캘린더 iframe** | `#iframeEarnings_tab_earnings` | `<iframe>` | 같은 출처의 `/calendar`를 열어 토스 캘린더 화면을 표시한다. |
+| **월 이동** | 캘린더 내 이전/다음 월 버튼 | `<button>` | 표시 월을 앞뒤로 이동한다. |
+| **날짜 달력** | 토스 캘린더 내부 달력 | `<button>` | 이벤트가 있는 날짜를 선택한다. 토스 화면 규칙에 따라 일요일은 표시하지 않는다. |
+| **일정 유형 필터** | 토스 캘린더 내부 라디오 그룹 | Radio 버튼 | 전체/경제지표/실적 유형으로 필터링한다. |
+| **지역 필터** | 토스 캘린더 내부 라디오 그룹 | Radio 버튼 | 전체/국내/해외 일정으로 필터링한다. |
+| **보기 모드** | 주별/월별 선택 그룹 | Radio 버튼 | 주별 목록 또는 월별 그리드로 일정을 표시한다. 좁은 화면에서도 모드 전환 버튼은 스크롤 영역 오른쪽에 고정한다. |
+| **일정 목록/그리드** | 토스 캘린더 내부 콘텐츠 | 목록/그리드 | 주별 목록은 날짜·일정·발표·예측·이전 값을 표시하고, 월별 보기에서는 날짜별 일정을 표시한다. |
+| **주간 AI 요약** | 토스 캘린더 내부 카드 | 요약 카드 | 주간 요약 제목과 내용, 자세히 보기 링크를 표시한다. |
 
 ---
 
 ### 1.4.3 임베디드 위젯 및 연동 사양
 
-1. **토스 캘린더 프록시**:
-   - iframe은 같은 출처의 `/api/toss_calendar`를 요청한다.
-   - Express 서버가 `https://www.tossinvest.com/calendar`를 User-Agent 및 한국어 Accept-Language 헤더와 함께 10초 제한으로 가져와 HTML로 반환한다.
-   - 프록시는 `<head>`에 `https://www.tossinvest.com/`를 가리키는 `<base>`와 요청 주소 변환 스크립트를 삽입한다. 정적 리소스는 토스 도메인에서 로드하며, 토스 도메인으로 향하는 요청과 iframe의 현재 출처 기준 루트 상대 `fetch`/XHR은 `/api/toss_calendar_proxy`를 경유한다.
-   - API 프록시는 HTTPS의 `*.tossinvest.com` 및 `*.toss.im` 호스트만 허용하고 최대 15초, 응답 최대 20MB로 제한한다. 요청 원문 호스트의 Origin/Referer와 브라우저 User-Agent/Accept 정보를 전달한다. 프록시 응답에는 토스 원본 HTTP 상태와 콘텐츠 형식 진단 헤더를 붙이고, 실패 시 원인을 제한된 문자열의 오류 헤더 및 서버 로그에 남긴다.
-   - 원격 HTML 구조가 달라지거나 API가 다른 도메인을 사용하고 브라우저 CORS를 허용하지 않는 경우, 로그인이 필요한 데이터/API, 브라우저 쿠키를 요구하는 기능은 표시가 완전하지 않을 수 있다.
-2. **iframe 보안 및 샌드박스 정책**:
+1. **캘린더 페이지 로드**:
+   - iframe은 같은 출처의 `/calendar`를 연다. `/api/toss_calendar`는 동일 HTML 프록시의 호환 경로다.
+   - Express 서버가 `https://www.tossinvest.com/calendar`를 User-Agent 및 한국어 Accept-Language 헤더와 함께 10초 제한으로 가져온다.
+   - HTML `<head>`에 토스 도메인을 기준으로 하는 `<base>`와 URL 변환 스크립트를 삽입한다. 스크립트는 fetch/XHR, History API, 서비스 워커 등록 및 이미지 `src`/`srcset`을 임베드 출처와 호환되게 조정한다.
+   - 캘린더 페이지 JavaScript 번들은 같은 출처의 `/assets/v2/_next/static/chunks/` 경로로 전달한다. 서비스 워커 및 워커 청크도 같은 출처 프록시 경로로 제공한다. PWA manifest 링크는 임베드 화면에서 제거한다.
+2. **월별 일정 데이터**:
+   - 원본 API: `POST https://wts-cert-api.tossinvest.com/api/v4/calendar/monthly/YYYY-MM`.
+   - 표시 월 및 인접 월의 데이터는 `/api/toss_calendar_proxy`를 통해 전달한다. 현재 구현은 표시 월을 포함해 전후 3개월씩 총 7개월 데이터를 요청한다.
+   - 요청 본문은 `{}`이며, 프록시 JSON의 `result` 객체(그 안의 `events` 배열)를 캘린더 쿼리 결과로 사용한다.
+3. **주간 AI 요약**:
+   - 원본 API: `GET https://wts-cert-api.tossinvest.com/api/v1/nova-calendar/ai/summary/weekly`.
+   - `/api/toss_calendar_proxy`를 통해 받은 JSON의 `result` 객체를 사용해 요약 카드 제목과 내용을 표시한다. 자세히 보기의 추가 자료 로딩은 토스 캘린더 내부 동작에 따른다.
+4. **정적 리소스 및 이미지**:
+   - 프록시는 HTTPS `*.tossinvest.com` 및 `*.toss.im` 호스트만 허용한다. API 프록시는 타임아웃 15초, 응답 최대 20MB로 제한한다.
+   - 요청의 User-Agent/Accept 계열 헤더와 토스 Origin/Referer를 전달한다. 원본 상태/콘텐츠 형식 진단 헤더를 제공하고, 실패 원인은 제한된 문자열의 오류 헤더 및 서버 로그에 남긴다.
+   - 달력 이미지·아이콘은 같은 출처 프록시를 거쳐 브라우저의 외부 이미지 응답 차단을 피한다.
+5. **iframe 보안 및 샌드박스 정책**:
    - `allow`: `"clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share"`
    - `sandbox`: `"allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation"`
    - 스크립트·동일 출처 요청·폼·팝업 등을 허용한다. 원격 사이트와 브라우저 정책에 따라 일부 동작은 제한될 수 있다.
-3. **토스 캘린더 연동**:
-   - 상단 헤더의 `토스 캘린더 ↗` 버튼은 원본 `https://www.tossinvest.com/calendar`를 새 창으로 연다. 본문 iframe의 기본 화면도 토스 캘린더다.
+6. **토스 캘린더 직접 열기**:
+   - 상단 `토스 캘린더 ↗` 버튼은 원본 `https://www.tossinvest.com/calendar`를 새 창으로 연다. iframe 프록시 화면과 독립된 직접 연결이다.
 
 ---
 
 ### 1.4.4 새로고침 워크플로우 (`refreshEarningsTab`)
 
-1. 사용자가 상단 [새로고침] 버튼 클릭 또는 전체 새로고침(`refreshAllTabs`) 시 호출.
-2. **안전 버퍼링 리로드 기법 (Blink-Free Safe Reload)**:
+1. 상단 [새로고침]을 클릭하면 `refreshEarningsTab(tabId)`가 호출된다. 전체 새로고침 경로에서도 이 함수를 호출할 수 있다.
+2. 캡처 모드가 아니면 현재 iframe URL을 보관한 뒤 `about:blank`로 바꾸고 100ms 후 원래 URL을 다시 지정한다.
    ```javascript
    const currentSrc = iframe.src;
-   iframe.src = 'about:blank'; // 메모리 및 연결 초기화
+    iframe.src = 'about:blank';
    setTimeout(() => {
-       iframe.src = currentSrc; // 원래 URL 재할당으로 깨끗한 리로드
+        iframe.src = currentSrc;
        statusText.textContent = '새로고침 완료';
        lastUpdate.textContent = formatTime(new Date());
    }, 100);
    ```
-3. 상태 텍스트 '새로고침 완료' 및 마지막 갱신 일시 갱신.
+3. 원래 URL을 다시 지정한 시점에 상태를 `새로고침 완료`로 바꾸고 마지막 갱신 시각을 기록한다. 상태 표시줄은 원격 API가 모든 데이터를 성공적으로 가져왔는지 검증하지 않는다.
 
 ---
 
 ### 1.4.5 제약 사항 및 예외 처리 (Constraints & Fallbacks)
 
-1. **화면 캡처 중 조작 방어**:
-   - 전체 탭 캡처(`isCapturing === true`) 도중에는 iframe 새로고침을 스킵하여 캡처 이미지 내 빈 화면(`about:blank`)이 찍히는 현상을 원천 방지.
-2. **반응형 높이 유지**:
-   - CSS `.full-tab` 클래스를 통해 부모 컨테이너의 잔여 높이를 100% 차지하도록 설계하여 디스플레이 해상도에 따른 잘림 방지.
+1. **외부 서비스 의존**: 일정과 AI 요약은 토스증권 페이지/API 가용성, 응답 형식, 도메인 및 번들 구조 변경에 의존한다. 페이지 구조나 번들 식별 문자열이 바뀌면 요청 우회가 적용되지 않아 콘텐츠가 비어 있을 수 있다.
+2. **호스트 제한**: 프록시는 HTTPS `tossinvest.com` 및 `toss.im` 하위 호스트만 허용한다. 토스가 다른 도메인으로 API·이미지를 옮기면 URL 변환 및 허용 범위를 갱신해야 한다.
+3. **인증 및 원격 정책**: 직접 새 창에서는 정상인 기능도 iframe 샌드박스, 브라우저 보안/CORS/CORP 정책, 로그인·쿠키 요구에 따라 임베드 화면에서 다르게 동작할 수 있다.
+4. **캡처 중 새로고침 제한**: `isCapturing === true`이면 iframe 새로고침을 실행하지 않고 콘솔에 기록한다.
+5. **새로고침 중 빈 프레임**: 약 100ms 동안 iframe이 `about:blank`로 바뀐다. 이 동안 프레임이 비어 보일 수 있고 완료 상태는 원격 데이터 검증이 아닌 URL 재할당 시점에 갱신된다.
+6. **좁은 화면**: 월별 그리드 콘텐츠가 iframe보다 넓으면 캘린더 내부 가로 스크롤이 생길 수 있다. 주별/월별 선택 그룹은 스크롤 영역 오른쪽에 고정해 모드 전환에 접근하도록 한다.
+7. **날짜 및 이벤트 가용성**: 일요일은 달력에서 제외된다. 날짜 선택 가능 여부와 일정 내용은 토스 API가 제공하는 이벤트에 따른다. AI 요약은 토스의 주간 요약 API가 제공하는 자료에 의존한다.
+
+> **검증 메모 (2026-09-27)**: 토스 원본 캘린더와 임베드 화면을 비교하고, 주별 일정, 월별 보기 전환, 주간 AI 요약 표시 및 프록시 응답을 확인했다. 구현 대조 파일은 `public/app.js`와 `server.js`다.
 
 ---
 

@@ -1890,13 +1890,54 @@ app.get('/api/settings', (req, res) => {
 app.post('/api/settings', (req, res) => {
     console.log(`📤 POST /api/settings 요청됨 (Body Size: ${JSON.stringify(req.body).length})`);
     try {
-        const settings = req.body;
+        const settings = { ...(req.body || {}) };
+        let savedSettings = null;
+        if (fs.existsSync(SETTINGS_FILE)) {
+            savedSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+        }
+
+        // Routine settings saves must never replace the last explicitly saved memo.
+        for (const key of ['memoHtml', 'memoDelta']) {
+            if (savedSettings && Object.prototype.hasOwnProperty.call(savedSettings, key)) {
+                settings[key] = savedSettings[key];
+            } else {
+                delete settings[key];
+            }
+        }
         fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
         res.json({ success: true });
         console.log("✅ 설정 저장 완료");
     } catch (error) {
         console.error("❌ 설정 저장 에러:", error.message);
         res.status(500).json({ error: "설정을 저장하는데 실패했습니다." });
+    }
+});
+
+app.post('/api/settings/memo', (req, res) => {
+    try {
+        const { memoHtml, memoDelta, initialSettings } = req.body || {};
+        if (typeof memoHtml !== 'string' || (memoDelta !== null && typeof memoDelta !== 'object')) {
+            return res.status(400).json({ success: false, error: 'memoHtml 문자열과 memoDelta 객체가 필요합니다.' });
+        }
+
+        let settings = null;
+        if (fs.existsSync(SETTINGS_FILE)) {
+            settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+        } else if (initialSettings && typeof initialSettings === 'object' && !Array.isArray(initialSettings)) {
+            // Seed the first server snapshot so the memo is available on other devices too.
+            settings = { ...initialSettings };
+        } else {
+            settings = {};
+        }
+
+        settings.memoHtml = memoHtml;
+        settings.memoDelta = memoDelta;
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+        console.log('✅ 메모 서버 저장 완료');
+        res.json({ success: true });
+    } catch (error) {
+        console.error('❌ 메모 서버 저장 에러:', error.message);
+        res.status(500).json({ success: false, error: '메모를 서버에 저장하지 못했습니다.' });
     }
 });
 
