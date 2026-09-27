@@ -1,6 +1,6 @@
 # 키움 실시간 랭킹 시스템 사양서 (System Specification)
 
-> **문서 버전**: v1.0.2  
+> **문서 버전**: v1.0.5  
 > **최초 작성일**: 2026-09-26  
 > **최근 업데이트**: 2026-09-27  
 > **대상 시스템**: 키움증권 실시간 종목 순위 및 종합 대시보드 웹서비스 (`kiwoom_realtimerank`)
@@ -102,44 +102,61 @@ flowchart TD
   - `stex_tp`: 거래소 구분 (`1`: KRX, `2`: NXT, `3`: 통합) — 기본값: `3` (통합)
 * **연동 원천 API**: 키움증권 `ka10032` (전일동시간대비거래대금상위요청)
   - 엔드포인트: `POST https://api.kiwoom.com/api/dostk/rkinfo`
-  - 고정 파라미터: `mang_stk_incls: "0"` (관리종목 제외)
+  - 요청 본문: `mrkt_tp` (화면의 시장 선택값), `stex_tp` (화면의 거래소 선택값), `mang_stk_incls: "0"` (관리종목 제외)
+  - 요청 헤더: `Content-Type: application/json`, `Authorization: Bearer <access_token>`, `api-id: ka10032`
+  - 제한 시간: 5초
+* **인증**: 키움 앱 키/시크릿으로 `POST https://api.kiwoom.com/oauth2/token`에 `appkey`, `secretkey`, `grant_type: "client_credentials"`를 보내 토큰을 발급한다. 발급 토큰은 캐시되며 만료 5분 전까지 재사용한다. API 키는 서버 환경변수에서 읽는다.
+* **응답 원천 및 시장 분류 보정**:
+  - `ka10032` 응답의 `trde_prica_upper` 배열을 사용하며, 응답이 없을 때 `output` 배열을 대체 필드로 확인한다. 개별 종목 항목에서 순위(`rank`), 종목코드(`stk_cd`), 종목명(`stk_nm` 등), 등락률(`flu_rt`), 거래대금(`trde_prica`)을 읽는다.
+  - 종목코드 끝의 `_AL`을 제거한 값을 사용해 `POST https://api.kiwoom.com/api/dostk/stkinfo`의 `ka10100` (주식기본정보)을 조회한다. 요청 본문은 `{ "stk_cd": "<종목코드>" }`, 헤더는 `Content-Type: application/json`, `Authorization: Bearer <access_token>`, `api-id: ka10100`, 제한 시간은 3초다.
+  - `ka10100` 응답의 `marketCode`가 `0`(KOSPI) 또는 `10`(KOSDAQ)인 종목만 남긴다. `marketName`에 `거래소`가 포함되거나 값이 `KOSPI`이면 표시 시장을 `K`, 그 외 통과 종목은 기본 시장값(`K`/`Q`)을 사용한다. 시장 정보는 종목코드별 서버 메모리 캐시에 보관한다.
+  - 종목명이 `KODEX` 또는 `TIGER`로 시작하면 `ka10100` 조회 전에 제외한다. 시장 코드가 허용 목록 밖이면 결과에서도 제외한다. `ka10100` 호출이 실패하면 이름 필터만 적용하고 기존 기본 시장값으로 계속 처리한다.
+  - 시장 캐시가 없는 종목은 순차적으로 기본정보를 확인하며, 종목 처리 사이에 100ms 지연을 둔다.
+* **백엔드 응답 매핑**: 원본 항목을 유지하면서 `mkt_type`에 시장 라벨, `fluc_rt`에 `flu_rt`, `trde_amt`에 `trde_prica`를 추가한다. 이후 쏠림율 계산값도 각 항목에 추가해 브라우저로 반환한다.
 * **표시 컬럼 및 포맷팅**:
   1. **순위 (`rank`)**: 정수 순위 표기
   2. **시장 (`market-type`)**: `mkt_type` 기반 (K: KOSPI, Q: KOSDAQ, ETF 등 뱃지)
   3. **종목명 (`stk_nm` / `isu_nm`)**: 텍스트
   4. **등락률 (`fluc_rt`)**: 부호(`+`, `-`) 포함 소수점 2자리 표기 (양수: 빨강 `price-up`, 음수: 파랑 `price-down`, 0: 회색)
   5. **거래대금 (`trde_amt` / `acml_tr_pbmn`)**: 단위 백만원. 원 단위 수치인 경우 `Math.round(num / 1,000,000)`로 절사 포맷팅.
+  6. **쏠림율 (`concentration_rate`)**: 종목 거래대금 ÷ 해당 시장 전체 거래대금 × 100. 시장 전체 거래대금은 키움 `ka20001` (`POST https://api.kiwoom.com/api/dostk/sect`) 응답의 `trde_prica`를 사용한다. 요청 헤더는 `Content-Type: application/json`, `Authorization: Bearer <access_token>`, `api-id: ka20001`; 본문은 시장별로 KOSPI `{ mrkt_tp: "0", inds_cd: "001" }`, KOSDAQ `{ mrkt_tp: "1", inds_cd: "101" }`이다. 한 번의 순위 조회에서 결과에 포함된 각 시장을 최대 1회 조회하며 제한 시간은 5초다. 종목별 거래대금(`trde_prica`, 없으면 `trde_amt`)으로 비율을 계산하고 가장 가까운 정수로 반올림해 `%`와 함께 표시한다. 시장 거래대금 조회 실패 또는 유효하지 않은 거래대금이면 `-`를 표시하고 나머지 순위 데이터는 유지한다.
 * **출력 제한**: 상위 20개 항목 (`slice(0, 20)`)
 
 #### [패널 2] 실시간 조회 순위 [키움]
-* **연동 백엔드 API**: `GET /api/data?qry_tp={qry_tp}`
-* **요청 쿼리 파라미터**: `qry_tp` (1: 30초, 2: 1분, 3: 10분, 4: 1시간, 5: 당일누적)
+* **연동 백엔드 API**: `GET /api/stock?qry_tp={qry_tp}`. 패널 3의 eFriend 조회도 같은 요청에서 함께 수행한다.
+* **요청 쿼리 파라미터**: `qry_tp` (1: 30초, 2: 1분, 3: 10분, 4: 1시간, 5: 당일누적). 값은 Rank 갱신 주기 선택 메뉴에서 전달한다.
+* **공통 키움 인증**: 1.1.3 패널 1의 키움 토큰 발급 절차를 사용한다. 아래 키움 요청은 `Content-Type: application/json`, `Authorization: Bearer <access_token>`, `api-id` 헤더를 보낸다.
 * **연동 원천 API 파이프라인**:
-  1. `ka00198` (실시간종목조회순위): `POST https://api.kiwoom.com/api/dostk/stkinfo`
-  2. `ka10100` (주식기본정보): 시장코드(`marketCode`) 확인 (`0`: KOSPI, `10`: KOSDAQ만 통과, ETF/ETN 필터링)
-  3. `ka10007` (시세표성정보): 당일 누적 거래대금(`trde_prica`, 백만 단위) 보강
+  1. `ka00198` (실시간종목조회순위): `POST https://api.kiwoom.com/api/dostk/stkinfo`, 제한 시간 5초. 요청 본문은 `qry_tp`(화면에서 받은 값), `mrkt_tp: "000"`, `sort_tp: "1"`, `trde_qty_tp: "0000"`, `stk_cnd: "0"`, `crd_cnd: "0"`, `stex_tp: "1"`이다. `api-id: ka00198`을 보낸다. 응답의 `item_inq_rank` 배열을 순위 원본으로 사용한다.
+  2. `ka10100` (주식기본정보)로 시장을 보강한다: `POST https://api.kiwoom.com/api/dostk/stkinfo`, 본문 `{ "stk_cd": "<원본 종목코드>" }`, `api-id: ka10100`, 제한 시간 3초. 응답 `marketCode`가 `0` 또는 `10`인 종목만 통과시키고, `marketName`에 `거래소`가 포함되거나 값이 `KOSPI`이면 K, 그 외 통과 종목은 기본값 Q로 표시한다. 시장 정보는 서버 메모리의 종목코드 캐시를 우선 사용한다.
+  3. `ka10007` (시세표성정보)로 종목별 누적 거래대금을 보강한다: `POST https://api.kiwoom.com/api/dostk/mrkcond`, 본문 `{ "stk_cd": "<원본 종목코드>_AL" }`, `api-id: ka10007`, 제한 시간 3초. 응답 `trde_prica`를 백만원 단위 정수로 읽어 `trde_amt`에 넣는다. 실패하면 0으로 처리한다.
+  - 이름이 `KODEX` 또는 `TIGER`로 시작하는 항목은 제외한다. 각 종목을 순차 처리하고 종목 처리 사이에 100ms 대기한다. `ka10100` 실패 시 기본 시장 Q로 계속 진행한다.
+* **서버 응답 필드**: 원본 항목에 `mkt_type`, `trde_amt`를 추가한다. `mkt_type`은 K/Q, `trde_amt`는 `ka10007.trde_prica`에서 가져온 백만원 단위 값이다.
 * **표시 컬럼 및 포맷팅**:
-  1. **순위 (`bigd_rank`)**: 1~20위
+  1. **순위 (`bigd_rank`)**: 응답 순위 또는 표시 배열의 순번, 최대 20행
   2. **시장 (`mkt_type`)**: K / Q
-  3. **종목명 (`stk_nm`)**: ETF(KODEX, TIGER 등) 및 관리종목 배제된 순수 주식명
+  3. **종목명 (`stk_nm`)**: 종목명. `KODEX`/`TIGER`로 시작하는 항목은 서버 단계에서 제외한다.
   4. **등락률 (`base_comp_chgr`)**: 등락 색상 클래스 적용
   5. **거래대금 (`trde_amt`)**: 백만원 단위 표시
-* **출력 제한**: 상위 20개 항목
+* **출력 제한**: 상위 20개 항목 (`slice(0, 20)`)
 
 #### [패널 3] 대주가능 종목 [한투]
-* **연동 백엔드 API**: `GET /api/data` 응답 객체의 `data.efriend`
+* **연동 백엔드 API**: `GET /api/stock?qry_tp={qry_tp}` 응답 객체의 `data.efriend`. 이 데이터 로드는 패널 2의 Rank 요청과 함께 수행된다.
+* **인증 설정**: 서버 환경변수 `EFRIEND_DOMAIN`, `EFRIEND_APPKEY`, `EFRIEND_SECRETKEY`가 모두 있을 때 호출한다. 토큰은 `POST {EFRIEND_DOMAIN}/oauth2/tokenP`에 JSON 본문 `{ grant_type: "client_credentials", appkey, appsecret }`를 보내 발급하며, `Content-Type: application/json; charset=UTF-8`, 제한 시간 5초를 사용한다. 응답의 `access_token`을 사용하고 `expires_in`(없으면 24시간)을 기준으로 만료 5분 전까지 메모리 캐시한다.
 * **연동 원천 API 파이프라인**:
-  1. 한국투자증권 토큰 발급 (`/oauth2/tokenP`)
-  2. 대주가능 종목 페이징 조회 (`CTSC2702R`, `/uapi/domestic-stock/v1/quotations/lendable-by-company`, 최대 50페이지 순회)
-  3. 현재가/등락률 조회 (`FHKST01010100`, `/uapi/domestic-stock/v1/quotations/inquire-price`)
-* **정렬 로직**: 수신된 전체 종목 중 당일 등락률(`prdy_ctrt`) 기준 내림차순(상승률 높은 순) 정렬
+  1. 대주 가능 종목을 `GET {EFRIEND_DOMAIN}/uapi/domestic-stock/v1/quotations/lendable-by-company`로 조회한다. 헤더는 `content-type: application/json; charset=utf-8`, `authorization: Bearer <access_token>`, `appkey`, `appsecret`, `tr_id: CTSC2702R`, `custtype: P`를 보낸다. 첫 요청은 `tr_cont`를 빈 값, 이후 요청은 `Y`로 둔다. URL 쿼리 파라미터는 `EXCG_DVSN_CD=00`, `PDNO=`(빈 값), `THCO_STLN_PSBL_YN=Y`, `INQR_DVSN_1=0`, `CTX_AREA_FK200`, `CTX_AREA_NK100`이다. 제한 시간은 10초다.
+  2. 응답 `output1` 배열(없으면 `output`)을 누적한다. 응답 헤더 `tr_cont`가 `Y` 또는 `M`이고 항목이 있을 때 `ctx_area_fk200`, `ctx_area_nk100` 커서를 다음 요청에 전달한다. 최대 50페이지까지 조회하며 페이지 사이에 200ms 대기한다. 페이지 오류가 발생하면 이미 받은 항목으로 계속한다.
+  3. 각 종목에 대해 현재가를 `GET {EFRIEND_DOMAIN}/uapi/domestic-stock/v1/quotations/inquire-price`로 조회한다. 헤더는 `content-type: application/json; charset=utf-8`, `authorization: Bearer <access_token>`, `appkey`, `appsecret`, `tr_id: FHKST01010100`, `custtype: P`; 쿼리 파라미터는 `FID_COND_MRKT_DIV_CODE=J`, `FID_INPUT_ISCD=<pdno>`이다. `pdno`가 6자리이고 `5` 또는 `7`로 시작하면 조회 코드 앞에 `Q`를 붙인다. 제한 시간은 3초다.
+  4. 현재가 응답 `output.prdy_ctrt`, `output.stck_prpr`, `output.rprs_mrkt_kor_name`을 원본 대주 데이터에 병합한다. 종목 10개씩 병렬 조회하고 묶음 사이에 50ms 대기한다. 현재가 조회 실패 시 등락률은 `0.00`, 현재가는 원본 `bfdy_clpr`, 시장명은 빈 값으로 대체한다.
+* **서버 응답 및 정렬**: `output1`/`output`의 원본 필드를 유지한 종목 배열을 `data.efriend`에 반환한다. 브라우저는 `prdy_ctrt` 기준 내림차순(상승률 높은 순)으로 정렬하고 화면 순번을 부여한다.
 * **표시 컬럼 및 포맷팅**:
   1. **순위**: 1부터 순차 인덱스
-  2. **시장**: `rprs_mrkt_kor_name` 분석 후 K / Q 표기
+  2. **시장**: `rprs_mrkt_kor_name` 분석 후 K / Q 표기 (판별되지 않으면 `-`)
   3. **종목명 (`prdt_name`)**: 종목명
   4. **등락률 (`prdy_ctrt`)**: 등락 색상 적용
   5. **매매가능수량 (`trad_psbl_qty2`)**: 0 초과 시 `price-up` 하이라이트
-  6. **매매가능금액 (계산 컬럼)**: `현재가(stck_prpr) × 매매가능수량(trad_psbl_qty2)` (단위: 원, 천 단위 쉼표 표기)
+  6. **매매가능금액 (계산 컬럼)**: `현재가(stck_prpr)` 또는 `bfdy_clpr` 대체값 × `매매가능수량(trad_psbl_qty2)` (단위: 원, 천 단위 쉼표 표기)
+* **표시 범위**: 수신된 종목 전체를 등락률순으로 정렬해 표시한다. 본문 영역은 최대 높이 560px이며 초과분은 세로 스크롤한다.
 
 #### [패널 4] 관심종목 하락률 순위 (Watchlist Rapid Fall)
 * **연동 백엔드 API**:
