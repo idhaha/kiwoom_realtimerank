@@ -1145,6 +1145,44 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                         traceMonthlyRequest('xhr', url, rewritten);
                         return originalOpen.call(this, method, rewritten, ...args);
                     };
+                    // Image hosts use same-site response headers, so browsers
+                    // block their direct responses inside this cross-origin embed.
+                    // Relay image URLs through the dashboard origin as well.
+                    const rewriteImageUrl = value => {
+                        if (value == null || String(value).trim() === '') return value;
+                        const rewritten = rewriteUrl(value);
+                        return typeof rewritten === 'string' ? rewritten : value;
+                    };
+                    for (const property of ['src', 'srcset']) {
+                        const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, property);
+                        if (!descriptor || typeof descriptor.set !== 'function' || !descriptor.configurable) continue;
+                        Object.defineProperty(HTMLImageElement.prototype, property, {
+                            ...descriptor,
+                            set(value) {
+                                if (property === 'src') {
+                                    descriptor.set.call(this, rewriteImageUrl(value));
+                                    return;
+                                }
+                                const rewritten = String(value).split(',').map(candidate => {
+                                    const [url, ...size] = candidate.trim().split(/\\s+/);
+                                    return [rewriteImageUrl(url), ...size].join(' ');
+                                }).join(', ');
+                                descriptor.set.call(this, rewritten);
+                            }
+                        });
+                    }
+                    const originalSetAttribute = Element.prototype.setAttribute;
+                    Element.prototype.setAttribute = function(name, value) {
+                        if (this instanceof HTMLImageElement && String(name).toLowerCase() === 'src') {
+                            value = rewriteImageUrl(value);
+                        } else if (this instanceof HTMLImageElement && String(name).toLowerCase() === 'srcset') {
+                            value = String(value).split(',').map(candidate => {
+                                const [url, ...size] = candidate.trim().split(/\\s+/);
+                                return [rewriteImageUrl(url), ...size].join(' ');
+                            }).join(', ');
+                        }
+                        return originalSetAttribute.call(this, name, value);
+                    };
                     // Toss registers its service worker at /service-worker.js.
                     // Since this proxied document has the dashboard origin,
                     // register a same-origin relay URL instead of the Toss URL
