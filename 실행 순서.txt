@@ -11,10 +11,10 @@ taskkill /f /pid PID번호
 3. git 반영
 git checkout -b "br_oracle"
 git add .
-git commit -m "replaced stock calander to toss from investing.com-4"
-git tag -a v2.8.4 -m "replaced stock calander to toss from investing.com-4"
+git commit -m "changed the color of fixed tab"
+git tag -a v2.8.36 -m "changed the color of fixed tab"
 git push origin br_oracle
-git push origin v2.8.4
+git push origin v2.8.36
 
 4. 서버 접속
 PS D:\Program\Kiwoom> ssh -i C:\Users\yg.gb5pro\.ssh\id_rsa ubuntu@134.185.111.202 
@@ -32,5 +32,6 @@ ubuntu@instance-20260127-2105:~/kiwoom_realtimerank$ nano .env
 저장하지 않고 나가려면 Ctrl + X → N
 
 * oracle cloud 에서 파일 다운받기
-scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/kiwoom_realtimerank/server_debug.log "C:\Users\yg.gb5pro\Downloads"
+PS C:\Windows\system32> scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/kiwoom_realtimerank/server_debug.log "C:\Users\yg.gb5pro\Downloads"
+PS C:\Windows\system32> scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/kiwoom_realtimerank/user_settings.json "C:\Users\yg.gb5pro\Downloads"
 

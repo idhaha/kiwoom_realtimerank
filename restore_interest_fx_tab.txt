@@ -1,0 +1,17 @@
+[금리/환율]
+< 금리 >
+("fred('DGS10','10년')","미국채 10년물","fred('DGS2','10년')","2년물")
+/*("fred('IRLTLT01JPM156N')","일본국채 10년물")
+("fred('IRLTLT01KRM156N')","한국국채 10년물")*/
+
+("https://tradingeconomics.com/japan/government-bond-yield","일본국채 10년물","10년","https://tradingeconomics.com/japan/2-year-note-yield","2년물","10년")
+/*("https://tradingeconomics.com/japan/2-year-note-yield","일본국채 2년물","https://tradingeconomics.com/japan/government-bond-yield","10년물")*/
+/*("tradingeconomics('japan/government-bond-yield', '10년')","일본국채 10년물", "tradingeconomics('japan/2-year-note-yield', '10년')","일본국채 2년물")*/
+
+("ecos('010210000','10년')","한국채 10년물","ecos('010195000','10년')","2년물")
+
+< 환율 >
+("https://tradingeconomics.com/south-korea/currency","USD/KRW","10년")
+("https://tradingeconomics.com/china//currency","USD/CNY","10년")
+("https://tradingeconomics.com/japan/currency","USD/JPY","10년")
+("https://tradingeconomics.com/euro-area//currency","EUR/USD","10년")
