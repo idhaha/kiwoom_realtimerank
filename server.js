@@ -1330,17 +1330,22 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
             let script = Buffer.from(response.data).toString('utf8');
             const hookMarker = 'ei=()=>{let{category';
             const queryMarker = 'queryFn:()=>X.FH.post(`${J.Q.CERT}${er(t,n)}`),refetchOnWindowFocus';
-            if (script.includes(hookMarker) && script.includes(queryMarker)) {
+            const queryStatusMarker = 'i=(0,j.E)({queries:r}),s=i.map(e=>e.data);';
+            if (script.includes(hookMarker) && script.includes(queryMarker) && script.includes(queryStatusMarker)) {
                 script = script
                     .replace(hookMarker, 'ei=()=>{console.info("[TossCalendarTrace] monthly hook invoked");let{category')
                     .replace(
                         queryMarker,
-                        'queryFn:()=>{console.info("[TossCalendarTrace] monthly query function invoked",t,n);return X.FH.post(`${J.Q.CERT}${er(t,n)}`)},refetchOnWindowFocus'
+                        'queryFn:()=>{console.info("[TossCalendarTrace] monthly query function invoked",t,n);const request=X.FH.post(`${J.Q.CERT}${er(t,n)}`);request.then(result=>console.info("[TossCalendarTrace] monthly request resolved",{year:t,month:n,status:result?.status,keys:Object.keys(result||{})}),error=>console.error("[TossCalendarTrace] monthly request rejected",{year:t,month:n,message:error?.message,status:error?.response?.status}));return request},refetchOnWindowFocus'
+                    )
+                    .replace(
+                        queryStatusMarker,
+                        'i=(0,j.E)({queries:r}),s=(console.info("[TossCalendarTrace] monthly query states",i.map(query=>({status:query.status,fetchStatus:query.fetchStatus,error:query.error?.message}))),i.map(e=>e.data));'
                     );
                 responseBody = script;
                 res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-            } else {
-                console.warn('[TossCalendarTrace] calendar bundle markers not found; Toss may have changed its bundle');
+        } else {
+            console.warn('[TossCalendarTrace] calendar bundle markers not found; Toss may have changed its bundle');
             }
         }
 
