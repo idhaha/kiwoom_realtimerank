@@ -1140,15 +1140,31 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     if (navigator.serviceWorker && navigator.serviceWorker.register) {
                         const serviceWorkerContainer = navigator.serviceWorker;
                         const originalRegister = serviceWorkerContainer.register.bind(serviceWorkerContainer);
-                        serviceWorkerContainer.register = (scriptURL, options) => {
+                        const registerTossWorkerLocally = (scriptURL, options = {}) => {
                             try {
                                 const workerUrl = new URL(String(scriptURL), document.baseURI);
                                 if (workerUrl.hostname === 'www.tossinvest.com' && workerUrl.pathname === '/service-worker.js') {
                                     scriptURL = window.location.origin + workerUrl.pathname + workerUrl.search;
                                 }
+                                const rewrittenOptions = { ...options };
+                                if (rewrittenOptions.scope) {
+                                    const scopeUrl = new URL(rewrittenOptions.scope, document.baseURI);
+                                    if (scopeUrl.hostname === 'www.tossinvest.com') {
+                                        rewrittenOptions.scope = window.location.origin + scopeUrl.pathname + scopeUrl.search;
+                                    }
+                                }
+                                options = rewrittenOptions;
                             } catch (_) {}
                             return originalRegister(scriptURL, options);
                         };
+                        try {
+                            Object.defineProperty(serviceWorkerContainer, 'register', {
+                                configurable: true,
+                                value: registerTossWorkerLocally
+                            });
+                        } catch (_) {
+                            serviceWorkerContainer.register = registerTossWorkerLocally;
+                        }
                     }
                 })();
             </script>`;
