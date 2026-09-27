@@ -425,6 +425,55 @@ app.get('/api/stock', async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 100));
         }
 
+        // 대주가능 목록의 종목 데이터는 eFriend에서 유지하고, 시장구분은
+        // 거래대금 상위와 동일하게 Kiwoom ka10100 정보만 사용한다.
+        let marketLookupCount = 0;
+        for (const stock of efriendStocks) {
+            const stockCode = String(stock.pdno || '').trim().replace(/[^0-9a-zA-Z]/g, '').replace(/_AL$/i, '');
+            if (!stockCode) continue;
+
+            const cachedMarket = marketCache[stockCode] || marketCache[`${stockCode}_AL`];
+            if (cachedMarket && cachedMarket.code != null && ['0', '10'].includes(String(cachedMarket.code))) {
+                stock.mkt_type = ['K', 'Q'].includes(cachedMarket.type)
+                    ? cachedMarket.type
+                    : resolveKiwoomMarketType(cachedMarket, String(cachedMarket.code) === '0' ? 'K' : 'Q');
+                continue;
+            }
+
+            try {
+                const basicInfoResponse = await axios.post(
+                    'https://api.kiwoom.com/api/dostk/stkinfo',
+                    { stk_cd: stockCode },
+                    {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`,
+                            'api-id': 'ka10100'
+                        },
+                        timeout: 3000
+                    }
+                );
+                const basicInfo = basicInfoResponse.data || {};
+                const marketCode = String(basicInfo.marketCode || basicInfo.mkt_cd || '');
+                if (['0', '10'].includes(marketCode)) {
+                    const marketType = resolveKiwoomMarketType(basicInfo, marketCode === '0' ? 'K' : 'Q');
+                    stock.mkt_type = marketType;
+                    marketCache[stockCode] = {
+                        ...(marketCache[stockCode] || {}),
+                        type: marketType,
+                        code: marketCode
+                    };
+                    marketLookupCount++;
+                }
+            } catch (err) {
+                fileLog(`[Warning] eFriend ka10100 failed for ${stockCode}: ${err.message}`);
+            }
+
+            // 종목 수가 많을 때 Kiwoom API 요청이 몰리지 않도록 간격을 둔다.
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        console.log(`Step 4.5: eFriend 시장구분 조회 완료 (${marketLookupCount}개 ka10100 조회, KIS 시장명 미사용)`);
+
         console.log("Step 5: 데이터 보정 및 병합 완료");
         res.json({
             success: true,

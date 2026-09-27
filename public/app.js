@@ -615,20 +615,8 @@ function renderEfriendTable(stocks) {
         const changeRate = stock.prdy_ctrt || '0.00';
         const tradActiveQty = parseInt(stock.trad_psbl_qty2) || 0;
 
-        // 시장 구분: KOSPI/KS 포함 시 K, KOSDAQ/KSQ 포함 시 Q, 그 외 -
-        const mrktName = (stock.rprs_mrkt_kor_name || '').toUpperCase();
-        console.log(`[Market Name Log] Stock: ${prdtName}, Raw mrktName: "${stock.rprs_mrkt_kor_name}", Processed: "${mrktName}"`); // Added log for user
-        let marketLabel = stock.mkt_type || '-';
-        if (!stock.mkt_type && (mrktName.includes('KOSPI') || mrktName.includes('KSP') || mrktName === 'KOSPI200' || mrktName === '유가증권' || mrktName.startsWith('KS'))) {
-            // "KSQ"가 포함되어 있으면 KOSDAQ 처리하므로 "KS"로 먼저 시작하거나 명확하게 KOSPI 등락이 있는 경우
-            if (mrktName.includes('KSQ') || mrktName.includes('KOSDAQ')) {
-                marketLabel = 'Q';
-            } else {
-                marketLabel = 'K';
-            }
-        } else if (!stock.mkt_type && (mrktName.includes('KOSDAQ') || mrktName.includes('KSQ') || mrktName === '코스닥')) {
-            marketLabel = 'Q';
-        }
+        // 시장구분은 서버가 조회한 Kiwoom ka10100 결과만 표시한다.
+        const marketLabel = stock.mkt_type || '-';
 
         // 매매가능금액 = 현재가 * 매매가능수량 (단위: 원)
         const tradActiveValue = currentPrice * tradActiveQty;
