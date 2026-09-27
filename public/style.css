@@ -458,6 +458,22 @@ footer {
     user-select: none;
 }
 
+.tab-btn.perm-tab {
+    background: #e2e8f0;
+    color: #475569;
+}
+
+.tab-btn.perm-tab:hover {
+    color: #334155;
+    background: #cbd5e1;
+}
+
+.tab-btn.perm-tab.active {
+    color: #1e293b;
+    background: #cbd5e1;
+    border-bottom-color: var(--accent-primary);
+}
+
 .tab-btn:hover {
     color: var(--accent-primary);
     background: rgba(15, 23, 42, 0.04);
