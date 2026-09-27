@@ -1336,7 +1336,7 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
                     .replace(hookMarker, 'ei=()=>{console.info("[TossCalendarTrace] monthly hook invoked");let{category')
                     .replace(
                         queryMarker,
-                        'queryFn:()=>{console.info("[TossCalendarTrace] monthly query function invoked",t,n);const request=X.FH.post(`${J.Q.CERT}${er(t,n)}`);request.then(result=>console.info("[TossCalendarTrace] monthly request resolved",{year:t,month:n,status:result?.status,keys:Object.keys(result||{})}),error=>console.error("[TossCalendarTrace] monthly request rejected",{year:t,month:n,message:error?.message,status:error?.response?.status}));return request},refetchOnWindowFocus'
+                        'queryFn:()=>{const targetUrl=`${J.Q.CERT}${er(t,n)}`;const proxyUrl=`${window.location.origin}/api/toss_calendar_proxy?url=${encodeURIComponent(targetUrl)}`;console.info("[TossCalendarTrace] monthly proxy request",{year:t,month:n,targetUrl});const request=window.fetch(proxyUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}).then(async response=>{if(!response.ok)throw new Error(`Calendar proxy HTTP ${response.status}`);return{data:await response.json(),status:response.status}});request.then(result=>console.info("[TossCalendarTrace] monthly proxy resolved",{year:t,month:n,status:result.status}),error=>console.error("[TossCalendarTrace] monthly proxy rejected",{year:t,month:n,message:error?.message}));return request},refetchOnWindowFocus'
                     )
                     .replace(
                         queryStatusMarker,
