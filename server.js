@@ -22,13 +22,15 @@ function resolveKiwoomMarketType(basicInfo, fallback = 'Q') {
 }
 
 // 디버그 로그 파일 설정
-const LOG_FILE = path.join(__dirname, 'server_debug.log');
+const LOG_DIR = path.join(__dirname, 'dev_tools', 'logs');
+fs.mkdirSync(LOG_DIR, { recursive: true });
+const LOG_FILE = path.join(LOG_DIR, 'server_debug.log');
 
 function fileLog(message) {
     const logMessage = `[${new Date().toLocaleString()}] ${message}\n`;
     console.log(message);
     try {
-        fs.appendFileSync(path.join(__dirname, 'server_debug.log'), logMessage);
+        fs.appendFileSync(LOG_FILE, logMessage);
     } catch (e) {
         // ignore
     }
@@ -1853,7 +1855,7 @@ app.get('/api/trading-economics', async (req, res) => {
 
             } catch (e) {
                 console.error(`   ❌ Scraping error: ${e.message}`);
-                fs.appendFileSync('puppeteer_debug.log', `   ❌ ${e.message}\n`);
+                fs.appendFileSync(path.join(LOG_DIR, 'puppeteer_debug.log'), `   ❌ ${e.message}\n`);
                 throw e;
             } finally {
                 activeBrowsers = Math.max(0, activeBrowsers - 1);

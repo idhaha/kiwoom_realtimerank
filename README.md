@@ -1,10 +1,10 @@
-# 키움증권 실시간종목조회순위 웹서비스
+# MarketThrough — 실시간 금융 대시보드 웹서비스
 
 Oracle Cloud Free Tier를 활용한 키움증권 실시간종목조회순위 데이터 표시 웹 애플리케이션입니다.
 
 ## 📋 기능
 
-- ✅ 키움증권 REST API를 통한 실시간종목조회순위 데이터 조회
+- ✅ 키움증권, 한국투자증권 REST API를 통한 실시간종목조회순위 데이터 조회
 - ✅ 거래대금 순위 및 실시간 조회 순위 표시
 - ✅ ADR 차트 (KOSPI/KOSDAQ)
 - ✅ 실적 발표 캘린더
@@ -17,7 +17,7 @@ Oracle Cloud Free Tier를 활용한 키움증권 실시간종목조회순위 데
 ## 🏗️ 프로젝트 구조
 
 ```
-d:\Program\Kiwoom\
+d:\Program\MarketThrough\
 ├── public/                # 정적 파일 (프론트엔드)
 │   ├── index.html         # 메인 HTML
 │   ├── style.css          # 스타일시트
@@ -25,6 +25,12 @@ d:\Program\Kiwoom\
 ├── server.js              # Express 서버 (백엔드)
 ├── package.json           # 프로젝트 의존성
 ├── .env                   # 환경 변수 (API 키)
+├── docs/                  # 시스템 사양서
+├── dev_tools/             # 테스트, 디버깅, 실험 파일 및 로그
+│   ├── tests/
+│   ├── debug/
+│   ├── experiments/
+│   └── logs/
 └── .gitignore             # Git 제외 파일
 ```
 

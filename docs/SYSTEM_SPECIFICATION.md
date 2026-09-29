@@ -1,9 +1,9 @@
-# 키움 실시간 랭킹 시스템 사양서 (System Specification)
+# MarketThrough 사양서 (System Specification)
 
 > **문서 버전**: v1.0.6  
 > **최초 작성일**: 2026-09-26  
 > **최근 업데이트**: 2026-09-27  
-> **대상 시스템**: 키움증권 실시간 종목 순위 및 종합 대시보드 웹서비스 (`kiwoom_realtimerank`)
+> **대상 시스템**: 키움증권 API 기반 실시간 종목 순위 및 종합 대시보드 웹서비스 (`market-through`)
 
 ---
 

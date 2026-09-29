@@ -1,16 +1,17 @@
 {
-    "name": "kiwoom-realtimerank",
+    "name": "market-through",
     "version": "1.2.0",
-    "description": "키움증권 실시간종목조회순위 웹서비스 (Oracle Cloud)",
+    "description": "실시간 금융 대시보드 웹서비스 (키움증권 API 기반, Oracle Cloud)",
     "main": "server.js",
     "scripts": {
         "dev": "node server.js",
         "start": "node server.js"
     },
     "keywords": [
-        "kiwoom",
+        "market-through",
         "stock",
         "realtime",
+        "dashboard",
         "oracle-cloud"
     ],
     "author": "idhaha",

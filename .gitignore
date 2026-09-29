@@ -36,3 +36,5 @@ dist/
 *.swo
 *~
 user_settings.json
+
+dev_tools/
