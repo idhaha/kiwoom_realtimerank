@@ -43,6 +43,8 @@
 - [ ] T009 [US1] 새로고침 주기 선택(`#refreshInterval`: 30초/1분/10분/1시간/당일누적)이 FR-002대로 동작하는지 확인 — `public/app.js`
 - [ ] T010 [US1] 수동 조회 버튼(`#manualRefresh`)이 4개 패널을 동시에 갱신 시도하는지 확인 (FR-003) — `public/app.js`
 - [ ] T011 [US1] 통신 실패 시 에러 상태 표시(FR-006)가 구현되어 있는지 확인 — `public/app.js`
+- [ ] T011a [US1] `#lastUpdate`가 마지막 성공 데이터 수신 시각으로 정확히 갱신되는지 확인 (FR-004) — `public/app.js`
+- [ ] T011b [US1] `#statusText`가 대기/로딩 중/완료/실패 4개 상태를 정확히 전환하는지 확인 (FR-005) — `public/app.js`
 - [ ] T012 [US1] T006~T011에서 발견된 spec 대비 불일치를 수정 — `server.js`, `public/app.js`
 - [ ] T013 [US1] quickstart.md 시나리오 1~3 실행 후 SC-001, SC-002 충족 확인
 
@@ -61,7 +63,7 @@
 - [ ] T014 [US2] `EFRIEND_*` 환경변수가 없을 때 `GET /api/stock`의 efriend 응답이 빈 배열을 반환하는지 확인 (FR-012) — `server.js`
 - [ ] T015 [US2] 매매가능수량 강조 표시 및 매매가능금액(현재가×수량) 계산·표시(FR-011)를 확인 — `public/app.js`
 - [ ] T016 [US2] T014~T015에서 발견된 불일치를 수정 — `server.js`, `public/app.js`
-- [ ] T017 [US2] quickstart.md 시나리오 4 실행 후 FR-012 동작 확인
+- [ ] T017 [US2] quickstart.md 시나리오 4 실행 후 FR-012 및 SC-003(eFriend 장애 시 나머지 3개 패널 정상 동작) 확인
 
 **Checkpoint**: User Story 1과 2가 모두 독립적으로 동작
 

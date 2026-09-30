@@ -10,7 +10,7 @@
 
 **Language/Version**: Node.js >= 18(프록시), 브라우저 ES + Canvas(커스텀 차트 렌더링)
 
-**Primary Dependencies**: axios(Finviz/TradingEconomics/FRED/ECOS 프록시)
+**Primary Dependencies**: axios(Finviz/TradingEconomics/ECOS 프록시), Python 3 + `fredapi`(또는 동등 패키지, `requirements.txt` 기준) — `GET /api/fred`는 Node.js가 아니라 `child_process.exec()`로 프로젝트 루트의 `fred_api.py`를 서브프로세스 실행하는 방식으로 구현되어 있다.
 
 **Storage**: 탭 설정(문법 텍스트, 구획 색상 등)은 앱 설정 스냅샷의 일부로 `006-settings-sync`를 통해 저장(이 기능 자체는 저장 로직을 소유하지 않음)
 
@@ -22,7 +22,7 @@
 
 **Performance Goals**: 탭 추가 후 1초 이내 사용 가능(SC-001)
 
-**Constraints**: 커스텀 문법은 엄격한 검증기가 아닌 휴리스틱 파서(정규식 기반 괄호/쉼표 분리)이며, 이 한계는 의도적으로 유지한다(spec의 Assumptions 참고).
+**Constraints**: 커스텀 문법은 엄격한 검증기가 아닌 휴리스틱 파서(정규식 기반 괄호/쉼표 분리)이며, 이 한계는 의도적으로 유지한다(spec의 Assumptions 참고). `fred_api.py`와 `requirements.txt`는 프로젝트 루트(`__dirname` 기준 상대경로로 실행됨)에 반드시 존재해야 하며, `dev_tools/`나 다른 하위 폴더로 옮기면 `/api/fred`가 즉시 실패한다(2026-09-29 실제 장애 발생 이력, `docs/analysis-log.md` 참고).
 
 **Scale/Scope**: 1인 사용자, 탭 개수 제한 없음(문서화된 제한 없음)
 

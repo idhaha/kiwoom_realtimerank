@@ -16,6 +16,7 @@
 
 - [ ] T002 동적 탭 ID 생성 규칙(생성 시각 기반)과 `tabData[id]` 저장 구조(data-model.md DynamicTab)가 일치하는지 확인 — `public/app.js`
 - [ ] T003 [P] 개별 데이터 소스 실패가 탭 전체에 영향을 주지 않는 격리 구조(FR-007)가 공통으로 적용되어 있는지 확인 — `public/app.js`
+- [ ] T003a `fred_api.py`, `requirements.txt`가 프로젝트 루트에 존재하고 `pip install -r requirements.txt`로 의존성이 설치되어 있는지 확인 — 루트 디렉토리 (dev_tools로 이동 시 `/api/fred` 즉시 실패, docs/analysis-log.md 참고)
 
 **Checkpoint**: 탭 생명주기/격리 공통 로직 검증 완료
 

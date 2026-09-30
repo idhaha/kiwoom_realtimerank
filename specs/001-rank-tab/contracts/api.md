@@ -23,4 +23,7 @@
 **Query**: `grp_id`
 **Response 200**: `{ "items": [ /* WatchlistGroup.entries[] */ ] }`, 하락률 큰 순 정렬.
 
+## GET /api/watchlist_debug (비공개/디버그 전용)
+프론트엔드에서 사용하지 않는 수동 디버그 엔드포인트. 이 계약 문서의 공식 API 범위에서 제외한다.
+
 > 위 응답 스키마는 `docs/SYSTEM_SPECIFICATION.md` 1.1.3절과 `server.js` 구현을 근거로 정리한 것이며, 필드명은 실제 코드의 원본 키(위 data-model.md 참고)를 그대로 따른다.
