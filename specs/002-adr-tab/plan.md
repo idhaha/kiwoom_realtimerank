@@ -14,7 +14,7 @@ ADR 탭은 외부 사이트(adrinfo.kr)를 서버가 프록시해 HTML을 받아
 
 **Primary Dependencies**: axios(프록시 fetch), 프론트엔드는 순수 Canvas 2D — 별도 차트 라이브러리 미사용
 
-**Storage**: 없음. 파싱된 시계열은 `tabData['tab_adr'].adr`에 메모리 캐시.
+**Storage**: 없음. 파싱된 시계열은 `tabData['tab_adr'].adr`에 `{ kospi, kosdaq, updated }` 형태로 메모리 캐시.
 
 **Testing**: 자동화 테스트 없음(Constitution IV). quickstart.md로 수동 검증.
 

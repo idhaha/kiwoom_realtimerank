@@ -11,10 +11,10 @@ taskkill /f /pid PID번호
 3. git 반영
 git checkout -b "br_oracle"
 git add .
-git commit -m "trivial update"
-git tag -a v2.8.43 -m "trivial update"
+git commit -m "fixed two load button"
+git tag -a v3.0.1 -m "fixed two load button"
 git push origin br_oracle
-git push origin v2.8.43
+git push origin v3.0.1
 
 만일 새로운 폴더나 파일을 커밋하고 github에 올리려면
 git add docs/SYSTEM_SPECIFICATION.md
@@ -37,6 +37,11 @@ ubuntu@instance-20260127-2105:~/kiwoom_realtimerank$ nano .env
 저장하지 않고 나가려면 Ctrl + X → N
 
 * oracle cloud 에서 파일 다운받기
-PS C:\Windows\system32> scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/kiwoom_realtimerank/server_debug.log "C:\Users\yg.gb5pro\Downloads"
-PS C:\Windows\system32> scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/kiwoom_realtimerank/user_settings.json "C:\Users\yg.gb5pro\Downloads"
+PS C:\Windows\system32> scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/kiwoom_realtimerank/.env "C:\Users\yg.gb5pro\Downloads"
+PS C:\Windows\system32> scp -i "C:\Users\yg.gb5pro\.ssh\id_rsa" ubuntu@134.185.111.202:~/update-kiwoom.sh "C:\Users\yg.gb5pro\Downloads"
 
+* 프로세스 관리
+ubuntu@instance-20260127-2105:~/market-through$ pm2 list   -> 현재 실행중인 프로세스 확인
+ubuntu@instance-20260127-2105:~/market-through$ pm2 delete market-through-service  -> 특정 프로세스 죽이기
+ubuntu@instance-20260127-2105:~/market-through$ pm2 save -> 현재 프로세스 리스트를 저장
+pm2 reload market-through --update-env || pm2 start server.js --name market-through -> 특정 프로세스를 재시작

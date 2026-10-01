@@ -1471,7 +1471,7 @@ function applyData(data) {
             lastSavedSettings.rankInterval = '2';
         }
         if (data.adrInterval) {
-            lastSavedSettings.adrInterval = data.adrInterval;
+            lastSavedSettings.adrInterval = data.adrInterval === '4' ? '5' : data.adrInterval;
         } else {
             lastSavedSettings.adrInterval = '2';
         }
@@ -1839,7 +1839,6 @@ function createChartGrid(tabId) {
                                     <option value="1" data-interval="60000">1분 간격</option>
                                     <option value="2" data-interval="600000">10분 간격</option>
                                     <option value="3" data-interval="3600000">1시간 간격</option>
-                                    <option value="4" data-interval="30000">당일누적</option>
                                 </select>
                             </div>
                             <button id="adrManualRefresh" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
@@ -5741,7 +5740,7 @@ function applyFullStateBackup(data) {
     }
     const adrSelect = document.getElementById('adrRefreshInterval');
     if (adrSelect && data.adrInterval) {
-        adrSelect.value = data.adrInterval;
+        adrSelect.value = data.adrInterval === '4' ? '5' : data.adrInterval;
     }
 
     // 5. 메모 복구

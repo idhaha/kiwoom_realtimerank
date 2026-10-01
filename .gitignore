@@ -36,10 +36,13 @@ dist/
 *.swo
 *~
 user_settings.json
+autosaved_user_settings.json
 user_settings.memo-backup.json
 user_settings.json.*.tmp
+autosaved_user_settings.json.*.tmp
 user_settings.memo-backup.json.*.tmp
 bulk_settings_*.txt
+full_backup_*.txt
 full_backup_*.json
 
 dev_tools/

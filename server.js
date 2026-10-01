@@ -1983,12 +1983,12 @@ app.get('/api/fred', (req, res) => {
 /**
  * 사용자 설정 저장 및 불러오기 API
  */
-const SETTINGS_FILE = path.join(__dirname, 'user_settings.json');
+const SETTINGS_FILE = path.join(__dirname, 'autosaved_user_settings.json');
 const MEMO_BACKUP_FILE = path.join(__dirname, 'user_settings.memo-backup.json');
-const BACKUP_NAME_PATTERN = /^(bulk_settings_\d{8}_\d{6}_\d{3}\.txt|full_backup_\d{8}_\d{6}_\d{3}\.json)$/;
+const BACKUP_NAME_PATTERN = /^(full_backup_\d{8}_\d{6}_\d{3}\.(txt|json)|bulk_settings_\d{8}_\d{6}_\d{3}\.txt)$/;
 
 function getBackupPath(filename) {
-    if (typeof filename !== 'string' || (filename !== 'user_settings.json' && !BACKUP_NAME_PATTERN.test(filename))) return null;
+    if (typeof filename !== 'string' || (filename !== 'autosaved_user_settings.json' && !BACKUP_NAME_PATTERN.test(filename))) return null;
     const resolved = path.resolve(__dirname, filename);
     return path.dirname(resolved) === path.resolve(__dirname) ? resolved : null;
 }
@@ -1996,7 +1996,7 @@ function getBackupPath(filename) {
 app.get('/api/settings/backups', (req, res) => {
     try {
         const files = fs.readdirSync(__dirname)
-            .filter(filename => filename === 'user_settings.json' || BACKUP_NAME_PATTERN.test(filename))
+            .filter(filename => filename === 'autosaved_user_settings.json' || BACKUP_NAME_PATTERN.test(filename))
             .map(filename => {
                 const stat = fs.statSync(path.join(__dirname, filename));
                 return { filename, bytes: stat.size, updatedAt: stat.mtimeMs };
@@ -2033,7 +2033,7 @@ app.post('/api/settings/backups', (req, res) => {
             return res.status(400).json({ success: false, error: '올바른 전체 설정 JSON 백업이 아닙니다.' });
         }
         const stamp = new Date().toISOString().replace(/[-:T]/g, '').replace(/(\d{8})(\d{6})\.(\d{3})Z$/, '$1_$2_$3');
-        const txtFilename = `bulk_settings_${stamp}.txt`;
+        const txtFilename = `full_backup_${stamp}.txt`;
         const jsonFilename = `full_backup_${stamp}.json`;
         const txtPath = getBackupPath(txtFilename);
         const jsonPath = getBackupPath(jsonFilename);

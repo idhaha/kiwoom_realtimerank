@@ -22,6 +22,6 @@
 | watchlist_selected_group | 관심종목 그룹 선택 복원용 |
 | user_session | 세션 토큰(스냅샷에 포함 안 됨) |
 
-## ServerSettingsFile (user_settings.json)
+## ServerSettingsFile (autosaved_user_settings.json)
 - AppSettingsSnapshot 전체를 JSON으로 저장하는 서버 측 단일 파일.
 - 메모 변경 전 이전의 비어 있지 않은 메모는 `user_settings.memo-backup.json`에 별도 저장한다.

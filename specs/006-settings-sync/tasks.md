@@ -8,7 +8,7 @@
 
 ## Phase 1: Setup
 
-- [x] T001 `user_settings.json` 및 메모 백업/임시 파일이 `.gitignore`에 포함됨을 확인 — `.gitignore`
+- [x] T001 `autosaved_user_settings.json` 및 메모 백업/임시 파일이 `.gitignore`에 포함됨을 확인 — `.gitignore`
 
 ## Phase 2: Foundational
 
@@ -98,7 +98,7 @@
 
 | Task | 결과 | 검증 내용 |
 |---|---|---|
-| T001 | ⏳ | 현재 제공된 소스 집합에는 `.gitignore` 파일이 없어 `user_settings.json`이 실제로 git ignore 되는지는 확인하지 못했습니다. |
+| T001 | ⏳ | 당시 제공된 소스 집합에는 `.gitignore` 파일이 없어 설정 파일이 실제로 git ignore 되는지는 확인하지 못했습니다. 이후 `.gitignore`를 확인하고 갱신했다. |
 | T002 | 🟢 | `getSerializedState()`가 `activeTabId`, `tabs`, `contents`, `rankInterval`, `adrInterval`, `watchlistGroupId`, `memoHtml`, `memoDelta`, `updatedAt`를 모두 반환합니다. `memoTabIconMigrationV1`은 추가 필드입니다. |
 | T003 | 🟢 | `GET /api/settings`는 `Cache-Control: no-store...`, `Pragma: no-cache`, `Expires: 0`을 설정하고 계약 형태 `{success:true,data}` / `data:null`을 반환합니다. `POST /api/settings`도 `{success:true}`를 반환합니다. Express JSON body limit은 50MB입니다. |
 
@@ -138,7 +138,7 @@
 
 | Task | 결과 | 검증 내용 |
 |---|---|---|
-| T021 | 🟢 | 현재 `getSerializedState()`가 저장하는 스냅샷에는 API key/token 필드가 없고, 서버 `/api/settings`는 설정 스냅샷을 `user_settings.json`에 저장합니다. 앱 설정 저장 경로에서 API 키를 추가하는 코드는 확인되지 않았습니다. 단, `.gitignore`와 실제 파일 내용까지는 별도 확인이 필요합니다. |
+| T021 | 🟢 | 현재 `getSerializedState()`가 저장하는 스냅샷에는 API key/token 필드가 없고, 서버 `/api/settings`는 설정 스냅샷을 설정 JSON에 저장합니다. 앱 설정 저장 경로에서 API 키를 추가하는 코드는 확인되지 않았습니다. 단, 실제 파일 내용까지는 별도 확인이 필요합니다. |
 | T022 | 🟢 | 마이그레이션 감사에서 확인한 기존 3.4절 정책을 대조한 결과, 공유 서버 파일에 전체 스냅샷을 저장하고 동시 저장 시 마지막 POST의 전체 상태가 남으며 필드 병합/충돌 알림이 없다는 한계가 006의 snapshot/last-write-wins 설명과 일치함을 확인했다. |
 | T023 | ⏳ | quickstart 전체 시나리오 1~6은 실제 브라우저/서버 환경에서 실행해야 합니다. |
 
@@ -218,5 +218,11 @@ localhost 재시작 후 메모 API 왕복과 `memoUpdatedAt`을 생략한 일반
 ## 2026-10-01 단일 프로젝트 루트 가져오기
 
 - 사용자 요청에 따라 별도 PC 파일 불러오기 버튼을 제거하고, 단일 📂 버튼이 항상 현재 백엔드 프로젝트 루트에서 가져오도록 변경했다. localhost에서는 로컬 프로젝트 루트, Oracle 도메인에서는 Oracle 프로젝트 루트를 가리킨다.
-- 루트 목록에는 `user_settings.json`과 생성된 TXT/JSON 백업만 포함한다. 각 파일의 읽기도 허용 목록으로 제한한다.
-- localhost의 격리된 3100 포트에서 목록과 `user_settings.json` 읽기를 검증했다. 프로젝트 루트의 현재 설정은 23개 탭이며, 구문 검사도 통과했다. Oracle에는 이 변경을 배포한 뒤 같은 목록/복원 흐름을 확인해야 하므로 T020은 미완료다.
+- 당시 루트 목록에는 `user_settings.json`과 생성된 TXT/JSON 백업만 포함했다. 현재 이름은 `autosaved_user_settings.json`으로 바꾸고 이전 TXT 백업도 계속 읽을 수 있도록 한다.
+- localhost의 격리된 3100 포트에서 목록과 기존 `user_settings.json` 읽기를 검증했다. 프로젝트 루트의 현재 설정은 23개 탭이며, 구문 검사도 통과했다. Oracle에는 변경을 배포한 뒤 새 파일명/백업명 목록과 복원 흐름을 확인해야 하므로 T020은 미완료다.
+
+## 2026-10-01 저장 파일명 및 백업 접두어 정리
+
+- 자동 저장 파일명을 `autosaved_user_settings.json`으로 변경했다. 프로젝트 루트의 기존 파일은 사용자가 같은 이름으로 직접 변경하기로 했다. `.gitignore`에는 새 이름과 이전 이름을 모두 유지해 데이터가 실수로 커밋되지 않도록 했다.
+- 새 TXT/JSON 백업은 확장자로 용도를 구분하고 접두어는 `full_backup_<timestamp>`로 통일했다. 기존 `bulk_settings_<timestamp>.txt`는 이전 백업 호환을 위해 읽기 허용 목록에 남겼다.
+- 새 자동 저장 파일과 백업 이름은 프로젝트 루트에서 읽고 쓸 수 있지만, 사용자가 파일명을 변경한 뒤 Oracle 재시작/런타임 확인 전까지 T020은 미완료다.
