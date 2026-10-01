@@ -5391,29 +5391,13 @@ function refreshOverseasCustomCharts(tabId) {
 function setupBulkSettingsHandlers() {
     const bulkUploadBtn = document.getElementById('bulkUpload');
     const bulkDownloadBtn = document.getElementById('bulkDownload');
-    const serverBackupRestoreBtn = document.getElementById('serverBackupRestore');
-    const bulkFileInput = document.getElementById('bulkFileInput');
 
     if (bulkDownloadBtn) {
         bulkDownloadBtn.addEventListener('click', bulkExportSettings);
     }
 
-    if (serverBackupRestoreBtn) {
-        serverBackupRestoreBtn.addEventListener('click', restoreServerBackup);
-    }
-
-    if (bulkUploadBtn && bulkFileInput) {
-        bulkUploadBtn.addEventListener('click', () => {
-            bulkFileInput.value = '';
-            bulkFileInput.click();
-        });
-
-        bulkFileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                bulkImportSettings(file);
-            }
-        });
+    if (bulkUploadBtn) {
+        bulkUploadBtn.addEventListener('click', restoreServerBackup);
     }
 }
 
@@ -5504,7 +5488,8 @@ async function restoreServerBackup() {
         const backupResponse = await fetch(`/api/settings/backups/${encodeURIComponent(selected.filename)}`, { cache: 'no-store' });
         const backup = await backupResponse.json();
         if (!backupResponse.ok || !backup.success) throw new Error(backup.error || `HTTP ${backupResponse.status}`);
-        bulkImportSettings(new Blob([backup.content], { type: 'application/json' }));
+        const contentType = selected.filename.endsWith('.txt') ? 'text/plain' : 'application/json';
+        bulkImportSettings(new Blob([backup.content], { type: contentType }));
     } catch (error) {
         console.error('❌ [restoreServerBackup] Failed:', error);
         alert(`프로젝트 폴더 백업을 불러오지 못했습니다.\n${error.message}`);

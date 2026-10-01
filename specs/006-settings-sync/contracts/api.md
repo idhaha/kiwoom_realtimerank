@@ -26,9 +26,9 @@
 
 ## GET /api/settings/backups
 **Response 200**: `{ "success": true, "files": [{ "filename": string, "bytes": number, "updatedAt": number }] }`
-**동작**: 허용된 백업 파일명 패턴과 일치하는 프로젝트 루트 파일만 최신순으로 반환한다.
+**동작**: `user_settings.json` 및 허용된 백업 파일명 패턴과 일치하는 프로젝트 루트 파일을 최신순으로 반환한다.
 
 ## GET /api/settings/backups/:filename
 **Response 200**: `{ "success": true, "filename": string, "content": string }`
 **Response 404**: 허용된 이름 형식이 아니거나 파일이 없음
-**동작**: TXT/JSON 백업 파일을 읽기 전용으로 반환한다. 경로 구성 요소는 허용하지 않는다.
+**동작**: `user_settings.json` 또는 TXT/JSON 백업 파일을 읽기 전용으로 반환한다. 경로 구성 요소는 허용하지 않는다.

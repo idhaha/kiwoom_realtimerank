@@ -1988,7 +1988,7 @@ const MEMO_BACKUP_FILE = path.join(__dirname, 'user_settings.memo-backup.json');
 const BACKUP_NAME_PATTERN = /^(bulk_settings_\d{8}_\d{6}_\d{3}\.txt|full_backup_\d{8}_\d{6}_\d{3}\.json)$/;
 
 function getBackupPath(filename) {
-    if (typeof filename !== 'string' || !BACKUP_NAME_PATTERN.test(filename)) return null;
+    if (typeof filename !== 'string' || (filename !== 'user_settings.json' && !BACKUP_NAME_PATTERN.test(filename))) return null;
     const resolved = path.resolve(__dirname, filename);
     return path.dirname(resolved) === path.resolve(__dirname) ? resolved : null;
 }
@@ -1996,7 +1996,7 @@ function getBackupPath(filename) {
 app.get('/api/settings/backups', (req, res) => {
     try {
         const files = fs.readdirSync(__dirname)
-            .filter(filename => BACKUP_NAME_PATTERN.test(filename))
+            .filter(filename => filename === 'user_settings.json' || BACKUP_NAME_PATTERN.test(filename))
             .map(filename => {
                 const stat = fs.statSync(path.join(__dirname, filename));
                 return { filename, bytes: stat.size, updatedAt: stat.mtimeMs };
