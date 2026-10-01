@@ -3,9 +3,9 @@
 set -e
 
 echo "=========================================="
-echo "🚀 배포 시작: ~/kiwoom_realtimerank 폴더로 이동..."
+echo "🚀 배포 시작: ~/market-through 폴더로 이동..."
 echo "=========================================="
-cd ~/kiwoom_realtimerank
+cd ~/market-through
 
 echo "📥 1. 원격 저장소에서 최신 코드 및 태그 강제 동기화..."
 # --tags를 추가하여 태그 정보도 함께 가져옵니다.
@@ -26,7 +26,7 @@ echo "🔄 4. PM2 프로세스 리로드 및 자동 저장..."
 # pm2 reload는 서비스 중단 없이 새로운 코드를 반영합니다.
 # 만약 프로세스가 리스트에 없다면(서버 재부팅 등), || 뒤의 start 명령어가 새로 생성해줍니다.
 # --update-env는 .env 등의 환경변수 변경사항을 즉시 반영합니다.
-pm2 reload kiwoom-service --update-env || pm2 start server.js --name kiwoom-service
+pm2 reload market-through --update-env || pm2 start server.js --name market-through
 
 # 현재 실행 중인 PM2 리스트를 저장하여 서버 재부팅 시 자동 실행되도록 합니다.
 pm2 save

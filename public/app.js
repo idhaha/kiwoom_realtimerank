@@ -8,12 +8,14 @@ const API_URL = '/api/stock';
 
 // --- Tab & State Constants ---
 const STORAGE_KEY = 'MultiChart_State_v1';
+const MEMO_PENDING_SYNC_KEY = 'memoPendingServerSyncV1';
 const PERM_TAB_ID = 'tab_rank';
 const ADR_TAB_ID = 'tab_adr';
 const MEMO_TAB_ID = 'tab_memo';
 const EARNINGS_TAB_ID = 'tab_earnings';
 let isInitializing = false; // Flag to prevent auto-save during startup
 let isCapturing = false; // Flag to suppress all data-fetching during screenshot capture
+let adrRenderPending = false;
 let quillEditor; // Global Quill instance
 
 /**
@@ -24,6 +26,7 @@ const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 let tokenClient;
 let accessToken = null;
 let calendar = null;
+let tokenErrorCallback = null;
 
 window.handleCredentialResponse = function (response) {
     const payload = parseJwt(response.credential);
@@ -47,15 +50,26 @@ function initTokenClient() {
         scope: CALENDAR_SCOPE,
         callback: (tokenResponse) => {
             if (tokenResponse && tokenResponse.access_token) {
+                tokenErrorCallback = null;
                 accessToken = tokenResponse.access_token;
                 console.log("🎟️ Calendar Access Token Acquired");
                 if (calendar) calendar.refetchEvents();
+            } else if (tokenErrorCallback) {
+                const reject = tokenErrorCallback;
+                tokenErrorCallback = null;
+                reject(new Error(tokenResponse?.error_description || tokenResponse?.error || 'Google 인증이 완료되지 않았습니다.'));
             }
+        },
+        error_callback: (error) => {
+            const reject = tokenErrorCallback;
+            tokenErrorCallback = null;
+            if (reject) reject(new Error(error?.message || error?.type || 'Google 인증 창을 열지 못했습니다.'));
+            else console.error('❌ Google OAuth popup error:', error);
         },
     });
 }
 
-function requestCalendarAccess(callback) {
+function requestCalendarAccess(callback, onError) {
     if (accessToken) {
         if (callback) callback();
         return;
@@ -64,7 +78,7 @@ function requestCalendarAccess(callback) {
     // Check if library is loaded
     if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
         console.warn("⏳ Google GIS library not ready, retrying in 500ms...");
-        setTimeout(() => requestCalendarAccess(callback), 500);
+        setTimeout(() => requestCalendarAccess(callback, onError), 500);
         return;
     }
 
@@ -73,17 +87,43 @@ function requestCalendarAccess(callback) {
     // Safety check after init attempt
     if (!tokenClient) {
         console.error("❌ Failed to initialize tokenClient");
+        if (onError) onError(new Error('Google 인증을 초기화하지 못했습니다.'));
         return;
     }
 
     tokenClient.callback = (resp) => {
         if (resp.access_token) {
+            tokenErrorCallback = null;
             accessToken = resp.access_token;
             console.log("🎟️ Calendar Access Token Acquired");
             if (callback) callback();
+        } else if (onError) {
+            tokenErrorCallback = null;
+            onError(new Error(resp.error_description || resp.error || 'Google 인증이 완료되지 않았습니다.'));
         }
     };
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    tokenErrorCallback = onError || null;
+    try {
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+    } catch (error) {
+        tokenErrorCallback = null;
+        if (onError) onError(error);
+        else console.error('❌ Google Calendar authorization failed:', error);
+    }
+}
+
+function requestCalendarAccessAsync() {
+    return new Promise((resolve, reject) => requestCalendarAccess(resolve, reject));
+}
+
+async function requestCalendarWithReauth(request) {
+    const response = await request();
+    const responses = Array.isArray(response) ? response : [response];
+    if (!responses.some(item => item && item.status === 401)) return response;
+
+    accessToken = null;
+    await requestCalendarAccessAsync();
+    return request();
 }
 
 function parseJwt(token) {
@@ -222,15 +262,13 @@ async function fetchCalendarEvents(fetchInfo, successCallback, failureCallback) 
         // Fetch Korean Holidays
         const holidayUrl = `https://www.googleapis.com/calendar/v3/calendars/ko.south_korea%23holiday%40group.v.calendar.google.com/events?timeMin=${start}&timeMax=${end}&singleEvents=true`;
 
-        const [primaryRes, holidayRes] = await Promise.all([
+        const [primaryRes, holidayRes] = await requestCalendarWithReauth(() => Promise.all([
             fetch(primaryUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } }),
             fetch(holidayUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } })
-        ]);
+        ]));
 
-        if (primaryRes.status === 401) {
-            accessToken = null;
-            requestCalendarAccess(() => calendar.refetchEvents());
-            return;
+        if (!primaryRes.ok || !holidayRes.ok) {
+            throw new Error(`Google Calendar 조회 실패 (primary=${primaryRes.status}, holiday=${holidayRes.status})`);
         }
 
         const [primaryData, holidayData] = await Promise.all([
@@ -374,14 +412,14 @@ async function saveGoogleEvent() {
             : 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
         const method = eventId ? 'PUT' : 'POST';
 
-        const response = await fetch(url, {
+        const response = await requestCalendarWithReauth(() => fetch(url, {
             method: method,
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(eventData)
-        });
+        }));
 
         if (response.ok) {
             console.log(`✅ Event ${eventId ? 'updated' : 'created'} successfully`);
@@ -410,10 +448,10 @@ async function deleteGoogleEvent() {
     }
 
     try {
-        const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+        const response = await requestCalendarWithReauth(() => fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
+        }));
 
         if (response.ok) {
             console.log("✅ Event deleted successfully");
@@ -493,9 +531,19 @@ let lastSavedSettings = { rankInterval: '2', adrInterval: '2' };
 /**
  * 상태 업데이트
  */
-function updateStatus(status, message, data = {}) {
-    statusText.textContent = message;
-    if (data.start_time) {
+function updateStatus(status, message = '', data = {}) {
+    const statusLabels = {
+        waiting: '대기 중',
+        loading: '로딩 중',
+        success: '완료',
+        error: '실패'
+    };
+
+    if (statusText) {
+        statusText.textContent = statusLabels[status] || message || '대기 중';
+    }
+
+    if (data.start_time && statusText) {
         statusText.textContent += ` (Srv Start: ${data.start_time})`;
     }
 }
@@ -548,7 +596,7 @@ function renderTable(data) {
         tableBody.innerHTML = `
             <tr>
                 <td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                    조회된 데이터가 없습니다.
+                    데이터가 없습니다.
                 </td>
             </tr>
         `;
@@ -557,7 +605,7 @@ function renderTable(data) {
 
     console.log("📊 렌더링할 종목 데이터 예시:", stocks[0]);
 
-    // 표시 항목 수를 15개로 제한하여 세로 길이 축소
+    // 표시 항목 수를 20개로 제한하여 세로 길이 축소
     tableBody.innerHTML = stocks.slice(0, 20).map((stock, index) => {
         const changeRate = stock.base_comp_chgr || '0';
         let trdeAmtRaw = stock.trde_amt ? String(stock.trde_amt).replace(/[+,-]/g, '') : '0';
@@ -593,7 +641,7 @@ function renderEfriendTable(stocks) {
         efriendTableBody.innerHTML = `
             <tr>
                 <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                    조회된 대주가능 종목 데이터가 없습니다.
+                    데이터가 없습니다.
                 </td>
             </tr>
         `;
@@ -653,11 +701,11 @@ async function loadTransactionRank() {
         console.log("Transaction Rank Raw Result:", result);
 
         if (result.success) {
-            const items = result.data || [];
+            const items = result.items || [];
             console.log("Transaction Items:", items.length);
 
             if (items.length === 0) {
-                transactionBody.innerHTML = `<tr><td colspan="6" class="align-center">데이터 없음</td></tr>`;
+                transactionBody.innerHTML = `<tr><td colspan="6" class="align-center">데이터가 없습니다.</td></tr>`;
                 return;
             }
 
@@ -685,12 +733,20 @@ async function loadTransactionRank() {
             }).join('');
 
         } else {
-            console.error("Trans Rank Error:", result.error);
-            transactionBody.innerHTML = `<tr><td colspan="6" class="align-center error">통신 오류</td></tr>`;
+            if (document.querySelector('.tab-content.active')?.id === PERM_TAB_ID) {
+                console.error("Trans Rank Error:", result.error);
+                transactionBody.innerHTML = `<tr><td colspan="6" class="align-center error">통신 오류</td></tr>`;
+            } else {
+                console.warn('[Rank] 거래대금 백그라운드 갱신 실패 (UI 억제됨):', result.error);
+            }
         }
     } catch (e) {
-        console.error("Trans Rank Fetch Fail:", e);
-        transactionBody.innerHTML = `<tr><td colspan="6" class="align-center error">통신 오류</td></tr>`;
+        if (document.querySelector('.tab-content.active')?.id === PERM_TAB_ID) {
+            console.error("Trans Rank Fetch Fail:", e);
+            transactionBody.innerHTML = `<tr><td colspan="6" class="align-center error">통신 오류</td></tr>`;
+        } else {
+            console.warn('[Rank] 거래대금 백그라운드 갱신 실패 (UI 억제됨):', e.message);
+        }
     }
 }
 
@@ -705,7 +761,7 @@ function renderWatchlistTable(stocks) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                    조회된 관심종목 데이터가 없습니다.
+                    데이터가 없습니다.
                 </td>
             </tr>
         `;
@@ -753,12 +809,13 @@ async function loadWatchlistGroups() {
 
         const savedGrp = localStorage.getItem('watchlist_selected_group') || (input ? input.value.trim() : '') || '074';
 
-        if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-            const matched = result.data.find(g => String(g.grp_id) === String(savedGrp) || String(g.grp_nm) === String(savedGrp));
+        const groups = result.groups || [];
+        if (result.success && Array.isArray(groups) && groups.length > 0) {
+            const matched = groups.find(g => String(g.grp_id) === String(savedGrp) || String(g.grp_nm) === String(savedGrp));
             const selectedVal = matched ? matched.grp_id : savedGrp;
 
             if (select) {
-                select.innerHTML = result.data.map(g => `
+                select.innerHTML = groups.map(g => `
                     <option value="${g.grp_id}" ${String(g.grp_id) === String(selectedVal) ? 'selected' : ''}>
                         ${g.grp_nm ? `${g.grp_nm} (${g.grp_id})` : g.grp_id}
                     </option>
@@ -805,23 +862,35 @@ async function loadWatchlistRank() {
                 const errJson = await response.json();
                 if (errJson.error) errorMsg = errJson.error;
             } catch (e) {}
-            tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">조회 실패: ${errorMsg}</td></tr>`;
+            if (document.querySelector('.tab-content.active')?.id === PERM_TAB_ID) {
+                tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">조회 실패: ${errorMsg}</td></tr>`;
+            } else {
+                console.warn('[Rank] 관심종목 백그라운드 갱신 실패 (UI 억제됨):', errorMsg);
+            }
             return;
         }
 
         const result = await response.json();
 
         if (result.success) {
-            const items = result.data || [];
+            const items = result.items || [];
             console.log(`[Watchlist] Items loaded: ${items.length}`);
             renderWatchlistTable(items);
         } else {
-            console.error("[Watchlist] API Error:", result.error);
-            tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">조회 실패: ${result.error || '통신 오류'}</td></tr>`;
+            if (document.querySelector('.tab-content.active')?.id === PERM_TAB_ID) {
+                console.error("[Watchlist] API Error:", result.error);
+                tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">조회 실패: ${result.error || '통신 오류'}</td></tr>`;
+            } else {
+                console.warn('[Rank] 관심종목 백그라운드 갱신 실패 (UI 억제됨):', result.error || '통신 오류');
+            }
         }
     } catch (e) {
-        console.error("[Watchlist] Fetch Fail:", e);
-        tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">통신 오류: ${e.message}</td></tr>`;
+        if (document.querySelector('.tab-content.active')?.id === PERM_TAB_ID) {
+            console.error("[Watchlist] Fetch Fail:", e);
+            tbody.innerHTML = `<tr><td colspan="5" class="align-center error" style="padding: 2rem; color: #e74c3c;">통신 오류: ${e.message}</td></tr>`;
+        } else {
+            console.warn('[Rank] 관심종목 백그라운드 갱신 실패 (UI 억제됨):', e.message);
+        }
     }
 }
 
@@ -829,6 +898,7 @@ async function loadWatchlistRank() {
  * 데이터 로드
  */
 async function loadData() {
+    console.log('[TEST] loadData() 시작');    //Andrew
     if (isCapturing) { console.log('[Capture] loadData() skipped (isCapturing)'); return; }
 
     try {
@@ -840,6 +910,8 @@ async function loadData() {
 
         const selectedOption = refreshIntervalSelect.options[refreshIntervalSelect.selectedIndex];
         const qryTp = selectedOption.value;
+
+console.log('[TEST] /api/stock 호출 직전:', `${API_URL}?qry_tp=${qryTp}`); //Andrew
 
         const response = await fetch(`${API_URL}?qry_tp=${qryTp}`, {
             method: 'GET',
@@ -865,6 +937,8 @@ async function loadData() {
 
         const result = await response.json();
 
+console.log('[TEST] /api/stock 응답 완료:', response.status); //Andrew
+
         if (!result.success) {
             throw new Error(result.error || '알 수 없는 오류가 발생했습니다');
         }
@@ -882,7 +956,7 @@ async function loadData() {
         dataContainer.style.display = 'block';
         const efriendDataContainer = document.getElementById('efriendDataContainer');
         if (efriendDataContainer) efriendDataContainer.style.display = 'block';
-
+console.log('[TEST] lastUpdate 갱신:', formatTime(new Date()));//Andrew
         lastUpdate.textContent = formatTime(new Date());
         updateStatus('success', '데이터 로딩 완료');
 
@@ -968,12 +1042,12 @@ refreshIntervalSelect.addEventListener('change', (e) => {
     saveAppData();
 });
 
-manualRefreshBtn.addEventListener('click', () => {
-    console.log('수동 새로고침 실행');
-    loadData();
-    loadTransactionRank();
-    loadWatchlistRank();
-});
+// manualRefreshBtn.addEventListener('click', () => {
+//     console.log('수동 새로고침 실행');
+//     loadData();
+//     loadTransactionRank();
+//     loadWatchlistRank();
+// });
 
 if (watchlistGroupSelect) {
     watchlistGroupSelect.addEventListener('change', (e) => {
@@ -1243,6 +1317,7 @@ function getSerializedState(sourceData = null) {
         watchlistGroupId: watchlistGroupId,
         memoHtml: memoHtml,
         memoDelta: memoDelta,
+        memoUpdatedAt: Number(localStorage.getItem('memoContent_updatedAt')) || 0,
         memoTabIconMigrationV1: true,
         updatedAt: Date.now()
     };
@@ -1448,8 +1523,20 @@ function applyData(data) {
 }
 
 function applyMemoState(data) {
-    if (!data || (!Object.prototype.hasOwnProperty.call(data, 'memoHtml') && !Object.prototype.hasOwnProperty.call(data, 'memoDelta'))) {
-        return false;
+    if (!data) return false;
+
+    // A failed save is still a valid local memo, even if this server snapshot has no memo keys.
+    const pending = getPendingMemoSync();
+    const hasIncomingMemo = Object.prototype.hasOwnProperty.call(data, 'memoHtml') || Object.prototype.hasOwnProperty.call(data, 'memoDelta');
+    if (!hasIncomingMemo) {
+        if (!pending) return false;
+        writeLocalMemo(pending.memoHtml, pending.memoDelta);
+        if (quillEditor) {
+            if (pending.memoDelta) quillEditor.setContents(pending.memoDelta);
+            else if (pending.memoHtml) quillEditor.root.innerHTML = pending.memoHtml;
+            else quillEditor.setText('');
+        }
+        return true;
     }
 
     const html = typeof data.memoHtml === 'string' ? data.memoHtml : '';
@@ -1459,9 +1546,23 @@ function applyMemoState(data) {
     }
     if (!delta || !Array.isArray(delta.ops)) delta = null;
 
-    localStorage.setItem('memoContent_html', html);
-    if (delta) localStorage.setItem('memoContent_delta', JSON.stringify(delta));
-    else localStorage.removeItem('memoContent_delta');
+    // Preserve a newer explicit save that failed to reach the server.
+    const incomingUpdatedAt = Number(data.memoUpdatedAt) || 0;
+    if (pending && pending.memoUpdatedAt > incomingUpdatedAt) {
+        writeLocalMemo(pending.memoHtml, pending.memoDelta);
+        if (quillEditor) {
+            if (pending.memoDelta) quillEditor.setContents(pending.memoDelta);
+            else if (pending.memoHtml) quillEditor.root.innerHTML = pending.memoHtml;
+            else quillEditor.setText('');
+        }
+        return true;
+    }
+    if (pending && incomingUpdatedAt >= pending.memoUpdatedAt) {
+        localStorage.removeItem(MEMO_PENDING_SYNC_KEY);
+    }
+
+    writeLocalMemo(html, delta);
+    if (incomingUpdatedAt > 0) localStorage.setItem('memoContent_updatedAt', String(incomingUpdatedAt));
 
     if (quillEditor) {
         if (delta) quillEditor.setContents(delta);
@@ -1471,16 +1572,41 @@ function applyMemoState(data) {
     return true;
 }
 
-async function saveMemoToServer(memoHtml, memoDelta) {
+function writeLocalMemo(memoHtml, memoDelta) {
+    localStorage.setItem('memoContent_html', memoHtml);
+    if (memoDelta) localStorage.setItem('memoContent_delta', JSON.stringify(memoDelta));
+    else localStorage.removeItem('memoContent_delta');
+}
+
+function getPendingMemoSync() {
+    try {
+        const pending = JSON.parse(localStorage.getItem(MEMO_PENDING_SYNC_KEY) || 'null');
+        if (!pending || typeof pending.memoHtml !== 'string' || !Number.isFinite(Number(pending.memoUpdatedAt))) return null;
+        let delta = pending.memoDelta;
+        if (typeof delta === 'string') delta = JSON.parse(delta);
+        if (!delta || !Array.isArray(delta.ops)) delta = null;
+        return { memoHtml: pending.memoHtml, memoDelta: delta, memoUpdatedAt: Number(pending.memoUpdatedAt) };
+    } catch {
+        return null;
+    }
+}
+
+async function saveMemoToServer(memoHtml, memoDelta, memoUpdatedAt = Date.now()) {
+    // Direct callers (for example, restoring a backup) get the same recoverable retry state.
+    const currentPending = getPendingMemoSync();
+    if (!currentPending || currentPending.memoUpdatedAt <= memoUpdatedAt) {
+        localStorage.setItem(MEMO_PENDING_SYNC_KEY, JSON.stringify({ memoHtml, memoDelta, memoUpdatedAt }));
+    }
     const snapshot = getSerializedState();
     snapshot.memoHtml = memoHtml;
     snapshot.memoDelta = memoDelta;
+    snapshot.memoUpdatedAt = memoUpdatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 
     const response = await fetch('/api/settings/memo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memoHtml, memoDelta, initialSettings: snapshot })
+        body: JSON.stringify({ memoHtml, memoDelta, memoUpdatedAt, initialSettings: snapshot })
     });
     if (!response.ok) {
         const result = await response.json().catch(() => ({}));
@@ -1488,6 +1614,11 @@ async function saveMemoToServer(memoHtml, memoDelta) {
     }
     const result = await response.json();
     if (!result.success) throw new Error(result.error || '메모 저장에 실패했습니다.');
+    localStorage.setItem('memoContent_updatedAt', String(memoUpdatedAt));
+    const pending = getPendingMemoSync();
+    if (pending && pending.memoUpdatedAt <= memoUpdatedAt) {
+        localStorage.removeItem(MEMO_PENDING_SYNC_KEY);
+    }
 }
 
 function resetDynamicTabs() {
@@ -1523,6 +1654,11 @@ function activateTab(tabId) {
     const wasEmpty = initializeTab(tabId);
 
     if (tabId === ADR_TAB_ID) {
+        const adrData = tabData[ADR_TAB_ID]?.adr;
+        if (adrRenderPending && adrData) {
+            renderAdr(adrData.kospi, adrData.kosdaq);
+            adrRenderPending = false;
+        }
         if (!isCapturing) startAdrAutoRefresh();
     } else if (tabId === MEMO_TAB_ID) {
         // Initialize FullCalendar when memo tab is active
@@ -1721,8 +1857,8 @@ function createChartGrid(tabId) {
                         <div class="adr-chart-header"><h3>K</h3></div>
                         <div class="adr-period-selector">
                             <button class="period-btn" data-period="6m">6m</button>
-                            <button class="period-btn active" data-period="1y">1y</button>
-                            <button class="period-btn" data-period="2y">2y</button>
+                            <button class="period-btn" data-period="1y">1y</button>
+                            <button class="period-btn active" data-period="2y">2y</button>
                             <button class="period-btn" data-period="5y">5y</button>
                             <button class="period-btn" data-period="10y">10y</button>
                         </div>
@@ -1732,8 +1868,8 @@ function createChartGrid(tabId) {
                         <div class="adr-chart-header"><h3>Q</h3></div>
                         <div class="adr-period-selector">
                             <button class="period-btn" data-period="6m">6m</button>
-                            <button class="period-btn active" data-period="1y">1y</button>
-                            <button class="period-btn" data-period="2y">2y</button>
+                            <button class="period-btn" data-period="1y">1y</button>
+                            <button class="period-btn active" data-period="2y">2y</button>
                             <button class="period-btn" data-period="5y">5y</button>
                             <button class="period-btn" data-period="10y">10y</button>
                         </div>
@@ -2018,8 +2154,10 @@ function loadChartFromInput(inputElement) {
 async function updateAdrFromSource() {
     const url = `/api/adr?t=${Date.now()}`;
     console.log("🔄 [ADR] Step 1: Fetching from backend proxy:", url);
-    const activeTab = document.querySelector('.tab-content.active');
-    const isAdrActive = activeTab && activeTab.id === ADR_TAB_ID;
+    const isAdrActive = () => {
+        const currentTab = document.querySelector('.tab-content.active');
+        return currentTab && currentTab.id === ADR_TAB_ID;
+    };
 
 
 
@@ -2040,6 +2178,9 @@ async function updateAdrFromSource() {
 
         const kLen = parsed.kospi.length;
         const qLen = parsed.kosdaq.length;
+        if (kLen === 0 || qLen === 0) {
+            throw new Error('KOSPI 또는 KOSDAQ ADR 데이터가 비어 있습니다.');
+        }
         const kLastDate = kLen > 0 ? new Date(parsed.kospi[kLen - 1].date).toLocaleDateString() : 'N/A';
         const qLastDate = qLen > 0 ? new Date(parsed.kosdaq[qLen - 1].date).toLocaleDateString() : 'N/A';
 
@@ -2052,21 +2193,22 @@ async function updateAdrFromSource() {
         tabData[ADR_TAB_ID] = tabData[ADR_TAB_ID] || {};
         tabData[ADR_TAB_ID].adr = { kospi: parsed.kospi, kosdaq: parsed.kosdaq, updated: Date.now() };
 
-        console.log("🎨 [ADR] Step 5: Calling renderAdr...");
-        renderAdr(parsed.kospi, parsed.kosdaq);
+        if (isAdrActive()) {
+            console.log("🎨 [ADR] Step 5: Calling renderAdr...");
+            renderAdr(parsed.kospi, parsed.kosdaq);
+            adrRenderPending = false;
+        } else {
+            adrRenderPending = true;
+            console.log('[ADR] 탭 비활성 상태라 데이터 저장 후 렌더링을 보류합니다.');
+        }
 
         const last = new Date().toLocaleString();
         if (adrStatusTextElem) adrStatusTextElem.textContent = "업데이트 완료";
         if (adrLastUpdateElem) adrLastUpdateElem.textContent = last;
 
-        if (parsed.kospi.length === 0 && parsed.kosdaq.length === 0) {
-            console.warn("⚠️ [ADR] No data parsed!");
-            if (isAdrActive) alert('데이터를 파싱할 수 없습니다. ADR 정보 사이트의 구조가 이전과 다를 수 있습니다.');
-        }
     } catch (e) {
         console.error('❌ [ADR] 업데이트 실패:', e);
         if (adrStatusTextElem) adrStatusTextElem.textContent = "업데이트 실패";
-        if (isAdrActive) alert('ADR 업데이트 실패: ' + e.message);
     } finally {
     }
 }
@@ -2146,35 +2288,67 @@ function renderAdr(kospi, kosdaq) {
         return { min: Math.min(...all), max: Math.max(...all) };
     };
 
-    const syncToKosdaq = (state) => {
-        if (!c2.chartState) return;
-        c2.chartState.visibleCount = state.visibleCount;
-        c2.chartState.scrollOffset = state.scrollOffset;
-        c2.chartState.hoveredIndex = state.hoveredIndex;
-        requestAnimationFrame(() => drawLineChart(c2, kosdaq, 'Q ADR', state.visibleCount));
+    const nearestIndexForDate = (series, dateValue) => {
+        if (!series.length || dateValue == null) return -1;
+        const targetTime = Number.isFinite(Number(dateValue)) ? Number(dateValue) : new Date(dateValue).getTime();
+        if (!Number.isFinite(targetTime)) return -1;
+
+        let low = 0;
+        let high = series.length - 1;
+        while (low < high) {
+            const mid = Math.floor((low + high) / 2);
+            const midTime = new Date(series[mid].date).getTime();
+            if (midTime < targetTime) low = mid + 1;
+            else high = mid;
+        }
+        if (low > 0) {
+            const beforeTime = new Date(series[low - 1].date).getTime();
+            const afterTime = new Date(series[low].date).getTime();
+            if (Math.abs(beforeTime - targetTime) <= Math.abs(afterTime - targetTime)) return low - 1;
+        }
+        return low;
     };
 
-    const syncToKospi = (state) => {
-        if (!c1.chartState) return;
-        c1.chartState.visibleCount = state.visibleCount;
-        c1.chartState.scrollOffset = state.scrollOffset;
-        c1.chartState.hoveredIndex = state.hoveredIndex;
-        requestAnimationFrame(() => drawLineChart(c1, kospi, 'K ADR', state.visibleCount));
+    const syncChartByDate = (targetCanvas, targetData, targetLabel, state) => {
+        if (!targetCanvas.chartState || !targetData.length) return;
+        const targetState = targetCanvas.chartState;
+        const targetVisibleCount = Math.min(state.visibleCount, targetData.length);
+        const targetStart = nearestIndexForDate(targetData, state.visibleStartDate);
+        const maxOffset = Math.max(0, targetData.length - targetVisibleCount);
+
+        targetState.visibleCount = targetVisibleCount;
+        targetState.scrollOffset = Math.max(0, Math.min(targetStart >= 0 ? targetStart : state.scrollOffset, maxOffset));
+
+        const targetHover = nearestIndexForDate(targetData, state.hoveredDate);
+        const visibleStart = Math.floor(targetState.scrollOffset);
+        targetState.hoveredIndex = targetHover >= visibleStart && targetHover < visibleStart + targetVisibleCount
+            ? targetHover - visibleStart
+            : null;
+
+        requestAnimationFrame(() => drawLineChart(targetCanvas, targetData, targetLabel, targetVisibleCount));
     };
+
+    const syncToKosdaq = state => syncChartByDate(c2, kosdaq, 'Q ADR', state);
+    const syncToKospi = state => syncChartByDate(c1, kospi, 'K ADR', state);
 
     c1.rangeCalculator = getCombinedRange;
     c1.syncCallback = syncToKosdaq;
     c2.rangeCalculator = getCombinedRange;
     c2.syncCallback = syncToKospi;
 
-    // Use current visibleCount if already set, else default to 2y (~500 days)
-    const currentCount = c1.chartState ? c1.chartState.visibleCount : 500;
+    // Use current visibleCount if already set, else default to 2y (480 trading days).
+    const currentCount = c1.chartState ? c1.chartState.visibleCount : 480;
     drawLineChart(c1, kospi, 'K ADR', currentCount);
     drawLineChart(c2, kosdaq, 'Q ADR', currentCount);
 }
 // function drawLineChart(canvas, data, label, visibleCount = 60) {
 function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = null) {
     if (!canvas) return;
+    if (data && data.length > 0) visibleCount = Math.max(1, Math.min(visibleCount, data.length));
+    // Interaction listeners are installed once, so keep their data source current
+    // when a later refresh replaces the ADR arrays.
+    canvas.chartData = data;
+    canvas.chartLabel = label;
     // Store sync callback for future use (e.g. by period buttons)
     if (syncCallback) canvas.syncCallback = syncCallback;
 
@@ -2257,6 +2431,9 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
     // But original logic used startIdx + visibleCount. Let's keep it consistent:
     const actualEndIdx = Math.min(startIdx + visibleCount, data.length);
     const visibleSeries = data.slice(startIdx, actualEndIdx);
+    state.visibleStartDate = visibleSeries[0]?.date ?? null;
+    state.visibleEndDate = visibleSeries[visibleSeries.length - 1]?.date ?? null;
+    state.hoveredDate = state.hoveredIndex !== null ? visibleSeries[state.hoveredIndex]?.date ?? null : null;
 
     // Padding
     const padding = { top: 60, right: 100, bottom: 80, left: 60 };
@@ -2559,6 +2736,8 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
 
                 const x = lastEv.x;
                 const rect = lastEv.rect;
+                const activeData = canvas.chartData || data;
+                const activeLabel = canvas.chartLabel || label;
                 const currentVisibleCount = canvas.chartState.visibleCount;
 
                 if (canvas.chartState.isScrollDragging) {
@@ -2566,14 +2745,14 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
                     const dx = x - canvas.chartState.lastX;
                     canvas.chartState.lastX = x; // update for next delta
 
-                    const totalDataCount = data.length;
+                    const totalDataCount = activeData.length;
                     const barAreaW = canvas.chartState.scrollbar ? canvas.chartState.scrollbar.areaWidth : w;
 
                     const scrollRatioChange = dx / barAreaW;
                     const offsetChange = scrollRatioChange * totalDataCount;
 
                     canvas.chartState.scrollOffset += offsetChange;
-                    drawLineChart(canvas, data, label, currentVisibleCount);
+                    drawLineChart(canvas, activeData, activeLabel, currentVisibleCount);
                     if (canvas.syncCallback) canvas.syncCallback(canvas.chartState);
 
                 } else if (canvas.chartState.isDragging) {
@@ -2583,7 +2762,7 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
 
                     const moveCount = -dx / (plotW / currentVisibleCount);
                     canvas.chartState.scrollOffset += moveCount;
-                    drawLineChart(canvas, data, label, currentVisibleCount);
+                    drawLineChart(canvas, activeData, activeLabel, currentVisibleCount);
                     if (canvas.syncCallback) canvas.syncCallback(canvas.chartState);
 
                 } else {
@@ -2601,13 +2780,13 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
                         const idx = Math.round(ratio * (currentVisibleCount - 1));
                         if (idx >= 0 && idx < currentVisibleCount) {
                             canvas.chartState.hoveredIndex = idx;
-                            drawLineChart(canvas, data, label, currentVisibleCount);
+                            drawLineChart(canvas, activeData, activeLabel, currentVisibleCount);
                             if (canvas.syncCallback) canvas.syncCallback(canvas.chartState);
                         }
                     } else {
                         if (canvas.chartState.hoveredIndex !== null) {
                             canvas.chartState.hoveredIndex = null;
-                            drawLineChart(canvas, data, label, currentVisibleCount);
+                            drawLineChart(canvas, activeData, activeLabel, currentVisibleCount);
                             if (canvas.syncCallback) canvas.syncCallback(canvas.chartState);
                         }
                     }
@@ -2653,10 +2832,27 @@ function drawLineChart(canvas, data, label, visibleCount = 60, syncCallback = nu
         // Wheel (Scroll)
         canvas.addEventListener('wheel', e => {
             e.preventDefault();
-            const currentVisibleCount = canvas.chartState.visibleCount;
-            const delta = Math.sign(e.deltaY);
-            canvas.chartState.scrollOffset += delta * (currentVisibleCount / 10); // Speed
-            requestAnimationFrame(() => drawLineChart(canvas, data, label, currentVisibleCount));
+            const activeData = canvas.chartData || data;
+            const activeLabel = canvas.chartLabel || label;
+            if (!activeData.length) return;
+            const state = canvas.chartState;
+            const rect = canvas.getBoundingClientRect();
+            const localX = e.clientX - rect.left;
+            const pointerRatio = Math.max(0, Math.min(1, (localX - padding.left) / plotW));
+            const previousCount = state.visibleCount;
+            const anchorIndex = Math.max(0, Math.min(activeData.length - 1,
+                Math.round(state.scrollOffset + pointerRatio * (previousCount - 1))));
+            const zoomFactor = e.deltaY > 0 ? 1.2 : 0.8;
+            const nextCount = Math.max(30, Math.min(activeData.length, Math.round(previousCount * zoomFactor)));
+            state.visibleCount = nextCount;
+            state.scrollOffset = anchorIndex - pointerRatio * (nextCount - 1);
+            state.hoveredIndex = null;
+            requestAnimationFrame(() => {
+                const latestData = canvas.chartData || activeData;
+                const latestLabel = canvas.chartLabel || activeLabel;
+                drawLineChart(canvas, latestData, latestLabel, nextCount);
+                if (canvas.syncCallback) canvas.syncCallback(state);
+            });
         }, { passive: false });
     }
 
@@ -2681,7 +2877,8 @@ document.body.addEventListener('click', function (e) {
     const periodBtn = e.target.closest('.period-btn');
     if (periodBtn) {
         const period = periodBtn.dataset.period;
-        const fullData = tabData[ADR_TAB_ID].adr;
+        const fullData = tabData[ADR_TAB_ID]?.adr;
+        if (!fullData) return;
 
         document.querySelectorAll('.adr-chart-wrapper').forEach(wrapper => {
             wrapper.querySelectorAll('.period-btn').forEach(b => {
@@ -2710,6 +2907,7 @@ document.body.addEventListener('click', function (e) {
         console.log('[Click] Rank 조회 버튼 클릭');
         loadData();
         loadTransactionRank();
+        loadWatchlistRank();
         return;
     }
 
@@ -2896,6 +3094,21 @@ document.getElementById('addOverseasTab').addEventListener('click', () => {
     tabData[newTabId] = { type: 'overseas_custom', config: '' };
 
     createTabButtonElement(newTabId, "해외종목 " + overseasCount);
+    createTabContentElement(newTabId);
+    activateTab(newTabId);
+    addTabMenu.style.display = "none";
+    saveAppData();
+});
+
+// Add a dedicated exchange-rate and interest-rate custom tab.
+document.getElementById('addExchangeRateTab').addEventListener('click', () => {
+    const uniqueId = Date.now();
+    const newTabId = "tab_exchange_" + uniqueId;
+    const currentTabs = Array.from(document.querySelectorAll(".tab-btn"));
+    const exchangeCount = currentTabs.filter(btn => btn.textContent.startsWith("금리/환율")).length + 1;
+
+    tabData[newTabId] = { type: 'exchange_rate', config: '', sectorColors: {} };
+    createTabButtonElement(newTabId, "금리/환율 " + exchangeCount);
     createTabContentElement(newTabId);
     activateTab(newTabId);
     addTabMenu.style.display = "none";
@@ -4628,6 +4841,7 @@ async function refreshAllTabs() {
         const originalText = globalRefreshBtn.textContent;
         globalRefreshBtn.textContent = "갱신 중...";
         globalRefreshBtn.disabled = true;
+        updateStatus('loading');
         setTimeout(() => {
             globalRefreshBtn.textContent = originalText;
             globalRefreshBtn.disabled = false;
@@ -4662,8 +4876,9 @@ async function refreshAllTabs() {
         }
     });
 
-    if (statusText) statusText.textContent = "전체 탭 갱신 명령 전송됨";
-    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
+    updateStatus('success');
+//    if (statusText) statusText.textContent = "전체 탭 갱신 명령 전송됨";
+//    if (lastUpdate) lastUpdate.textContent = formatTime(new Date());
 }
 
 /**
@@ -5176,10 +5391,15 @@ function refreshOverseasCustomCharts(tabId) {
 function setupBulkSettingsHandlers() {
     const bulkUploadBtn = document.getElementById('bulkUpload');
     const bulkDownloadBtn = document.getElementById('bulkDownload');
+    const serverBackupRestoreBtn = document.getElementById('serverBackupRestore');
     const bulkFileInput = document.getElementById('bulkFileInput');
 
     if (bulkDownloadBtn) {
         bulkDownloadBtn.addEventListener('click', bulkExportSettings);
+    }
+
+    if (serverBackupRestoreBtn) {
+        serverBackupRestoreBtn.addEventListener('click', restoreServerBackup);
     }
 
     if (bulkUploadBtn && bulkFileInput) {
@@ -5246,34 +5466,49 @@ function bulkExportSettings() {
         return;
     }
 
-    // 1. TXT Export (Custom Tabs only)
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const txtBlob = new Blob([content], { type: 'text/plain' });
-    const txtUrl = URL.createObjectURL(txtBlob);
-    const aTxt = document.createElement('a');
-    aTxt.href = txtUrl;
-    aTxt.download = `bulk_settings_${dateStr}.txt`;
-    document.body.appendChild(aTxt);
-    aTxt.click();
-    document.body.removeChild(aTxt);
-    URL.revokeObjectURL(txtUrl);
-
-    // 2. JSON Export (Full State)
     const fullState = getSerializedState();
-    const jsonBlob = new Blob([JSON.stringify(fullState, null, 2)], { type: 'application/json' });
-    const jsonUrl = URL.createObjectURL(jsonBlob);
-    const aJson = document.createElement('a');
-    aJson.href = jsonUrl;
-    aJson.download = `full_backup_${dateStr}.json`;
-    document.body.appendChild(aJson);
+    fetch('/api/settings/backups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txt: content, json: JSON.stringify(fullState) })
+    })
+        .then(async response => {
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+            alert(`프로젝트 폴더에 백업했습니다.\n${result.files.join('\n')}`);
+        })
+        .catch(error => {
+            console.error('❌ [bulkExportSettings] Server backup failed:', error);
+            alert(`프로젝트 폴더에 백업하지 못했습니다.\n${error.message}`);
+        });
+}
 
-    // Slight delay to ensure browsers allow multiple downloads
-    setTimeout(() => {
-        aJson.click();
-        document.body.removeChild(aJson);
-        URL.revokeObjectURL(jsonUrl);
-        console.log("📥 [bulkExportSettings] Dual-format (TXT + JSON) download triggered.");
-    }, 100);
+async function restoreServerBackup() {
+    try {
+        const response = await fetch('/api/settings/backups', { cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+        const backups = result.files || [];
+        if (!backups.length) {
+            alert('프로젝트 폴더에 복원 가능한 백업이 없습니다.');
+            return;
+        }
+        const choices = backups.map((file, index) => `${index + 1}. ${file.filename}`).join('\n');
+        const choice = prompt(`복원할 프로젝트 폴더 백업 번호를 입력하세요.\n\n${choices}`);
+        if (choice === null) return;
+        const selected = backups[Number.parseInt(choice, 10) - 1];
+        if (!selected) {
+            alert('목록에 있는 번호를 입력해주세요.');
+            return;
+        }
+        const backupResponse = await fetch(`/api/settings/backups/${encodeURIComponent(selected.filename)}`, { cache: 'no-store' });
+        const backup = await backupResponse.json();
+        if (!backupResponse.ok || !backup.success) throw new Error(backup.error || `HTTP ${backupResponse.status}`);
+        bulkImportSettings(new Blob([backup.content], { type: 'application/json' }));
+    } catch (error) {
+        console.error('❌ [restoreServerBackup] Failed:', error);
+        alert(`프로젝트 폴더 백업을 불러오지 못했습니다.\n${error.message}`);
+    }
 }
 
 /**
@@ -5552,20 +5787,23 @@ function applyFullStateBackup(data) {
         }
     }
 
-    // 6. 설정 저장과 메모 저장은 서버에서 별도 경로로 처리
+    // 6. 복원된 활성 탭을 먼저 적용해야 저장 스냅샷에도 백업의 activeTabId가 기록된다.
+    const targetTabId = data.activeTabId || PERM_TAB_ID;
+    activateTab(targetTabId);
+
+    // 설정 저장과 메모 저장은 서버에서 별도 경로로 처리
     saveAppData();
     if (backupHasMemo) {
         let restoredDelta = data.memoDelta;
         if (typeof restoredDelta === 'string') {
             try { restoredDelta = JSON.parse(restoredDelta); } catch { restoredDelta = null; }
         }
-        saveMemoToServer(typeof data.memoHtml === 'string' ? data.memoHtml : '', restoredDelta)
+        const restoredHtml = typeof data.memoHtml === 'string'
+            ? data.memoHtml
+            : (localStorage.getItem('memoContent_html') || '');
+        saveMemoToServer(restoredHtml, restoredDelta)
             .catch(error => console.error('❌ [Restore] Memo server save failed:', error));
     }
-
-    // 7. 활성 탭 전환
-    const targetTabId = data.activeTabId || PERM_TAB_ID;
-    activateTab(targetTabId);
 
     alert("✅ 전체 환경 복구가 완료되었습니다.");
     console.log("✅ [Restore] Success. Activated tab:", targetTabId);
@@ -5593,6 +5831,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (finalData) {
+        // index.html starts with Rank active; clear that default so applyData can
+        // restore the snapshot's activeTabId during the initial load.
+        document.querySelectorAll('.tab-content.active').forEach(tab => tab.classList.remove('active'));
         applyData(finalData);
         // 서버 데이터를 성공적으로 적용한 경우 로컬스토리지에도 보관 (서버로 역전송 방지)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(finalData));
@@ -5771,7 +6012,10 @@ function initMemoEditor() {
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const day = String(now.getDate()).padStart(2, '0');
-            const dateStr = `[${year}-${month}-${day}]`;
+            const hour = String(now.getHours()).padStart(2, '0');
+            const minute = String(now.getMinutes()).padStart(2, '0');
+            const second = String(now.getSeconds()).padStart(2, '0');
+            const dateStr = `[${year}-${month}-${day} ${hour}:${minute}:${second}]`;
 
             const range = this.quill.getSelection(true); // true = focus if needed
             let index = range ? range.index : this.quill.getLength();
@@ -5930,8 +6174,9 @@ async function saveMemo() {
     const content = quillEditor.getContents();
     const html = quillEditor.root.innerHTML;
 
-    localStorage.setItem('memoContent_html', html);
-    localStorage.setItem('memoContent_delta', JSON.stringify(content));
+    const memoUpdatedAt = Date.now();
+    writeLocalMemo(html, content);
+    localStorage.setItem(MEMO_PENDING_SYNC_KEY, JSON.stringify({ memoHtml: html, memoDelta: content, memoUpdatedAt }));
 
     const status = document.getElementById('memoStatus');
     const saveBtn = document.getElementById('memoSaveBtn');
@@ -5939,7 +6184,7 @@ async function saveMemo() {
     if (status) status.textContent = '서버로 저장 중...';
 
     try {
-        await saveMemoToServer(html, content);
+        await saveMemoToServer(html, content, memoUpdatedAt);
         if (status) status.textContent = '서버 저장 완료 ✓';
         console.log('💾 [Memo] Explicit server save completed');
     } catch (error) {

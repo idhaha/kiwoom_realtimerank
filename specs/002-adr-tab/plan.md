@@ -57,7 +57,6 @@ public/
 ├── index.html             # tab_adr 마크업
 ├── app.js                 # extractArrayFromHtml, drawLineChart, 듀얼 동기화 로직
 └── style.css
-docs/SYSTEM_SPECIFICATION.md  # 1.2절
 ```
 
 **Structure Decision**: 기존 단일 프로젝트 구조 유지. 별도 차트 모듈 분리 없이 `app.js` 내 기존 함수 확장.

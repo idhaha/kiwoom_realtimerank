@@ -58,7 +58,6 @@ public/
 ├── index.html             # tab_earnings 마크업, iframe 컨테이너
 ├── app.js                 # refreshEarningsTab, iframe 새로고침 로직
 └── style.css
-docs/SYSTEM_SPECIFICATION.md  # 1.4절
 ```
 
 **Structure Decision**: 기존 구조 유지. HTML/자산/API 프록시 로직은 `server.js` 내 기존 라우트에서 계속 확장.

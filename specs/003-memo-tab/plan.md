@@ -55,7 +55,6 @@ public/
 ├── index.html             # tab_memo 마크업, FullCalendar/Quill CDN 스크립트
 ├── app.js                 # Quill 초기화, [Today] 버튼, Google OAuth 플로우, 캘린더 CRUD
 └── style.css
-docs/SYSTEM_SPECIFICATION.md  # 1.3절
 ```
 
 **Structure Decision**: 기존 구조 유지. Google Calendar 연동은 서버를 거치지 않고 브라우저에서 Google API를 직접 호출하는 기존 방식을 유지(백엔드 프록시 불필요).

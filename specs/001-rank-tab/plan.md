@@ -23,6 +23,7 @@ Rank 탭은 거래대금 상위(키움), 실시간 조회 순위(키움), 대주
 **Target Platform**: Oracle Cloud Free Tier(Ubuntu) 서버에서 PM2로 상시 구동, 브라우저(데스크톱/모바일 반응형)로 접근
 
 **Project Type**: 웹 서비스 — 단일 Express 서버가 API와 정적 프론트엔드(`public/`)를 함께 서빙
+**Cross-feature UI ownership**: 전역 `전체조회` 및 작은 화면 `더 보기` 작업 메뉴는 공통 UI 동작의 Source of Truth를 이 feature의 spec에서 관리하며, 구현은 기존 `public/app.js`/`index.html`의 전역 컨트롤을 기준으로 한다.
 
 **Performance Goals**: 초기 로드 5초 이내(SC-001), 자동 갱신 주기 오차 ±5초 이내(SC-002)
 
@@ -69,7 +70,6 @@ public/
 ├── app.js                    # Rank 패널 렌더링/자동갱신 로직 (loadData, loadTransactionRank 등)
 └── style.css                 # Rank 테이블/상태 표시 스타일
 docs/
-├── SYSTEM_SPECIFICATION.md    # 1.1절 = 이 기능의 원본 사양
 └── reference/                 # 키움/한투 API 참고문서
 .env                          # KIWOOM_APPKEY, KIWOOM_SECRETKEY, EFRIEND_* (git 미포함)
 ```

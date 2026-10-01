@@ -19,7 +19,7 @@ Sync Impact Report와 본 constitution은 앞으로 프로젝트의 개발 및 �
 
 specs에는 검증되지 않은 계획이나 희망 사항을 현재 구현된 기능인 것처럼 기술해서는 안 된다. 계획된 변경 사항은 future work로 별도로 기술한다.
 
-코드와 docs/SYSTEM_SPECIFICATION.md의 내용이 서로 다른 경우, 영향을 받는 spec을 최종 확정하기 전에 어느 쪽이 잘못되었는지 확인하고 해당 불일치를 해결해야 한다.
+코드와 관련 Spec Kit 문서(spec.md, plan.md, tasks.md, contracts 등)의 내용이 서로 다른 경우, 영향을 받는 spec을 최종 확정하기 전에 어느 쪽이 잘못되었는지 확인하고 해당 불일치를 해결해야 한다.
 
 ### II. External API Resilience
 이 프로젝트는 여러 외부 데이터 소스(Kiwoom REST, eFriend, TradingEconomics, FRED, ECOS, TradingView, Investing.com, Finviz, Toss Securities calendar, Google Calendar)에 의존한다.
@@ -65,7 +65,7 @@ docs/reference/는 third-party API reference material을 보관하며, applicati
 
 Feature work는 다음 Spec Kit 순서를 따른다: /speckit-constitution → /speckit-specify → /speckit-clarify → /speckit-plan → /speckit-tasks → /speckit-analyze → /speckit-implement.
 
-기존 기능(brownfield)의 경우 실제 코드를 기준으로 먼저 spec을 작성한 다음 docs/SYSTEM_SPECIFICATION.md와 대조하여 검증한다. 불일치 사항은 기록하고 /speckit-analyze를 통해 해결한 후 implementation work를 진행한다.
+기존 기능(brownfield)의 경우 실제 코드를 기준으로 먼저 spec을 작성한 다음 관련 기존 문서 및 현재 구현을 교차검증한다. 불일치 사항은 기록하고 /speckit-analyze를 통해 해결한 후 implementation work를 진행한다. 최종 확정된 요구사항과 설계는 각 feature의 Spec Kit 산출물을 Source of Truth로 사용한다.
 
 Commits는 논리적인 변경 단위별로 수동 검토하고 직접 수행한다. 자동 또는 unattended commit은 사용하지 않는다.
 

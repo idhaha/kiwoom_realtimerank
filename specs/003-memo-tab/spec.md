@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: 기존 구현(브라운필드) 문서화 — `docs/SYSTEM_SPECIFICATION.md` 1.3절 기준
+**Input**: 기존 구현(브라운필드) 문서화 — 현재 구현과 이 Feature의 Spec Kit 산출물을 기준으로 정리
 
 ## User Scenarios & Testing *(mandatory)*
 

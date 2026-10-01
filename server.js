@@ -307,6 +307,7 @@ app.get('/api/stock', async (req, res) => {
         console.log("DEBUG: ka00198 Full Response Data:", JSON.stringify(totalResp.data, null, 2));
 
         const stocks = totalResp.data.item_inq_rank || [];
+        fileLog(`[Rank] /api/stock ka00198 received ${stocks.length} items (return_code=${totalResp.data.return_code ?? 'n/a'})`);
 
         // 토큰 에러 발생 시 캐시 초기화
         if (totalResp.data.return_code === 3 || (totalResp.data.return_msg && totalResp.data.return_msg.includes("Token이 유효하지 않습니다"))) {
@@ -406,6 +407,8 @@ app.get('/api/stock', async (req, res) => {
 
                     return {
                         ...stock,
+                        bigd_rank: stock.bigd_rank || stock.rank || 0,
+                        base_comp_chgr: stock.base_comp_chgr || stock.flu_rt || stock.fluc_rt || stock.prdy_ctrt || '0',
                         mkt_type: marketType, // Explicit market type from ka10100
                         trde_amt: trdeAmtMillion // 기존 로직 호환 (클라이언트가 /100 할수도, 확인 필요. 일단 ka10007은 백만단위 trde_prica 리턴함. 클라이언트에서 그대로 쓰도록 수정했으니 여기선 *100 안하고 그대로 줘야함? 아님 클라이언트가 백만단위 기대?)
                         // [Fix] 클라이언트 renderTable: const trdeAmtMillion = trdeAmtNum; (백만단위 그대로 사용)
@@ -477,6 +480,7 @@ app.get('/api/stock', async (req, res) => {
         console.log(`Step 4.5: eFriend 시장구분 조회 완료 (${marketLookupCount}개 ka10100 조회, KIS 시장명 미사용)`);
 
         console.log("Step 5: 데이터 보정 및 병합 완료");
+        fileLog(`[Rank] /api/stock response counts: kiwoom=${enrichedStocks.length}, efriend=${efriendStocks.length}`);
         res.json({
             success: true,
             data: {
@@ -542,6 +546,7 @@ app.get('/api/transaction_rank', async (req, res) => {
 
         // ka10032 returns data in 'trde_prica_upper'
         const rawItems = response.data.trde_prica_upper || response.data.output || [];
+        fileLog(`[Rank] /api/transaction_rank ka10032 received ${rawItems.length} items (return_code=${response.data.return_code ?? 'n/a'})`);
 
         // 토큰 에러 발생 시 캐시 초기화
         if (response.data.return_code === 3 || (response.data.return_msg && response.data.return_msg.includes("Token이 유효하지 않습니다"))) {
@@ -550,13 +555,16 @@ app.get('/api/transaction_rank', async (req, res) => {
             tokenExpiryTime = 0;
         }
 
+        // The UI renders at most 20 rows. Enrich a few extra candidates to
+        // leave room for ETFs and non-stock instruments removed by filtering.
+        const candidateItems = rawItems.slice(0, 30);
         // Market Enrichment
-        console.log(`Step 3: 거래대금상위 시장구분(ka10100) 보정 시작 (${rawItems.length}개)...`);
+        console.log(`Step 3: 거래대금상위 시장구분(ka10100) 보정 시작 (${candidateItems.length}/${rawItems.length}개)...`);
         const enrichedItems = [];
         const chunkSize = 1; // 429 에러 방지를 위해 1로 하향
 
-        for (let i = 0; i < rawItems.length; i += chunkSize) {
-            const chunk = rawItems.slice(i, i + chunkSize);
+        for (let i = 0; i < candidateItems.length; i += chunkSize) {
+            const chunk = candidateItems.slice(i, i + chunkSize);
             const chunkPromises = chunk.map(async (item) => {
                 let marketType = (mrkt_tp === "001") ? 'K' : (mrkt_tp === "101" ? 'Q' : 'Q'); // Default if 'All'
                 const stockCode = (item.stk_cd || "").replace(/_AL$/, "");
@@ -670,9 +678,11 @@ app.get('/api/transaction_rank', async (req, res) => {
             };
         });
 
+        fileLog(`[Rank] /api/transaction_rank response counts: items=${dataWithConcentration.length}`);
+
         res.json({
             success: true,
-            data: dataWithConcentration,
+            items: dataWithConcentration,
             market_turnover: marketTurnover,
             server_time: new Date().toISOString()
         });
@@ -766,7 +776,7 @@ app.get('/api/watchlist_groups', async (req, res) => {
 
         res.json({
             success: true,
-            data: groups,
+            groups,
             server_time: new Date().toISOString()
         });
     } catch (error) {
@@ -1030,10 +1040,17 @@ app.get('/api/watchlist_rank', async (req, res) => {
 
         fileLog(`Step 4: 관심종목 최종 보정 완료 (총 ${enrichedItems.length}개 반환)`);
 
+        // API 계약에서도 하락률이 큰 종목부터 반환하도록 정렬한다.
+        enrichedItems.sort((a, b) => {
+            const rateA = Number.parseFloat(a.fluc_rt || a.flu_rt || a.base_comp_chgr || a.prdy_ctrt || 0) || 0;
+            const rateB = Number.parseFloat(b.fluc_rt || b.flu_rt || b.base_comp_chgr || b.prdy_ctrt || 0) || 0;
+            return rateA - rateB;
+        });
+
         res.json({
             success: true,
             grp_id: grpId,
-            data: enrichedItems,
+            items: enrichedItems,
             server_time: new Date().toISOString()
         });
 
@@ -1967,6 +1984,83 @@ app.get('/api/fred', (req, res) => {
  * 사용자 설정 저장 및 불러오기 API
  */
 const SETTINGS_FILE = path.join(__dirname, 'user_settings.json');
+const MEMO_BACKUP_FILE = path.join(__dirname, 'user_settings.memo-backup.json');
+const BACKUP_NAME_PATTERN = /^(bulk_settings_\d{8}_\d{6}_\d{3}\.txt|full_backup_\d{8}_\d{6}_\d{3}\.json)$/;
+
+function getBackupPath(filename) {
+    if (typeof filename !== 'string' || !BACKUP_NAME_PATTERN.test(filename)) return null;
+    const resolved = path.resolve(__dirname, filename);
+    return path.dirname(resolved) === path.resolve(__dirname) ? resolved : null;
+}
+
+app.get('/api/settings/backups', (req, res) => {
+    try {
+        const files = fs.readdirSync(__dirname)
+            .filter(filename => BACKUP_NAME_PATTERN.test(filename))
+            .map(filename => {
+                const stat = fs.statSync(path.join(__dirname, filename));
+                return { filename, bytes: stat.size, updatedAt: stat.mtimeMs };
+            })
+            .sort((a, b) => b.updatedAt - a.updatedAt);
+        res.set('Cache-Control', 'no-store');
+        res.json({ success: true, files });
+    } catch (error) {
+        res.status(500).json({ success: false, error: '백업 목록을 불러오지 못했습니다.' });
+    }
+});
+
+app.get('/api/settings/backups/:filename', (req, res) => {
+    const backupPath = getBackupPath(req.params.filename);
+    if (!backupPath || !fs.existsSync(backupPath)) {
+        return res.status(404).json({ success: false, error: '백업 파일을 찾을 수 없습니다.' });
+    }
+    try {
+        res.set('Cache-Control', 'no-store');
+        res.json({ success: true, filename: req.params.filename, content: fs.readFileSync(backupPath, 'utf8') });
+    } catch (error) {
+        res.status(500).json({ success: false, error: '백업 파일을 읽지 못했습니다.' });
+    }
+});
+
+app.post('/api/settings/backups', (req, res) => {
+    try {
+        const { txt, json } = req.body || {};
+        if (typeof txt !== 'string' || typeof json !== 'string') {
+            return res.status(400).json({ success: false, error: 'TXT와 JSON 백업 내용이 필요합니다.' });
+        }
+        const fullState = JSON.parse(json);
+        if (!fullState || !Array.isArray(fullState.tabs) || !fullState.contents || typeof fullState.contents !== 'object') {
+            return res.status(400).json({ success: false, error: '올바른 전체 설정 JSON 백업이 아닙니다.' });
+        }
+        const stamp = new Date().toISOString().replace(/[-:T]/g, '').replace(/(\d{8})(\d{6})\.(\d{3})Z$/, '$1_$2_$3');
+        const txtFilename = `bulk_settings_${stamp}.txt`;
+        const jsonFilename = `full_backup_${stamp}.json`;
+        const txtPath = getBackupPath(txtFilename);
+        const jsonPath = getBackupPath(jsonFilename);
+        fs.writeFileSync(txtPath, txt, { encoding: 'utf8', flag: 'wx' });
+        try {
+            fs.writeFileSync(jsonPath, JSON.stringify(fullState, null, 2), { encoding: 'utf8', flag: 'wx' });
+        } catch (error) {
+            try { fs.unlinkSync(txtPath); } catch { /* best effort cleanup */ }
+            throw error;
+        }
+        res.json({ success: true, files: [txtFilename, jsonFilename] });
+    } catch (error) {
+        console.error('❌ 백업 파일 저장 에러:', error.message);
+        res.status(500).json({ success: false, error: '프로젝트 폴더에 백업 파일을 저장하지 못했습니다.' });
+    }
+});
+
+function writeJsonAtomically(filePath, value) {
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+        fs.writeFileSync(tempPath, JSON.stringify(value, null, 2), 'utf8');
+        fs.renameSync(tempPath, filePath);
+    } catch (error) {
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch { /* best effort cleanup */ }
+        throw error;
+    }
+}
 
 app.get('/api/settings', (req, res) => {
     console.log("📥 GET /api/settings 요청됨");
@@ -1998,14 +2092,14 @@ app.post('/api/settings', (req, res) => {
         }
 
         // Routine settings saves must never replace the last explicitly saved memo.
-        for (const key of ['memoHtml', 'memoDelta']) {
+        for (const key of ['memoHtml', 'memoDelta', 'memoUpdatedAt']) {
             if (savedSettings && Object.prototype.hasOwnProperty.call(savedSettings, key)) {
                 settings[key] = savedSettings[key];
             } else {
                 delete settings[key];
             }
         }
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+        writeJsonAtomically(SETTINGS_FILE, settings);
         res.json({ success: true });
         console.log("✅ 설정 저장 완료");
     } catch (error) {
@@ -2016,7 +2110,7 @@ app.post('/api/settings', (req, res) => {
 
 app.post('/api/settings/memo', (req, res) => {
     try {
-        const { memoHtml, memoDelta, initialSettings } = req.body || {};
+        const { memoHtml, memoDelta, memoUpdatedAt, initialSettings } = req.body || {};
         if (typeof memoHtml !== 'string' || (memoDelta !== null && typeof memoDelta !== 'object')) {
             return res.status(400).json({ success: false, error: 'memoHtml 문자열과 memoDelta 객체가 필요합니다.' });
         }
@@ -2031,9 +2125,22 @@ app.post('/api/settings/memo', (req, res) => {
             settings = {};
         }
 
+        // Keep the last non-empty memo that was replaced so an accidental blank save is recoverable.
+        const hasPreviousMemo = typeof settings.memoHtml === 'string' && settings.memoHtml.length > 0;
+        const memoChanged = settings.memoHtml !== memoHtml || JSON.stringify(settings.memoDelta ?? null) !== JSON.stringify(memoDelta ?? null);
+        if (hasPreviousMemo && memoChanged) {
+            writeJsonAtomically(MEMO_BACKUP_FILE, {
+                memoHtml: settings.memoHtml,
+                memoDelta: settings.memoDelta ?? null,
+                memoUpdatedAt: settings.memoUpdatedAt ?? settings.updatedAt ?? null,
+                backedUpAt: Date.now()
+            });
+        }
+
         settings.memoHtml = memoHtml;
         settings.memoDelta = memoDelta;
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+        settings.memoUpdatedAt = Number.isFinite(Number(memoUpdatedAt)) ? Number(memoUpdatedAt) : Date.now();
+        writeJsonAtomically(SETTINGS_FILE, settings);
         console.log('✅ 메모 서버 저장 완료');
         res.json({ success: true });
     } catch (error) {

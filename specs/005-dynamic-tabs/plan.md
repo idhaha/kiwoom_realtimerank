@@ -56,7 +56,6 @@ public/
 ├── index.html             # + 메뉴, 그리드/커스텀 탭 템플릿
 ├── app.js                 # parseCustomCharts, 그리드 셀 로직, 탭 생명주기 관리
 └── style.css
-docs/SYSTEM_SPECIFICATION.md  # 2장
 ```
 
 **Structure Decision**: 기존 구조 유지. 탭 유형별 렌더링 로직은 `app.js` 내 기존 함수들을 계속 확장.
