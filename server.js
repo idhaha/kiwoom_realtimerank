@@ -6,6 +6,7 @@ const cors = require('cors');
 const fs = require('fs');
 const { exec } = require('child_process');
 const puppeteer = require('puppeteer');
+const crypto = require('crypto');
 
 // 전역 시장구분 캐시 (종목코드: 'K'/'Q') - 429 에러 방지용
 const marketCache = {};
@@ -39,6 +40,11 @@ function fileLog(message) {
 const app = express();
 const PORT = process.env.PORT || 3001;
 const SERVER_START_TIME = new Date().toLocaleString();
+const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '218429663028-l66pfc3i804uec317arj717r1hrf519u.apps.googleusercontent.com';
+const AUTH_ADMIN_EMAIL = 'azikanbal@gmail.com';
+const AUTHORIZED_EMAILS_FILE = path.join(__dirname, 'authorized_emails.json');
+const AUTH_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const authSessions = new Map();
 
 // 미들웨어 설정
 app.use(cors());
@@ -49,6 +55,16 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use((req, res, next) => {
     console.log("=========================================");
     console.log(`[${new Date().toLocaleTimeString()}] 요청 발생: ${req.method} ${req.url}`);
+    next();
+});
+
+// Protect every API route, including handlers registered earlier in this file.
+// Only the Google sign-in handshake and session lifecycle endpoints are public.
+app.use('/api', (req, res, next) => {
+    if (req.method === 'OPTIONS' || ['/auth/login', '/auth/session', '/auth/logout'].includes(req.path)) return next();
+    const session = getSessionFromRequest(req);
+    if (!session) return res.status(401).json({ success: false, error: '로그인이 필요합니다.' });
+    req.authUser = session;
     next();
 });
 
@@ -1179,6 +1195,10 @@ app.get('/api/watchlist_debug', async (req, res) => {
  * 토스증권 캘린더 프록시 엔드포인트 (X-Frame-Options 우회 및 임베드용)
  */
 app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
+    if (req.path === '/api/toss_calendar') {
+        const session = getSessionFromRequest(req);
+        if (!session) return res.status(401).json({ success: false, error: '로그인이 필요합니다.' });
+    }
     try {
         const response = await axios.get('https://www.tossinvest.com/calendar', {
             headers: {
@@ -1442,6 +1462,8 @@ app.get('/service-worker.js', async (req, res) => {
 // 캘린더 앱의 비동기 API 요청을 같은 출처에서 전달한다. 대상 호스트를
 // Toss 도메인으로 제한해 임의 URL 프록시로 사용되지 않도록 한다.
 app.all('/api/toss_calendar_proxy', async (req, res) => {
+    const session = getSessionFromRequest(req);
+    if (!session) return res.status(401).json({ success: false, error: '로그인이 필요합니다.' });
     let targetUrl;
     try {
         targetUrl = new URL(req.query.url || '');
@@ -1637,6 +1659,132 @@ app.get('/api/adr', async (req, res) => {
         res.status(500).json({ error: "ADR 데이터를 가져오는데 실패했습니다.", details: error.message });
     }
 });
+
+function readAuthorizedEmails() {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(AUTHORIZED_EMAILS_FILE, 'utf8'));
+        if (Array.isArray(parsed)) return parsed.map(email => String(email).trim().toLowerCase()).filter(Boolean);
+    } catch (error) {
+        if (error.code !== 'ENOENT') console.error('[Auth] Could not read authorized email list:', error.message);
+    }
+    return [];
+}
+
+function writeAuthorizedEmails(emails) {
+    const uniqueEmails = [...new Set(emails.map(email => String(email).trim().toLowerCase()).filter(Boolean))];
+    const tempFile = `${AUTHORIZED_EMAILS_FILE}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(uniqueEmails, null, 2), 'utf8');
+    fs.renameSync(tempFile, AUTHORIZED_EMAILS_FILE);
+}
+
+function getSessionFromRequest(req) {
+    const cookieHeader = req.headers.cookie || '';
+    const sessionCookie = cookieHeader.split(';').map(part => part.trim()).find(part => part.startsWith('azikanbal_session='));
+    if (!sessionCookie) return null;
+    const sessionId = decodeURIComponent(sessionCookie.slice('azikanbal_session='.length));
+    const session = authSessions.get(sessionId);
+    if (!session) return null;
+    if (Date.now() >= session.expiresAt) {
+        authSessions.delete(sessionId);
+        return null;
+    }
+    if (session.email !== AUTH_ADMIN_EMAIL && !readAuthorizedEmails().includes(session.email)) {
+        authSessions.delete(sessionId);
+        return null;
+    }
+    return { ...session, isAdmin: Boolean(AUTH_ADMIN_EMAIL && session.email === AUTH_ADMIN_EMAIL) };
+}
+
+function setAuthCookie(req, res, sessionId) {
+    const secure = req.secure || req.get('x-forwarded-proto') === 'https';
+    res.setHeader('Set-Cookie', `azikanbal_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}${secure ? '; Secure' : ''}`);
+}
+
+app.post('/api/auth/login', async (req, res) => {
+    const credential = req.body?.credential;
+    if (typeof credential !== 'string' || !credential) {
+        return res.status(400).json({ success: false, error: 'Google 로그인 자격 증명이 필요합니다.' });
+    }
+    try {
+        const tokenResponse = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
+            params: { id_token: credential },
+            timeout: 8000
+        });
+        const claims = tokenResponse.data;
+        const email = String(claims.email || '').trim().toLowerCase();
+        const verified = claims.email_verified === true || claims.email_verified === 'true';
+        const expiresAt = Number(claims.exp) * 1000;
+        if (claims.aud !== GOOGLE_OAUTH_CLIENT_ID || !email || !verified || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+            return res.status(401).json({ success: false, error: 'Google 계정 인증을 확인할 수 없습니다.' });
+        }
+        const isAdmin = email === AUTH_ADMIN_EMAIL;
+        if (!isAdmin && !readAuthorizedEmails().includes(email)) {
+            return res.status(403).json({ success: false, error: '이 Google 이메일은 서비스 로그인 허용 목록에 없습니다.' });
+        }
+        const sessionId = crypto.randomBytes(32).toString('base64url');
+        const session = { email, name: String(claims.name || ''), picture: String(claims.picture || ''), expiresAt: Date.now() + AUTH_SESSION_TTL_MS };
+        authSessions.set(sessionId, session);
+        setAuthCookie(req, res, sessionId);
+        res.set('Cache-Control', 'no-store');
+        return res.json({ success: true, user: { email, name: session.name, picture: session.picture, isAdmin } });
+    } catch (error) {
+        console.error('[Auth] Google ID token verification failed:', error.response?.data || error.message);
+        return res.status(401).json({ success: false, error: 'Google 계정 확인에 실패했습니다. 다시 로그인해 주세요.' });
+    }
+});
+
+app.get('/api/auth/session', (req, res) => {
+    const session = getSessionFromRequest(req);
+    if (!session) return res.status(401).json({ authenticated: false });
+    res.set('Cache-Control', 'no-store');
+    res.json({
+        authenticated: true,
+        user: { email: session.email, name: session.name, picture: session.picture, isAdmin: session.isAdmin }
+    });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    const cookieHeader = req.headers.cookie || '';
+    const sessionCookie = cookieHeader.split(';').map(part => part.trim()).find(part => part.startsWith('azikanbal_session='));
+    if (sessionCookie) authSessions.delete(decodeURIComponent(sessionCookie.slice('azikanbal_session='.length)));
+    res.setHeader('Set-Cookie', 'azikanbal_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+    res.json({ success: true });
+});
+
+function requireAdmin(req, res, next) {
+    if (!req.authUser?.isAdmin) return res.status(403).json({ success: false, error: '허용 이메일 관리 권한이 없습니다.' });
+    next();
+}
+
+app.get('/api/auth/users', requireAdmin, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, emails: [...new Set([AUTH_ADMIN_EMAIL, ...readAuthorizedEmails()])].filter(Boolean) });
+});
+
+app.post('/api/auth/users', requireAdmin, (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ success: false, error: '유효한 이메일 주소를 입력해 주세요.' });
+    }
+    if (email === AUTH_ADMIN_EMAIL || readAuthorizedEmails().includes(email)) {
+        return res.status(409).json({ success: false, error: '이미 등록된 이메일입니다.' });
+    }
+    writeAuthorizedEmails([...readAuthorizedEmails(), email]);
+    res.json({ success: true, emails: [...new Set([AUTH_ADMIN_EMAIL, ...readAuthorizedEmails()])].filter(Boolean) });
+});
+
+app.delete('/api/auth/users/:email', requireAdmin, (req, res) => {
+    const email = decodeURIComponent(req.params.email).trim().toLowerCase();
+    if (email === AUTH_ADMIN_EMAIL) return res.status(400).json({ success: false, error: '초기 관리자 계정은 이 화면에서 삭제할 수 없습니다.' });
+    const emails = readAuthorizedEmails();
+    if (!emails.includes(email)) return res.status(404).json({ success: false, error: '등록된 이메일을 찾을 수 없습니다.' });
+    writeAuthorizedEmails(emails.filter(item => item !== email));
+    for (const [sessionId, session] of authSessions) {
+        if (session.email === email) authSessions.delete(sessionId);
+    }
+    res.json({ success: true, emails: [...new Set([AUTH_ADMIN_EMAIL, ...readAuthorizedEmails()])].filter(Boolean) });
+});
+
 
 /**
  * Finviz 이미지 프록시 API (CORS 방지용)

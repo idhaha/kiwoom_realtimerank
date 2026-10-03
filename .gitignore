@@ -45,5 +45,7 @@ bulk_settings_*.txt
 full_backup_*.txt
 full_backup_*.json
 manualsaved_user_settings_*.json
+authorized_emails.json
+authorized_emails.json.*.tmp
 
 dev_tools/

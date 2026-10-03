@@ -47,7 +47,7 @@
 
 ### Implementation for User Story 2
 
-- [x] T011 [US2] GIS OAuth2 Implicit Flow가 앱 구동 시 자동 실행되지 않고 사용자 동작 시에만 트리거되는지 확인(FR-010) — `public/app.js`
+- [x] T011 [US2] 허용된 앱 세션 이후 Calendar OAuth scope 자동 요청 및 같은 Google 이메일 검증 경로를 확인(FR-010) — `public/app.js`
 - [x] T012 [US2] 사용자 캘린더 + 대한민국 공휴일 캘린더 병렬 조회(FR-007)가 contracts/api.md와 일치하는지 확인 — `public/app.js`
 - [x] T013 [P] [US2] 공휴일 이벤트가 읽기 전용으로 표시되는지(FR-008) 확인 — `public/app.js`
 - [x] T014 [US2] 일정 등록/수정/삭제(FR-009)가 각각 POST/PUT/DELETE로 정상 반영되는지 확인 — `public/app.js`
@@ -62,7 +62,9 @@
 ## Phase 5: Polish & Cross-Cutting Concerns
 
 - [x] T018 숨김 탭 초기화 예외 케이스(Edge Case) 재확인 — `public/app.js`
-- [x] T019 quickstart.md 전체 시나리오(1~7) 최종 실행
+- [x] T019 quickstart.md 기존 시나리오(1~7) 최종 실행
+- [x] T020 서비스 허용 목록과 Google Cloud OAuth 테스트 사용자 목록은 별개이며, 테스트 audience의 외부 계정은 Calendar scope 승인에 제한이 있음을 문서화 — `spec.md`, `plan.md`, `quickstart.md`
+- [x] T021 `idhaha@gmail.com`을 Google Cloud 테스트 사용자로 추가하지 않기로 한 결정을 기록하고, 해당 계정의 `403 access_denied`를 현재 운영 제한으로 남김 — `spec.md`, `quickstart.md`
 
 ## Dependencies & Execution Order
 
@@ -119,6 +121,15 @@
 저장 안정성 정적 검토에서 발견한 로컬 우선권 손실 경로, 비원자적 파일 쓰기, 메모 백업 부재를 보완했다. localhost에서 메모 API 및 일반 설정 저장 뒤의 메모 무결성과 저장 시각 보존을 확인했다. 오프라인 저장 실패 뒤 localStorage 대기본이 보존되고, 서버 새로고침 후에도 오래된 서버값에 덮이지 않는 것을 확인했다.
 
 2026-10-01 localhost UI 재확인: 현재 편집 HTML과 서버 메모의 해시가 동일한 것을 확인한 뒤 메모 저장 버튼을 눌러 `서버 저장 완료 ✓`, 서버에서 불러오기 버튼을 눌러 `서버에서 불러오기 완료 ✓` 상태를 확인했다. 화면 메모 내용은 변경하지 않았다. 당시 Google 재인증 로직은 401→새 토큰→200 mock 흐름에서 요청 2회/재인증 1회를 통과했고, 실제 계정 검증은 후속 작업으로 남겨 두었다.
+
+## 2026-10-03 Google OAuth 테스트 audience 조사
+
+- **T020 🟢** 사용자가 `azikanbal@gmail.com`으로 앱 관리자 로그인 후 서비스 허용 목록에 `idhaha@gmail.com`을 등록했다. 앱 로그아웃 후 idhaha 계정으로 서비스 로그인이 됐지만, 일정 탭에서 Calendar scope 동의 시 Google이 `403 access_denied`와 “앱은 현재 테스트 중이며 개발자가 승인한 테스터만 접근 가능” 메시지를 반환했다.
+- **Finding**: `authorized_emails.json`의 앱 로그인 허용은 Google Cloud OAuth audience의 테스트 사용자 권한과 독립적이다. Calendar API scope를 승인하려면 Google Cloud의 테스트 audience에도 해당 사용자가 있어야 한다.
+- **Decision**: 사용자는 `idhaha@gmail.com`을 Google Cloud 테스트 사용자로 추가하지 않기로 했다. Google Cloud 설정은 변경하지 않으며, 이 계정의 Calendar 동기화는 승인 거부 상태로 남는다. 앱 로그인 및 다른 dashboard 기능은 서비스 허용 목록에 따라 계속 사용할 수 있다.
+- **Operational constraint**: Google OAuth `Testing` 모드는 문서상 최대 100명의 테스트 사용자를 허용하고, 테스트 사용자 권한은 7일 후 만료될 수 있다. 향후 일반 사용자에게 제공하려면 Google Auth Platform에서 게시/검증 절차를 검토해야 한다.
+- **Source**: [Google OAuth App Audience](https://support.google.com/cloud/answer/15549945?hl=en), [Google 403 access_denied guidance](https://support.google.com/accounts/answer/16668185?hl=en).
+- **T022 🟢** quickstart.md에 OAuth audience 확인 및 테스트 사용자 미등록 시 예상되는 동기화 거부 시나리오를 추가했다. 해당 신규 Google Cloud 차단 시나리오는 계정 정책을 바꾸지 않고 문서화만 했다.
 
 
 ## 2026-10-01 추가 런타임 검증

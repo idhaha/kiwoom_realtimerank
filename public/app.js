@@ -17,30 +17,50 @@ let isInitializing = false; // Flag to prevent auto-save during startup
 let isCapturing = false; // Flag to suppress all data-fetching during screenshot capture
 let adrRenderPending = false;
 let quillEditor; // Global Quill instance
+let currentAuthUser = null;
 
 /**
  * ===== GOOGLE AUTHENTICATION & CALENDAR API =====
  */
 const GOOGLE_CLIENT_ID = "218429663028-l66pfc3i804uec317arj717r1hrf519u.apps.googleusercontent.com";
-const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const CALENDAR_SCOPE = "openid email https://www.googleapis.com/auth/calendar.events";
 let tokenClient;
 let accessToken = null;
 let calendar = null;
 let tokenErrorCallback = null;
 
-window.handleCredentialResponse = function (response) {
-    const payload = parseJwt(response.credential);
-    console.log("🔓 Login Successful:", payload.email);
+async function acceptCalendarAccessToken(tokenResponse) {
+    if (!tokenResponse?.access_token) throw new Error('Google Calendar 접근 토큰을 받지 못했습니다.');
+    const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { 'Authorization': `Bearer ${tokenResponse.access_token}` }
+    });
+    if (!profileResponse.ok) throw new Error('Google Calendar 계정을 확인하지 못했습니다.');
+    const profile = await profileResponse.json();
+    const calendarEmail = String(profile.email || '').trim().toLowerCase();
+    const appEmail = String(currentAuthUser?.email || '').trim().toLowerCase();
+    if (!profile.email_verified || !calendarEmail || (appEmail && calendarEmail !== appEmail)) {
+        throw new Error('서비스 로그인에 사용한 Google 계정으로 캘린더 권한을 승인해 주세요.');
+    }
+    accessToken = tokenResponse.access_token;
+}
 
-    localStorage.setItem('user_session', JSON.stringify({
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-        expiry: Date.now() + (24 * 60 * 60 * 1000) // 24 Hours
-    }));
-
-    unlockApp();
-    initTokenClient(); // Initialize token client for API access
+window.handleCredentialResponse = async function (response) {
+    const errorEl = document.getElementById('loginError');
+    if (errorEl) errorEl.textContent = '';
+    try {
+        const loginResponse = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential: response.credential })
+        });
+        const result = await loginResponse.json();
+        if (!loginResponse.ok || !result.success) throw new Error(result.error || 'Google 로그인에 실패했습니다.');
+        localStorage.removeItem('user_session');
+        location.reload();
+    } catch (error) {
+        console.error('[Auth] Sign-in rejected:', error);
+        if (errorEl) errorEl.textContent = error.message;
+    }
 };
 
 function initTokenClient() {
@@ -48,12 +68,22 @@ function initTokenClient() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: CALENDAR_SCOPE,
-        callback: (tokenResponse) => {
+        login_hint: currentAuthUser?.email,
+        callback: async (tokenResponse) => {
             if (tokenResponse && tokenResponse.access_token) {
-                tokenErrorCallback = null;
-                accessToken = tokenResponse.access_token;
-                console.log("🎟️ Calendar Access Token Acquired");
-                if (calendar) calendar.refetchEvents();
+                try {
+                    await acceptCalendarAccessToken(tokenResponse);
+                    tokenErrorCallback = null;
+                    console.log("🎟️ Calendar Access Token Acquired");
+                    setCalendarSyncStatus('Google 캘린더 동기화 중…');
+                    if (calendar) calendar.refetchEvents();
+                } catch (error) {
+                    accessToken = null;
+                    const reject = tokenErrorCallback;
+                    tokenErrorCallback = null;
+                    if (reject) reject(error);
+                    else console.error('[Calendar] Account verification failed:', error);
+                }
             } else if (tokenErrorCallback) {
                 const reject = tokenErrorCallback;
                 tokenErrorCallback = null;
@@ -91,12 +121,19 @@ function requestCalendarAccess(callback, onError) {
         return;
     }
 
-    tokenClient.callback = (resp) => {
+    tokenClient.callback = async (resp) => {
         if (resp.access_token) {
-            tokenErrorCallback = null;
-            accessToken = resp.access_token;
-            console.log("🎟️ Calendar Access Token Acquired");
-            if (callback) callback();
+            try {
+                await acceptCalendarAccessToken(resp);
+                tokenErrorCallback = null;
+                console.log("🎟️ Calendar Access Token Acquired");
+                if (callback) callback();
+            } catch (error) {
+                accessToken = null;
+                tokenErrorCallback = null;
+                if (onError) onError(error);
+                else console.error('[Calendar] Account verification failed:', error);
+            }
         } else if (onError) {
             tokenErrorCallback = null;
             onError(new Error(resp.error_description || resp.error || 'Google 인증이 완료되지 않았습니다.'));
@@ -104,7 +141,8 @@ function requestCalendarAccess(callback, onError) {
     };
     tokenErrorCallback = onError || null;
     try {
-        tokenClient.requestAccessToken({ prompt: 'consent' });
+        // Ask for consent only when needed; do not force the consent dialog every login.
+        tokenClient.requestAccessToken({ prompt: '', login_hint: currentAuthUser?.email });
     } catch (error) {
         tokenErrorCallback = null;
         if (onError) onError(error);
@@ -135,36 +173,40 @@ function parseJwt(token) {
     return JSON.parse(jsonPayload);
 }
 
-function unlockApp() {
+function unlockApp(user = null) {
     const loginOverlay = document.getElementById('loginOverlay');
     const tabContainer = document.getElementById('tabContainer');
     const tabContents = document.getElementById('tabContents');
 
+    if (user) currentAuthUser = user;
     if (loginOverlay) loginOverlay.style.display = 'none';
     if (tabContainer) tabContainer.style.display = 'flex';
     if (tabContents) tabContents.style.display = 'block';
     console.log("🚀 App Unlocked & Ready");
 }
 
-function checkLoginSession() {
-    const session = localStorage.getItem('user_session');
-    if (session) {
-        try {
-            const sessionData = JSON.parse(session);
-            if (Date.now() < sessionData.expiry) {
-                unlockApp();
-                initTokenClient();
-                return true;
-            }
-        } catch (e) {
-            console.error("Session parse error", e);
-        }
-    }
-    return false;
+function setCalendarSyncStatus(message, isError = false) {
+    const status = document.getElementById('calendarSyncStatus');
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle('is-error', isError);
 }
 
-// Check session immediately
-checkLoginSession();
+function startCalendarSyncAfterLogin() {
+    if (!currentAuthUser) return;
+    if (!calendar) initCalendar();
+    setCalendarSyncStatus('Google 캘린더 동기화 중…');
+    requestCalendarAccess(
+        () => {
+            setCalendarSyncStatus('Google 캘린더 동기화 중…');
+            if (calendar) calendar.refetchEvents();
+        },
+        (error) => {
+            console.warn('[Calendar] Automatic authorization did not complete:', error);
+            setCalendarSyncStatus('캘린더 권한이 필요합니다. 동기화 버튼으로 다시 시도해 주세요.', true);
+        }
+    );
+}
 
 // Initialize Google Identity Services programmatically
 window.onload = function () {
@@ -308,8 +350,10 @@ async function fetchCalendarEvents(fetchInfo, successCallback, failureCallback) 
         });
 
         successCallback([...primaryEvents, ...holidayEvents]);
+        setCalendarSyncStatus('동기화 완료');
     } catch (error) {
         console.error("❌ Calendar fetch error:", error);
+        setCalendarSyncStatus('동기화에 실패했습니다. 동기화 버튼으로 다시 시도해 주세요.', true);
         failureCallback(error);
     }
 }
@@ -5766,6 +5810,18 @@ function applyFullStateBackup(data) {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('앱 초기화...');
 
+    // Do not load dashboard data until the server confirms an allowed Google session.
+    try {
+        const authResponse = await fetch('/api/auth/session', { cache: 'no-store' });
+        if (!authResponse.ok) return;
+        const authState = await authResponse.json();
+        if (!authState.authenticated) return;
+        unlockApp(authState.user);
+    } catch (error) {
+        console.error('[Auth] Could not verify the current session:', error);
+        return;
+    }
+
     // Try server sync and localStorage, then compare timestamps
     const serverData = await loadAppDataFromServer();
     const localData = loadFromLocalStorage();
@@ -5808,6 +5864,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadWatchlistRank();
     startAutoRefresh();
     setupBulkSettingsHandlers();
+
+    // The app session and Google Calendar scope are separate grants. Once an
+    // allowed app session is confirmed, request Calendar access and load events.
+    startCalendarSyncAfterLogin();
 
     // Global listener for closing sector popups (Improved to handle text selection)
     let isSectorPopupClick = false;
@@ -6076,22 +6136,109 @@ function initMemoEditor() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Logout Button
-    const logoutBtn = document.getElementById('logoutBtn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-            if (confirm('로그아웃 하시겠습니까?')) {
-                localStorage.removeItem('user_session');
-                location.reload();
+    const profileModal = document.getElementById('profileModal');
+    const profileBtn = document.getElementById('profileBtn');
+    const closeProfileBtn = document.getElementById('closeProfileModal');
+    const userEmailEl = document.getElementById('profileCurrentUser');
+    const accountsSection = document.getElementById('authorizedAccountsSection');
+    const emailList = document.getElementById('authorizedEmailList');
+    const addEmailForm = document.getElementById('addAuthorizedEmailForm');
+    const emailInput = document.getElementById('authorizedEmailInput');
+    const accountsMessage = document.getElementById('authorizedAccountsMessage');
+
+    const closeProfile = () => { if (profileModal) profileModal.style.display = 'none'; };
+    const showAccountsMessage = (message, isError = false) => {
+        if (!accountsMessage) return;
+        accountsMessage.textContent = message;
+        accountsMessage.classList.toggle('is-error', isError);
+    };
+    const renderAuthorizedEmails = (emails) => {
+        if (!emailList) return;
+        emailList.replaceChildren();
+        emails.forEach(email => {
+            const item = document.createElement('li');
+            const label = document.createElement('span');
+            label.textContent = email;
+            item.appendChild(label);
+            if (email.toLowerCase() !== 'azikanbal@gmail.com') {
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'authorized-email-remove';
+                removeBtn.textContent = '삭제';
+                removeBtn.addEventListener('click', async () => {
+                    try {
+                        const response = await fetch(`/api/auth/users/${encodeURIComponent(email)}`, { method: 'DELETE' });
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.error || '이메일을 삭제하지 못했습니다.');
+                        renderAuthorizedEmails(result.emails);
+                        showAccountsMessage('허용 이메일을 삭제했습니다.');
+                    } catch (error) { showAccountsMessage(error.message, true); }
+                });
+                item.appendChild(removeBtn);
             }
+            emailList.appendChild(item);
         });
+    };
+    const loadAuthorizedEmails = async () => {
+        try {
+            const response = await fetch('/api/auth/users', { cache: 'no-store' });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || '허용 이메일 목록을 불러오지 못했습니다.');
+            renderAuthorizedEmails(result.emails || []);
+        } catch (error) { showAccountsMessage(error.message, true); }
+    };
+
+    if (profileBtn) profileBtn.addEventListener('click', () => {
+        if (!profileModal) return;
+        if (userEmailEl) userEmailEl.textContent = currentAuthUser?.email || '로그인 상태를 확인할 수 없습니다.';
+        const isAdmin = Boolean(currentAuthUser?.isAdmin);
+        if (accountsSection) accountsSection.hidden = !isAdmin;
+        showAccountsMessage('');
+        profileModal.style.display = 'flex';
+        if (isAdmin) loadAuthorizedEmails();
+    });
+    if (closeProfileBtn) closeProfileBtn.addEventListener('click', closeProfile);
+    if (profileModal) {
+        profileModal.addEventListener('click', event => { if (event.target === profileModal) closeProfile(); });
+        document.addEventListener('keydown', event => { if (event.key === 'Escape') closeProfile(); });
     }
+    if (addEmailForm) addEmailForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const email = emailInput?.value.trim();
+        if (!email) return;
+        try {
+            const response = await fetch('/api/auth/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || '이메일을 등록하지 못했습니다.');
+            renderAuthorizedEmails(result.emails || []);
+            emailInput.value = '';
+            showAccountsMessage('허용 이메일을 등록했습니다.');
+        } catch (error) { showAccountsMessage(error.message, true); }
+    });
+
+    const profileLogoutBtn = document.getElementById('profileLogoutBtn');
+    if (profileLogoutBtn) profileLogoutBtn.addEventListener('click', async () => {
+        try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+        } finally {
+            localStorage.removeItem('user_session');
+            location.reload();
+        }
+    });
 
     // Sync Calendar Button
     document.addEventListener('click', (e) => {
         if (e.target.id === 'syncCalBtn') {
+            setCalendarSyncStatus('Google 캘린더 동기화 중…');
             requestCalendarAccess(() => {
                 if (calendar) calendar.refetchEvents();
+            }, (error) => {
+                console.warn('[Calendar] Manual authorization did not complete:', error);
+                setCalendarSyncStatus('캘린더 권한을 확인하지 못했습니다.', true);
             });
         }
     });

@@ -29,8 +29,9 @@
         <div class="login-card">
             <div class="login-logo">🛰️ Azikanbal</div>
             <h1>Authentication Required</h1>
-            <p>본 서비스는 승인된 사용자만 이용 가능합니다.<br>구글 계정으로 로그인해 주세요.</p>
+            <p>본 서비스는 등록된 Google 계정만 이용할 수 있습니다.<br>Google 계정으로 로그인해 주세요.</p>
             <div id="g_id_signin_button"></div>
+            <p id="loginError" class="login-error" role="alert" aria-live="polite"></p>
         </div>
     </div>
 
@@ -58,8 +59,13 @@
                 </svg>
             </button>
             <button id="globalRefreshBtn" class="btn-primary" style="height: 38px;"><span>전체조회</span></button>
-            <button id="logoutBtn" class="btn-secondary" style="height: 38px; padding: 0 15px; margin-left: 10px;">🔓
-                <span>로그아웃</span></button>
+            <button id="profileBtn" class="profile-button" type="button" title="프로필 및 로그인 허용 계정 관리" aria-label="프로필 및 로그인 허용 계정 관리">
+                <svg class="profile-avatar" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+                    <circle cx="24" cy="24" r="24" fill="#eaf6fd" />
+                    <circle cx="24" cy="17" r="9" fill="#4b91cd" />
+                    <path d="M6.5 41.5a18.8 18.8 0 0 1 35 0A23.9 23.9 0 0 1 24 48a23.9 23.9 0 0 1-17.5-6.5Z" fill="#4b91cd" />
+                </svg>
+            </button>
         </div>
     </div>
 
@@ -73,6 +79,7 @@
                         <div class="panel-header">
                             <h2 style="margin: 0; font-size: 1.1rem;">구글 캘린더</h2>
                             <div class="calendar-actions">
+                                <span id="calendarSyncStatus" class="calendar-sync-status" role="status" aria-live="polite"></span>
                                 <button id="syncCalBtn" class="btn-primary"
                                     style="height: 38px; padding: 0 15px;">동기화</button>
                                 <button onclick="window.open('https://calendar.google.com/calendar/r', '_blank')"
@@ -331,6 +338,35 @@
             <div class="modal-footer backup-picker-footer">
                 <button id="cancelBackupPicker" class="btn-secondary" type="button">취소</button>
                 <button id="restoreSelectedBackup" class="btn-primary" type="button" disabled>선택한 설정 복원</button>
+            </div>
+        </div>
+    </div>
+    <!-- Profile and authorized sign-in accounts -->
+    <div id="profileModal" class="modal profile-modal" style="display: none;" role="dialog"
+        aria-modal="true" aria-labelledby="profileTitle">
+        <div class="modal-content profile-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="profileTitle">프로필</h2>
+                    <p id="profileCurrentUser" class="profile-current-user"></p>
+                </div>
+                <button id="closeProfileModal" class="btn-icon backup-picker-close" type="button" aria-label="닫기">&times;</button>
+            </div>
+            <div class="modal-body profile-body">
+                <section id="authorizedAccountsSection" class="authorized-accounts-section" hidden>
+                    <h3>로그인 허용 이메일</h3>
+                    <p class="profile-help">등록한 이메일 계정만 이 서비스에 로그인할 수 있습니다.</p>
+                    <form id="addAuthorizedEmailForm" class="add-authorized-email-form">
+                        <label class="sr-only" for="authorizedEmailInput">허용할 이메일 주소</label>
+                        <input id="authorizedEmailInput" type="email" autocomplete="off" placeholder="name@example.com" required>
+                        <button class="btn-primary" type="submit">등록</button>
+                    </form>
+                    <p id="authorizedAccountsMessage" class="profile-message" role="status"></p>
+                    <ul id="authorizedEmailList" class="authorized-email-list"></ul>
+                </section>
+            </div>
+            <div class="modal-footer profile-footer">
+                <button id="profileLogoutBtn" class="btn-danger" type="button">로그아웃</button>
             </div>
         </div>
     </div>

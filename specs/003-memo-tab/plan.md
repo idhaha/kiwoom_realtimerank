@@ -22,7 +22,7 @@
 
 **Performance Goals**: 저장 완료 피드백 3초 이내(SC-001), 새로고침 5초 이내(SC-003)
 
-**Constraints**: 타이핑 중 자동 저장 금지(다중 PC 레이스 컨디션 방지, Constitution 원칙과 별개로 기존 설계 원칙). 숨김 탭 초기화 순서 주의(높이 0 에러 방지).
+**Constraints**: 타이핑 중 자동 저장 금지(다중 PC 레이스 컨디션 방지, Constitution 원칙과 별개로 기존 설계 원칙). 숨김 탭 초기화 순서 주의(높이 0 에러 방지). 서비스 이메일 허용 목록과 Google Cloud OAuth 테스트 사용자 audience는 별개다. 현재 OAuth audience는 테스트 모드이며, 테스트 사용자로 등록되지 않은 이메일은 Calendar scope 사용이 Google에 의해 거부된다.
 
 **Scale/Scope**: 1인 사용자, 개인 Google 계정 1개 기준
 
@@ -30,6 +30,7 @@
 
 - **I. Spec-First**: PASS
 - **II. External API Resilience**: PASS — Google 토큰 만료(401) 시 자동 재인증, 네트워크 단절 시 로컬 보존으로 유실 방지.
+- **External OAuth Configuration**: Google Cloud `Testing` 상태에서는 OAuth 프로젝트 테스트 사용자만 Calendar scope를 승인받을 수 있다. `authorized_emails.json`은 이 Google Cloud 설정을 변경하지 않는다. 현재 `idhaha@gmail.com`은 Google 테스트 사용자로 추가하지 않기로 결정했으며, 이 계정의 캘린더 사용은 차단된 상태로 기록한다.
 - **III. Secrets Isolation**: PASS — Google OAuth 클라이언트 ID/토큰은 브라우저 세션에서만 처리되며 서버에 저장하지 않음. `user_session` 로컬 키는 `autosaved_user_settings.json`에 포함되지 않음(3.1절 기준).
 - **IV. Solo-Maintainer Simplicity**: PASS — 기존 CDN 라이브러리 조합 유지, 새 백엔드 컴포넌트 추가 없음.
 - **V. Agent-Agnostic Workflow**: PASS
