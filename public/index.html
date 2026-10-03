@@ -43,17 +43,21 @@
         <button id="addTabBtn" class="add-tab-btn" title="탭 추가">+</button>
 
         <div class="right-controls">
-            <button id="bulkUpload" class="btn-icon header-icon" title="현재 서버 프로젝트 루트의 JSON 설정을 선택해 전체 복원">📂</button>
-            <button id="bulkDownload" class="btn-icon header-icon" title="전체 설정을 JSON 한 파일로 프로젝트 폴더에 백업">💾</button>
+            <button id="bulkUpload" class="btn-icon header-icon server-transfer-icon" title="현재 서버 프로젝트 폴더에서 전체 설정 불러오기" aria-label="서버에서 전체 설정 불러오기">
+                <span class="server-transfer-glyph" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 3v18m0 0 7-7m-7 7-7-7M5 25v4h22v-4" /></svg><span>서버</span></span>
+            </button>
+            <button id="bulkDownload" class="btn-icon header-icon server-transfer-icon" title="전체 설정을 서버 프로젝트 폴더에 저장하기" aria-label="전체 설정을 서버에 저장하기">
+                <span class="server-transfer-glyph" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 21V3m0 0 7 7m-7-7-7 7M5 25v4h22v-4" /></svg><span>서버</span></span>
+            </button>
             <button id="moreControlsBtn" class="btn-icon header-icon mobile-only" title="더 보기" style="display: none;">⚙️</button>
-            <button id="captureAllBtn" class="capture-btn" title="전체 탭 캡처">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            <button id="captureAllBtn" class="btn-icon header-icon capture-camera-icon" title="전체 탭 캡처" aria-label="전체 탭 캡처">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="26" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
                     <circle cx="12" cy="13" r="4"></circle>
                 </svg>
             </button>
-            <button id="globalRefreshBtn" class="btn-primary" style="height: 38px;"><span>🔍 전체조회</span></button>
+            <button id="globalRefreshBtn" class="btn-primary" style="height: 38px;"><span>전체조회</span></button>
             <button id="logoutBtn" class="btn-secondary" style="height: 38px; padding: 0 15px; margin-left: 10px;">🔓
                 <span>로그아웃</span></button>
         </div>
@@ -67,7 +71,7 @@
                     <!-- Left: Google Calendar -->
                     <div class="calendar-section panel">
                         <div class="panel-header">
-                            <h2 style="margin: 0; font-size: 1.1rem;">📅 구글 캘린더</h2>
+                            <h2 style="margin: 0; font-size: 1.1rem;">구글 캘린더</h2>
                             <div class="calendar-actions">
                                 <button id="syncCalBtn" class="btn-primary"
                                     style="height: 38px; padding: 0 15px;">동기화</button>
@@ -86,8 +90,12 @@
                             <h2 style="margin: 0;">메모</h2>
                             <div class="memo-header-actions" style="display: flex; align-items: center; gap: 10px;">
                                 <span id="memoStatus" style="color: #888; font-size: 12px;"></span>
-                                <button id="memoRefreshBtn" class="btn-secondary">서버에서 불러오기</button>
-                                <button id="memoSaveBtn" class="btn-primary">서버로 저장하기</button>
+                                <button id="memoRefreshBtn" class="btn-icon header-icon server-transfer-icon memo-transfer-btn" title="서버에서 메모 불러오기" aria-label="서버에서 메모 불러오기">
+                                    <span class="server-transfer-glyph" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 3v18m0 0 7-7m-7 7-7-7M5 25v4h22v-4" /></svg><span>서버</span></span>
+                                </button>
+                                <button id="memoSaveBtn" class="btn-icon header-icon server-transfer-icon memo-transfer-btn" title="메모를 서버에 저장하기" aria-label="메모를 서버에 저장하기">
+                                    <span class="server-transfer-glyph" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 21V3m0 0 7 7m-7-7-7 7M5 25v4h22v-4" /></svg><span>서버</span></span>
+                                </button>
                             </div>
                         </div>
                         <div id="quillEditor"

@@ -1707,6 +1707,12 @@ function initializeTab(tabId) {
                 refreshBtn.addEventListener('click', () => refreshEarningsTab(tabId));
                 refreshBtn.setAttribute('data-listener-attached', 'true');
             }
+            content.querySelectorAll('.calendar-source-tab').forEach(sourceTab => {
+                if (!sourceTab.hasAttribute('data-listener-attached')) {
+                    sourceTab.addEventListener('click', () => selectEarningsCalendar(tabId, sourceTab.dataset.calendarSource));
+                    sourceTab.setAttribute('data-listener-attached', 'true');
+                }
+            });
         } else if (tabData[tabId] && tabData[tabId].type === 'overseas_custom') {
             const prefix = `overseasCustom_${tabId}`;
             const refreshBtn = document.getElementById(`refreshOverlay_${tabId}`);
@@ -1880,15 +1886,20 @@ function createChartGrid(tabId) {
 
     // 2. Earnings Tab (증시캘린더)
     if (tabId === EARNINGS_TAB_ID) {
-        const perm = "clipboard-write; autoplay; fullscreen; encrypted-media; picture-in-picture; web-share";
-        const sand = "allow-forms allow-scripts allow-same-origin allow-popups allow-modals allow-downloads allow-presentation";
+        const calendars = [
+            { id: 'toss', label: '지표/실적 일정', url: '/calendar', externalUrl: 'https://www.tossinvest.com/calendar' },
+            { id: 'seibro', label: '배당 일정', url: 'https://seibro.or.kr/websquare/control.jsp?w2xPath=/IPORTAL/user/company/BIP_CNTS01041V.xml&menuNo=285', externalUrl: 'https://seibro.or.kr/websquare/control.jsp?w2xPath=/IPORTAL/user/company/BIP_CNTS01041V.xml&menuNo=285' },
+            { id: 'investing', label: 'FED 금리 일정', url: 'https://kr.investing.com/economic-calendar/interest-rate-decision-168', externalUrl: 'https://kr.investing.com/economic-calendar/interest-rate-decision-168' }
+        ];
+        const activeCalendarId = tabData[tabId]?.activeCalendarId || 'toss';
+        const selectedCalendar = calendars.find(calendar => calendar.id === activeCalendarId) || calendars[0];
         return `
             <div class="container overseas-container">
                 <header>
                     <div class="header-single-line">
                         <h1><strong>증시캘린더</strong></h1>
                         <div class="header-controls" style="display: flex; gap: 8px;">
-                            <button onclick="window.open('https://www.tossinvest.com/calendar', '_blank')" class="btn-secondary" style="height: 38px; padding: 0 15px; font-weight: 500;">토스 캘린더 ↗</button>
+                            <a id="earningsExternalLink_${tabId}" href="${selectedCalendar.externalUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="height: 38px; padding: 0 15px; display: inline-flex; align-items: center; text-decoration: none; font-weight: 500;">원본 사이트 ↗</a>
                             <button id="refreshEarnings_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">새로고침</button>
                         </div>
                     </div>
@@ -1898,8 +1909,11 @@ function createChartGrid(tabId) {
                         <span id="earningsStatusText_${tabId}">대기 중...</span>
                     </div>
                 </header>
-                <div class="overseas-content-scroll" style="flex:1; overflow:hidden;">
-                    <iframe id="iframeEarnings_${tabId}" src="/calendar" class="embedded-iframe" style="width:100%; height:100%; border:none;" allow="${perm}" sandbox="${sand}"></iframe>
+                <div class="calendar-source-tabs" role="tablist" aria-label="캘린더 종류">
+                    ${calendars.map(calendar => `<button type="button" id="calendarSourceTab_${tabId}_${calendar.id}" class="calendar-source-tab${calendar.id === activeCalendarId ? ' active' : ''}" role="tab" aria-selected="${calendar.id === activeCalendarId}" aria-controls="calendarSourcePanel_${tabId}" data-calendar-source="${calendar.id}">${calendar.label}</button>`).join('')}
+                </div>
+                <div class="overseas-content-scroll calendar-source-panel" id="calendarSourcePanel_${tabId}" role="tabpanel" aria-labelledby="calendarSourceTab_${tabId}_${activeCalendarId}" style="flex:1; overflow:hidden;">
+                    <iframe id="iframeEarnings_${tabId}" src="${selectedCalendar.url}" data-calendar-urls="${encodeURIComponent(JSON.stringify(calendars))}" data-calendar-source="${activeCalendarId}" class="embedded-iframe" style="width:100%; height:100%; border:none;" title="${selectedCalendar.label} 캘린더"></iframe>
                 </div>
             </div>`;
     }
@@ -1960,15 +1974,15 @@ function createChartGrid(tabId) {
                 <header>
                     <div class="header-single-line">
                         <h1><strong>${titleText}</strong></h1>
+                        <div class="status-info tab-heading-status">
+                            <span id="${prefix}LastUpdate">-</span>
+                            <span class="status-separator">|</span>
+                            <span id="${prefix}StatusText">대기 중...</span>
+                            <button class="btn-config status-btn config-trigger" data-tab="${tabId}">종목입력</button>
+                        </div>
                         <div class="header-controls">
                             <button id="refreshOverlay_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
-                    </div>
-                    <div class="status-info">
-                        <span id="${prefix}LastUpdate">-</span>
-                        <span class="status-separator">|</span>
-                        <span id="${prefix}StatusText">대기 중...</span>
-                        <button class="btn-config status-btn config-trigger" data-tab="${tabId}">종목입력</button>
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:auto;">
@@ -2036,15 +2050,15 @@ function createChartGrid(tabId) {
                 <header>
                     <div class="header-single-line">
                         <h1><strong>${titleText}</strong></h1>
+                        <div class="status-info tab-heading-status">
+                            <span id="${prefix}LastUpdate">-</span>
+                            <span class="status-separator">|</span>
+                            <span id="${prefix}StatusText">대기 중...</span>
+                            <button class="btn-config status-btn config-trigger" data-tab="${tabId}">종목입력</button>
+                        </div>
                         <div class="header-controls">
                             <button id="refreshExchangeRate_${tabId}" class="btn-primary" style="height: 38px; padding: 0 15px;">조회</button>
                         </div>
-                    </div>
-                    <div class="status-info">
-                        <span id="${prefix}LastUpdate">-</span>
-                        <span class="status-separator">|</span>
-                        <span id="${prefix}StatusText">대기 중...</span>
-                        <button class="btn-config status-btn config-trigger" data-tab="${tabId}">종목입력</button>
                     </div>
                 </header>
                 <div class="overseas-content-scroll" style="flex:1; overflow:auto;">
@@ -5211,6 +5225,12 @@ function redrawTabCharts(tabId) {
 
     console.log(`🎨 [Redraw] Restoring charts for tab: ${tabId}`);
 
+    if (tabId === EARNINGS_TAB_ID) {
+        const activeCalendarId = tabData[tabId]?.activeCalendarId || 'toss';
+        selectEarningsCalendar(tabId, activeCalendarId);
+        return;
+    }
+
     // multi-series 차트 복구
     const multiCanvases = content.querySelectorAll('canvas[data-chart-type="multi-series"]');
     multiCanvases.forEach(canvas => {
@@ -5417,6 +5437,40 @@ function bulkExportSettings() {
             console.error('❌ [bulkExportSettings] Server backup failed:', error);
             alert(`전체 설정 JSON 백업에 실패했습니다.\n${error.message}`);
     });
+}
+
+function selectEarningsCalendar(tabId, sourceId) {
+    const iframe = document.getElementById(`iframeEarnings_${tabId}`);
+    if (!iframe) return;
+
+    let calendars;
+    try {
+        calendars = JSON.parse(decodeURIComponent(iframe.dataset.calendarUrls || '[]'));
+    } catch (error) {
+        console.error('[Calendar] Could not read calendar source URLs', error);
+        return;
+    }
+    const selected = calendars.find(calendar => calendar.id === sourceId);
+    if (!selected) return;
+
+    document.querySelectorAll(`#${tabId} .calendar-source-tab`).forEach(button => {
+        const active = button.dataset.calendarSource === sourceId;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+    });
+    const panel = document.getElementById(`calendarSourcePanel_${tabId}`);
+    if (panel) panel.setAttribute('aria-labelledby', `calendarSourceTab_${tabId}_${sourceId}`);
+    const externalLink = document.getElementById(`earningsExternalLink_${tabId}`);
+    if (externalLink) externalLink.href = selected.externalUrl;
+    iframe.title = `${selected.label} 캘린더`;
+    if (iframe.dataset.calendarSource !== sourceId) {
+        iframe.dataset.calendarSource = sourceId;
+        iframe.src = selected.url;
+    }
+    if (tabData[tabId]) {
+        tabData[tabId].activeCalendarId = sourceId;
+        saveAppData();
+    }
 }
 
 function chooseServerBackup(files) {
@@ -6282,7 +6336,7 @@ async function captureAllTabs() {
  * 탭 헤더 .header-controls에 📸 캡처 버튼 삽입
  */
 function injectCaptureButtons() {
-    const captureSVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
+    const captureSVG = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
 
     document.querySelectorAll('.tab-content').forEach(tabContent => {
         const headerControls = tabContent.querySelector('.header-controls');
@@ -6290,7 +6344,7 @@ function injectCaptureButtons() {
         if (headerControls.querySelector('.capture-btn-small')) return;
 
         const btn = document.createElement('button');
-        btn.className = 'capture-btn-small';
+        btn.className = 'capture-btn-small btn-icon header-icon capture-camera-icon';
         btn.title = '이 탭 캡처';
         btn.innerHTML = captureSVG;
         headerControls.insertBefore(btn, headerControls.firstChild);
@@ -6298,7 +6352,7 @@ function injectCaptureButtons() {
 }
 
 // 위임 이벤트: .capture-btn-small 클릭 시 해당 탭 캡처
-const _captureSVGIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
+const _captureSVGIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
 
 document.body.addEventListener('click', function (e) {
     const btn = e.target.closest('.capture-btn-small');

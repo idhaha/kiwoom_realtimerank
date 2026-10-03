@@ -116,6 +116,40 @@ body {
     gap: 0.5rem;
 }
 
+.memo-header-actions .memo-transfer-btn {
+    width: 42px;
+    height: 48px;
+    padding: 3px;
+    opacity: 0.82;
+}
+
+.server-transfer-glyph {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1px;
+    width: 100%;
+    line-height: 1;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.server-transfer-glyph svg {
+    width: 25px;
+    height: 25px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.server-transfer-glyph > span {
+    font-size: 10px;
+    line-height: 1.1;
+}
+
 /* Header */
 header {
     margin-bottom: 0.5rem;
@@ -180,6 +214,44 @@ h1 {
     color: var(--accent-primary);
     background: #f1f5f9;
     transform: translateY(-1px);
+}
+
+.server-transfer-icon {
+    width: 42px;
+    height: 48px;
+    padding: 3px;
+    opacity: 0.82;
+}
+
+.server-transfer-icon .server-transfer-glyph svg {
+    width: 24px;
+    height: 26px;
+}
+
+.capture-camera-icon {
+    width: 42px;
+    height: 48px;
+    padding: 3px;
+    opacity: 0.82;
+}
+
+.capture-camera-icon svg {
+    width: 24px;
+    height: 26px;
+}
+
+@media (max-width: 560px) {
+    .memo-header-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .memo-header-actions .memo-transfer-btn {
+        flex: 0 0 42px;
+        width: 42px;
+        height: 48px;
+        padding: 3px;
+    }
 }
 
 /* Refresh Control */
@@ -461,6 +533,7 @@ footer {
     display: flex;
     background: var(--bg-secondary);
     padding: 0 10px;
+    min-height: 54px;
     border-bottom: 2px solid var(--border-color);
     align-items: center;
     position: sticky;
@@ -471,6 +544,8 @@ footer {
 .tabs-wrapper {
     flex: 1;
     display: flex;
+    align-items: center;
+    min-height: 48px;
     overflow-x: auto;
     white-space: nowrap;
     scrollbar-width: thin;
@@ -497,7 +572,7 @@ footer {
 
 .tab-btn {
     padding: 0 15px;
-    height: 40px;
+    height: 48px;
     background: transparent;
     border: none;
     color: var(--text-secondary);
@@ -539,7 +614,7 @@ footer {
 
 .add-tab-btn {
     padding: 0 15px;
-    height: 32px;
+    height: 48px;
     background: var(--bg-panel);
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
@@ -565,6 +640,7 @@ footer {
 .right-controls {
     margin-left: auto;
     display: flex;
+    align-items: center;
     gap: 10px;
     flex-shrink: 0;
     background: var(--bg-secondary);
@@ -606,6 +682,50 @@ footer {
 
 .tab-content.full-tab {
     padding: 0 !important;
+}
+
+.calendar-source-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px 0;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.calendar-source-tab {
+    appearance: none;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: 7px 7px 0 0;
+    padding: 8px 14px;
+    color: var(--text-secondary);
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.calendar-source-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-primary);
+}
+
+.calendar-source-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border-color: var(--border-color);
+    box-shadow: 0 1px 0 var(--bg-primary);
+    font-weight: 600;
+}
+
+.calendar-source-tab:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.calendar-source-panel {
+    min-height: 0;
 }
 
 .embedded-iframe {
@@ -1457,6 +1577,19 @@ iframe {
     color: var(--text-primary);
 }
 
+.header-single-line .tab-heading-status {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    gap: 0.5rem;
+}
+
+.tab-heading-status .btn-config.status-btn {
+    position: static;
+    flex: 0 0 auto;
+    transform: none;
+}
+
 @media (max-width: 1000px) {
     .finviz-container {
         flex-direction: column;
@@ -1519,6 +1652,18 @@ iframe {
     flex-direction: column;
     max-width: 100% !important;
     padding: 0 !important;
+}
+
+.overseas-container > header {
+    margin-bottom: 0;
+}
+
+.overseas-container .finviz-container {
+    padding-top: 4px;
+}
+
+.overseas-container .finviz-container > .finviz-divider:first-child {
+    margin-top: 0;
 }
 
 .overseas-content-scroll {
@@ -2035,22 +2180,24 @@ body.modal-open {
     align-items: center;
     justify-content: center;
     background: transparent;
-    border: 1px solid var(--border-color, #e2e8f0);
-    border-radius: 5px;
+    border: none;
+    border-radius: 6px;
     color: var(--text-muted, #64748b);
     cursor: pointer;
-    padding: 4px 8px;
+    padding: 3px;
     font-size: 14px;
-    height: 32px;
+    width: 42px;
+    height: 48px;
     line-height: 1;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     margin-right: 4px;
+    opacity: 0.82;
 }
 
 .capture-btn-small:hover {
-    background: var(--bg-panel, #f1f5f9);
-    color: var(--text-primary, #0f172a);
-    border-color: var(--accent-secondary, #334155);
+    background: #f1f5f9;
+    color: var(--accent-primary, #0f172a);
+    transform: translateY(-1px);
 }
 
 .capture-btn-small:active {
