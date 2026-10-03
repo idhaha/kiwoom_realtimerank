@@ -5400,69 +5400,22 @@ function setupBulkSettingsHandlers() {
     }
 }
 
-/**
- * 전용 탭들의 설정을 [탭이름] 섹션으로 구분하여 통합 파일로 내보내기
- */
 function bulkExportSettings() {
-    let content = "";
-
-    // Find all custom overseas tabs
-    const tabButtons = Array.from(document.querySelectorAll('.tab-btn:not(.add-tab-btn)'));
-    let hasData = false;
-
-    tabButtons.forEach(btn => {
-        const tabId = btn.dataset.tab;
-        const type = tabData[tabId]?.type;
-        if (tabData[tabId] && (type === 'overseas_custom' || type === 'exchange_rate')) {
-            const title = btn.textContent.trim();
-            const config = tabData[tabId].config || "";
-            const sectorColors = tabData[tabId].sectorColors || {};
-
-            // Add Header
-            content += `[${title}]\n`;
-
-            const lines = config.split('\n');
-            const exportLines = lines.map(line => {
-                const trimmed = line.trim();
-                // Check if it's a divider <Title>
-                if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-                    const titleMatch = trimmed.match(/^<([^,>]+)(?:,\s*([^>]+))?>$/);
-                    if (titleMatch) {
-                        const divTitle = titleMatch[1].trim();
-                        if (sectorColors[divTitle]) {
-                            // Re-append color
-                            return `<${divTitle}, ${sectorColors[divTitle]}>`;
-                        }
-                    }
-                }
-                return line;
-            });
-
-            content += exportLines.join('\n');
-            content += "\n\n";
-            hasData = true;
-        }
-    });
-
-    if (!hasData) {
-        alert("내보낼 커스텀 탭 설정이 없습니다.");
-        return;
-    }
-
+    // One full-state JSON file covers custom tabs and all other app settings.
     const fullState = getSerializedState();
     fetch('/api/settings/backups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ txt: content, json: JSON.stringify(fullState) })
+        body: JSON.stringify({ json: JSON.stringify(fullState) })
     })
         .then(async response => {
             const result = await response.json();
             if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
-            alert(`프로젝트 폴더에 백업했습니다.\n${result.files.join('\n')}`);
+            alert(`전체 설정 JSON을 프로젝트 폴더에 백업했습니다.\n${result.filename}`);
         })
         .catch(error => {
             console.error('❌ [bulkExportSettings] Server backup failed:', error);
-            alert(`프로젝트 폴더에 백업하지 못했습니다.\n${error.message}`);
+            alert(`전체 설정 JSON 백업에 실패했습니다.\n${error.message}`);
         });
 }
 
@@ -5473,11 +5426,11 @@ async function restoreServerBackup() {
         if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
         const backups = result.files || [];
         if (!backups.length) {
-            alert('프로젝트 폴더에 복원 가능한 백업이 없습니다.');
+            alert('프로젝트 폴더에 복원 가능한 JSON 설정이 없습니다.');
             return;
         }
         const choices = backups.map((file, index) => `${index + 1}. ${file.filename}`).join('\n');
-        const choice = prompt(`복원할 프로젝트 폴더 백업 번호를 입력하세요.\n\n${choices}`);
+        const choice = prompt(`복원할 프로젝트 폴더 JSON 파일 번호를 입력하세요.\n\n${choices}`);
         if (choice === null) return;
         const selected = backups[Number.parseInt(choice, 10) - 1];
         if (!selected) {
@@ -5487,218 +5440,21 @@ async function restoreServerBackup() {
         const backupResponse = await fetch(`/api/settings/backups/${encodeURIComponent(selected.filename)}`, { cache: 'no-store' });
         const backup = await backupResponse.json();
         if (!backupResponse.ok || !backup.success) throw new Error(backup.error || `HTTP ${backupResponse.status}`);
-        const contentType = selected.filename.endsWith('.txt') ? 'text/plain' : 'application/json';
-        bulkImportSettings(new Blob([backup.content], { type: contentType }));
+        let data;
+        try {
+            data = JSON.parse(backup.content);
+        } catch {
+            throw new Error('선택한 파일이 올바른 JSON이 아닙니다.');
+        }
+        if (!data || !Array.isArray(data.tabs) || !data.contents || typeof data.contents !== 'object') {
+            throw new Error('전체 설정 스냅샷 형식의 JSON 파일이 아닙니다.');
+        }
+        if (!confirm('JSON 파일의 전체 설정으로 현재 설정을 교체하시겠습니까?')) return;
+        applyFullStateBackup(data);
     } catch (error) {
         console.error('❌ [restoreServerBackup] Failed:', error);
-        alert(`프로젝트 폴더 백업을 불러오지 못했습니다.\n${error.message}`);
+        alert(`프로젝트 폴더 JSON을 불러오지 못했습니다.\n${error.message}`);
     }
-}
-
-/**
- * 통합 파일에서 설정 불러오기
- */
-/**
- * 통합 파일에서 설정 불러오기
- */
-function bulkImportSettings(file) {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        // Remove BOM if present (Common in Windows Notepad files)
-        const text = e.target.result.replace(/^\uFEFF/, '');
-        if (text.trim().startsWith('{')) {
-            try {
-                const data = JSON.parse(text);
-                if (data.tabs && data.contents) {
-                    if (confirm("전체 백업 파일(JSON)이 감지되었습니다. 현재의 모든 설정을 지우고 이 시점으로 완벽하게 되돌리시겠습니까?")) {
-                        applyFullStateBackup(data);
-                    }
-                    return;
-                }
-            } catch (err) {
-                console.error("❌ JSON 파싱 실패, TXT로 시도합니다.", err);
-            }
-        }
-
-        if (!confirm("현재의 모든 인쇄물/커스텀 탭 설정이 덮어씌워지거나 추가될 수 있습니다. 계속하시겠습니까? (TXT 형식)")) {
-            return;
-        }
-
-        const lines = text.split(/\r?\n/);
-        let currentTitle = null;
-        let currentConfigLines = [];
-        let importCount = 0;
-
-        // Local accumulator for robust saving
-        const localImportedData = {};
-
-        // Helper to process a finished section
-        const processSection = (title, configLines) => {
-            // Handle duplicate names by appending (1), (2), etc.
-            let uniqueTitle = title;
-            let counter = 1;
-            while (true) {
-                // Check if this title is already used in this CURRENT import session?
-                // Or check global existence?
-                // Logic:
-                // If it's the FIRST time we see "MyTab" in this session, we can reuse existing "MyTab".
-                // If we see "MyTab" AGAIN in this session, we must rename it.
-
-                // However, distinguishing between "reusing existing non-session tab" and "duplicate in file" is hard without a session cache.
-                // Let's rely on DOM.
-
-                const existingBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === uniqueTitle);
-
-                // If no button exists with this name, it's unique!
-                if (!existingBtn) break;
-
-                // If button exists:
-                // Is it one we JUST created in this session? (Check localImportedData)
-                const existingId = existingBtn.dataset.tab;
-                if (localImportedData[existingId]) {
-                    // YES, we just created/modified this tab in this session.
-                    // This means the CURRENT title is a duplicate within the file!
-                    // We must rename the CURRENT title.
-                    uniqueTitle = `${title} (${counter++})`;
-                } else {
-                    // NO, this is a pre-existing tab from before import.
-                    // We can overwrite/Reuse it.
-                    break;
-                }
-            }
-
-            console.log(`Processing Section: [${uniqueTitle}], Lines: ${configLines.length}`);
-
-            // Detect type from title
-            const isExchangeRate = uniqueTitle.includes('환율') || uniqueTitle.includes('금리');
-            const targetType = isExchangeRate ? 'exchange_rate' : 'overseas_custom';
-
-            // Check if tab already exists by name (using the unique name)
-            let targetTabId = null;
-            const existingBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === uniqueTitle);
-
-            if (existingBtn) {
-                targetTabId = existingBtn.dataset.tab;
-                // If exists but not a custom tab, skip
-                if (!tabData[targetTabId] || (tabData[targetTabId].type !== 'overseas_custom' && tabData[targetTabId].type !== 'exchange_rate')) {
-                    console.warn(`Skipping existing non-custom tab: ${uniqueTitle}`);
-                    return;
-                }
-                // Update type if needed
-                tabData[targetTabId].type = targetType;
-            } else {
-                // Create new tab
-                const uniqueId = Date.now() + Math.floor(Math.random() * 1000);
-                targetTabId = (isExchangeRate ? "tab_exchange_" : "tab_custom_") + uniqueId;
-
-                // Init data
-                tabData[targetTabId] = { type: targetType, config: '', sectorColors: {} };
-                createTabButtonElement(targetTabId, uniqueTitle);
-                createTabContentElement(targetTabId);
-                console.log(`Created new tab: ${uniqueTitle} (${targetTabId}) [Type: ${targetType}]`);
-            }
-
-            // Parse config & Colors
-            const finalLines = [];
-            const newColors = tabData[targetTabId].sectorColors || {};
-
-            configLines.forEach(line => {
-                const trimmed = line.trim();
-                const divMatch = trimmed.match(/^<([^,>]+),\s*([^>]+)>$/);
-                if (divMatch) {
-                    const divTitle = divMatch[1].trim();
-                    const divColor = divMatch[2].trim();
-                    newColors[divTitle] = divColor;
-                    finalLines.push(`<${divTitle}>`);
-                } else {
-                    finalLines.push(line);
-                }
-            });
-
-            tabData[targetTabId].config = finalLines.join('\n');
-            tabData[targetTabId].sectorColors = newColors;
-
-            // Also update local accumulator
-            localImportedData[targetTabId] = tabData[targetTabId];
-
-            importCount++;
-            console.log(`[bulkImport] Processed tab ${targetTabId}. Data keys:`, Object.keys(tabData));
-        };
-
-        try {
-            // Line-by-line parser
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                const trimmed = line.trim();
-
-                // Regex: Allow optional trailing whitespace
-                const titleMatch = trimmed.match(/^\[(.*?)\]\s*$/);
-                if (titleMatch) {
-                    if (currentTitle) {
-                        processSection(currentTitle, currentConfigLines);
-                    }
-                    currentTitle = titleMatch[1].trim();
-                    currentConfigLines = [];
-                } else {
-                    if (currentTitle) {
-                        currentConfigLines.push(line);
-                    }
-                }
-            }
-
-            if (currentTitle) {
-                processSection(currentTitle, currentConfigLines);
-            }
-
-            // DEBUG: Debug Parsed sections
-            const foundTitles = Object.keys(localImportedData).map(k => {
-                // Find name from button logic?
-                // We don't store Name in localImportedData structure?
-                // We only stored the data object { type, config ... }
-                // We can find the button
-                const btn = document.querySelector(`.tab-btn[data-tab="${k}"]`);
-                return btn ? btn.textContent : "Unknown";
-            });
-
-            console.log("Parsed Titles:", foundTitles);
-
-            if (importCount > 0) {
-                // Give DOM a moment to update completely
-                await new Promise(r => setTimeout(r, 500));
-
-                console.log("[bulkImport] Pre-save check. Global tabData keys:", Object.keys(tabData));
-
-                // Merge global and local to be 100% sure we have everything
-                const mergedData = Object.assign({}, tabData, localImportedData);
-
-                console.log("[bulkImport] Force saving with merged data. Keys:", Object.keys(mergedData));
-
-                if (Object.keys(mergedData).length === 0) {
-                    console.error("CRITICAL: mergedData is empty despite importCount > 0!");
-                    alert("오류: 데이터 변수가 비어있습니다. 저장이 실패할 수 있습니다.");
-                }
-
-                // Force save with explicitly merged data
-                await saveAppData(mergedData);
-
-                alert(`${importCount}개의 탭 설정이 성공적으로 로드되었습니다.`);
-
-                // Activate the newly created tab (use the last processed title as best guess)
-                if (currentTitle) {
-                    const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === currentTitle);
-                    if (btn) {
-                        activateTab(btn.dataset.tab);
-                    }
-                }
-            } else {
-                alert("가져올 설정 데이터가 없거나 형식이 올바르지 않습니다.\n파일 내용을 확인해주세요.");
-            }
-        } catch (err) {
-            console.error(err);
-            alert(`[치명적 오류 발생]\n불러오기 중 오류가 발생했습니다.\n${err.message}`);
-        }
-    };
-    reader.readAsText(file);
 }
 
 /**

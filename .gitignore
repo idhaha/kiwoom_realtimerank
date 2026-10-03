@@ -44,5 +44,6 @@ user_settings.memo-backup.json.*.tmp
 bulk_settings_*.txt
 full_backup_*.txt
 full_backup_*.json
+manualsaved_user_settings_*.json
 
 dev_tools/

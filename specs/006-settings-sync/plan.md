@@ -4,7 +4,7 @@
 
 ## Summary
 
-전체 앱 설정(탭 구성, 갱신 주기, 메모, 관심종목 그룹 등)을 서버 프로젝트 루트의 단일 파일(`autosaved_user_settings.json`)에 전체 스냅샷 방식으로 저장·복원한다. 브라우저 로컬 저장소는 서버 장애 시 복구용 사본으로 유지한다. 전체 백업 TXT/JSON도 서버 프로젝트 루트에 저장한다. 버전 관리나 필드 단위 병합 없이 "마지막 저장 우선" 정책을 따른다.
+전체 앱 설정(탭 구성, 갱신 주기, 메모, 관심종목 그룹 등)을 서버 프로젝트 루트의 단일 파일(`autosaved_user_settings.json`)에 전체 스냅샷 방식으로 저장·복원한다. 브라우저 로컬 저장소는 서버 장애 시 복구용 사본으로 유지한다. 전체 백업은 `manualsaved_user_settings_<timestamp>.json` 한 파일로 서버 프로젝트 루트에 저장한다. 버전 관리나 필드 단위 병합 없이 "마지막 저장 우선" 정책을 따른다.
 
 ## Technical Context
 
@@ -12,7 +12,7 @@
 
 **Primary Dependencies**: express(정적 파일 서빙 및 JSON 본문 파싱, 50MB 한도)
 
-**Storage**: 서버 프로젝트 루트의 `autosaved_user_settings.json`(설정·메모 영구 스냅샷), 루트 TXT/JSON 백업 파일, 장애 복구용 브라우저 `localStorage`(`MultiChart_State_v1` 등)
+**Storage**: 서버 프로젝트 루트의 `autosaved_user_settings.json`(설정·메모 영구 스냅샷), 루트 JSON 전체 백업 파일, 장애 복구용 브라우저 `localStorage`(`MultiChart_State_v1` 등)
 
 **Testing**: 자동화 테스트 없음. quickstart.md로 수동 검증.
 
@@ -53,10 +53,10 @@ specs/006-settings-sync/
 server.js                 # GET/POST /api/settings
 public/
 ├── app.js                 # saveAppData, getSerializedState, applyData,
-                            # 시작 시 복원 로직, TXT/JSON 내보내기·가져오기
+                            # 시작 시 복원 로직, 전체 JSON 백업 내보내기·가져오기
 └── index.html
 autosaved_user_settings.json # 서버 저장 파일 (.gitignore 포함 필수)
-.gitignore                  # user_settings.json, .env 제외 확인 대상
+.gitignore                  # autosaved_user_settings.json 및 백업 파일 제외 확인 대상
 ```
 
 **Structure Decision**: 기존 구조 유지. 별도 DB나 버전 관리 시스템 도입 없이 단일 JSON 파일 + 전체 스냅샷 저장 방식을 그대로 사용.

@@ -1220,6 +1220,30 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                         }
                         return value;
                     };
+                    const rewriteCalendarChunkUrl = (value) => {
+                        try {
+                            const url = new URL(value, document.baseURI);
+                            const isTossHost = /(^|\\.)tossinvest\\.com$/i.test(url.hostname) || /(^|\\.)toss\\.im$/i.test(url.hostname);
+                            if (isTossHost && /^\\/assets\\/v2\\/_next\\/static\\/chunks\\/.+\\.js$/i.test(url.pathname)) {
+                                return window.location.origin + url.pathname + url.search + url.hash;
+                            }
+                        } catch (_) {}
+                        return value;
+                    };
+                    const scriptSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
+                    if (scriptSrcDescriptor && scriptSrcDescriptor.configurable && typeof scriptSrcDescriptor.set === 'function') {
+                        Object.defineProperty(HTMLScriptElement.prototype, 'src', {
+                            ...scriptSrcDescriptor,
+                            set(value) { scriptSrcDescriptor.set.call(this, rewriteCalendarChunkUrl(value)); }
+                        });
+                    }
+                    const linkHrefDescriptor = Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, 'href');
+                    if (linkHrefDescriptor && linkHrefDescriptor.configurable && typeof linkHrefDescriptor.set === 'function') {
+                        Object.defineProperty(HTMLLinkElement.prototype, 'href', {
+                            ...linkHrefDescriptor,
+                            set(value) { linkHrefDescriptor.set.call(this, rewriteCalendarChunkUrl(value)); }
+                        });
+                    }
                     window.fetch = (input, init) => {
                         if (input instanceof Request) {
                             const rewritten = rewriteUrl(input.url);
@@ -1291,9 +1315,14 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
                     }
                     const originalSetAttribute = Element.prototype.setAttribute;
                     Element.prototype.setAttribute = function(name, value) {
-                        if (this instanceof HTMLImageElement && String(name).toLowerCase() === 'src') {
+                        const attributeName = String(name).toLowerCase();
+                        if (this instanceof HTMLScriptElement && attributeName === 'src') {
+                            value = rewriteCalendarChunkUrl(value);
+                        } else if (this instanceof HTMLLinkElement && attributeName === 'href') {
+                            value = rewriteCalendarChunkUrl(value);
+                        } else if (this instanceof HTMLImageElement && attributeName === 'src') {
                             value = rewriteImageUrl(value);
-                        } else if (this instanceof HTMLImageElement && String(name).toLowerCase() === 'srcset') {
+                        } else if (this instanceof HTMLImageElement && attributeName === 'srcset') {
                             value = String(value).split(',').map(candidate => {
                                 const [url, ...size] = candidate.trim().split(/\\s+/);
                                 return [rewriteImageUrl(url), ...size].join(' ');
@@ -1360,13 +1389,14 @@ app.get(['/api/toss_calendar', '/calendar'], async (req, res) => {
             // The PWA manifest is not needed in the embedded calendar. Removing
             // it avoids a cross-origin manifest fetch under the Toss <base> URL.
             html = html.replace(/<link\b(?=[^>]*\brel=["']manifest["'])[^>]*>/gi, '');
-            // Route the calendar page bundle through this host temporarily so
-            // diagnostics can observe its data hook and request function.
+            // Route the calendar page and its shared chunks through this host
+            // so diagnostics and the same-origin API proxy apply to the code
+            // that actually owns the calendar filter state.
             const forwardedProto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
             const forwardedHost = req.get('x-forwarded-host') || req.get('host');
             const publicOrigin = forwardedProto + '://' + forwardedHost;
             html = html.replace(
-                /(src=["'])(\/assets\/v2\/_next\/static\/chunks\/pages\/calendar-[^"']+\.js)(["'])/i,
+                /(src=["'])(\/assets\/v2\/_next\/static\/chunks\/[^"']+\.js)(["'])/gi,
                 (_match, prefix, chunkPath, suffix) => prefix + publicOrigin + chunkPath + suffix
             );
         }
@@ -1485,12 +1515,43 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
 
         let responseBody = response.data;
         const isCalendarPageChunk = /\/pages\/calendar-[^/]+\.js$/i.test(targetUrl.pathname);
-        if (isCalendarPageChunk && response.status === 200) {
+        const isCalendarAppChunk = /\/pages\/_app-[^/]+\.js$/i.test(targetUrl.pathname);
+        let isCalendarStateChunk = /\/9410-[^/]+\.js$/i.test(targetUrl.pathname);
+        if (response.status === 200) {
             let script = Buffer.from(response.data).toString('utf8');
+            const countryReducerMarker = 'case"SET_COUNTRY":return{...e,country:t.payload};case"SET_VIEW_TYPE"';
+            const hasCalendarCountryReducer = script.includes(countryReducerMarker);
+            if (hasCalendarCountryReducer) isCalendarStateChunk = true;
+            if (isCalendarStateChunk || hasCalendarCountryReducer) {
+                const countryReducerTrace = 'case"SET_COUNTRY":return(console.info("[TossCalendarTrace] SET_COUNTRY reducer",{previous:e.country,next:t.payload}),{...e,country:t.payload});case"SET_VIEW_TYPE"';
+                const countrySetterMarker = 'o=(0,r.p)(e=>{t({type:"SET_COUNTRY",payload:e})})';
+                const countrySetterTrace = 'o=(0,r.p)(e=>{console.info("[TossCalendarTrace] setCountry action",{value:e});t({type:"SET_COUNTRY",payload:e})})';
+                const countryHookReturnMarker = 'return{category:e.category,country:e.country,viewType:e.viewType,stockCategory:e.stockCategory,setCategory:n,setCountry:o,setViewType:l,setStockCategory:c,resetFilters:u}';
+                const countryHookReturnTrace = 'return((window.__tossCalendarCountryTrace!==e.country)&&(window.__tossCalendarCountryTrace=e.country,console.info("[TossCalendarTrace] country hook state",{country:e.country})),{category:e.category,country:e.country,viewType:e.viewType,stockCategory:e.stockCategory,setCategory:n,setCountry:o,setViewType:l,setStockCategory:c,resetFilters:u})';
+                if (hasCalendarCountryReducer) {
+                    script = script.replace(countryReducerMarker, countryReducerTrace);
+                } else {
+                    console.warn('[TossCalendarTrace] SET_COUNTRY reducer marker not found; Toss may have changed its bundle');
+                }
+                if (script.includes(countrySetterMarker)) {
+                    script = script.replace(countrySetterMarker, countrySetterTrace);
+                } else {
+                    console.warn('[TossCalendarTrace] setCountry action marker not found; Toss may have changed its bundle');
+                }
+                if (script.includes(countryHookReturnMarker)) {
+                    script = script.replace(countryHookReturnMarker, countryHookReturnTrace);
+                } else {
+                    console.warn('[TossCalendarTrace] country hook return marker not found; Toss may have changed its bundle');
+                }
+                res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+                responseBody = script;
+            }
+            if (isCalendarPageChunk) {
             const hookMarker = 'ei=()=>{let{category';
             const queryMarker = 'queryFn:()=>X.FH.post(`${J.Q.CERT}${er(t,n)}`),refetchOnWindowFocus';
             const queryStatusMarker = 'i=(0,j.E)({queries:r}),s=i.map(e=>e.data);';
             const aiSummaryQueryMarker = 'queryFn:()=>X.FH.get(`${J.Q.CERT}${nD}`),...nk.us});nw.getKey';
+            const countryFilterMarker = 'onValueChange:e=>{r(e),requestAnimationFrame(()=>{d(s)})},children:Object.entries(Q.TP)';
             if (script.includes(hookMarker) && script.includes(queryMarker) && script.includes(queryStatusMarker)) {
                 script = script
                     .replace(hookMarker, 'ei=()=>{console.info("[TossCalendarTrace] monthly hook invoked");let{category')
@@ -1501,7 +1562,18 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
                     .replace(
                         queryStatusMarker,
                         'i=(0,j.E)({queries:r}),s=(console.info("[TossCalendarTrace] monthly query states",i.map(query=>({status:query.status,fetchStatus:query.fetchStatus,error:query.error?.message}))),i.map(e=>e.data));'
+                    )
+                    .replace(
+                        countryFilterMarker,
+                        'onValueChange:e=>{const clickId=window.__tossCalendarClickId=(window.__tossCalendarClickId||0)+1;window.__tossCalendarPendingCountryClick={id:clickId,value:e};setTimeout(()=>{if(window.__tossCalendarPendingCountryClick?.id===clickId)window.__tossCalendarPendingCountryClick=null},1000);const getCountrySelection=()=>[...document.querySelectorAll(\'button[role="radio"][value="all"],button[role="radio"][value="kr"],button[role="radio"][value="us"]\')].filter(button=>button.getAttribute("aria-checked")==="true").map(button=>button.value);console.info("[TossCalendarTrace] country click",{clickId,value:e});try{r(e)}catch(error){console.error("[TossCalendarTrace] country click callback threw",{clickId,value:e,message:error?.message});throw error}requestAnimationFrame(()=>{console.info("[TossCalendarTrace] country click next frame",{clickId,value:e,selected:getCountrySelection()});d(s)});setTimeout(()=>console.info("[TossCalendarTrace] country click after 350ms",{clickId,value:e,selected:getCountrySelection()}),350)},children:Object.entries(Q.TP)'
+                    )
+                    .replace(
+                        'size:"small",value:t,onValueChange:e=>{const getCountrySelection',
+                        'size:"small",value:(window.__tossCalendarRadioTrace!==t&&(window.__tossCalendarRadioTrace=t,console.info("[TossCalendarTrace] country radio render",{value:t})),t),onValueChange:e=>{const getCountrySelection'
                     );
+                if (!script.includes('[TossCalendarTrace] country click')) {
+                    console.warn('[TossCalendarTrace] country filter marker not found; Toss may have changed its bundle');
+                }
                 if (script.includes(aiSummaryQueryMarker)) {
                     script = script.replace(
                         aiSummaryQueryMarker,
@@ -1513,12 +1585,31 @@ app.get('/assets/v2/_next/static/chunks/*', async (req, res) => {
                 responseBody = script;
                 res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
         } else {
-            console.warn('[TossCalendarTrace] calendar bundle markers not found; Toss may have changed its bundle');
+                console.warn('[TossCalendarTrace] calendar bundle markers not found; Toss may have changed its bundle');
+            }
+            }
+            if (isCalendarAppChunk) {
+                const segmentedControlCommitMarker = 'return(0,u.jsx)(y,{value:{value:C,size:c,fit:f},children:';
+                const segmentedControlCommitTrace = '(window.__tossCalendarPendingCountryClick&&window.__tossCalendarPendingCountryClick.value===d&&!window.__tossCalendarPendingCountryClick.controlRendered&&(window.__tossCalendarPendingCountryClick.controlRendered=true,console.info("[TossCalendarTrace] country click control render",{...window.__tossCalendarPendingCountryClick,prop:d,value:C})),(0,l.useEffect)(()=>{if("kr"===d||"kr"===C){const radios=[...document.querySelectorAll(\'button[role="radio"][value="kr"]\')].map(b=>({checked:b.getAttribute("aria-checked"),selected:b.getAttribute("data-seg-selected")}));console.info("[TossCalendarTrace] segmented control commit",{prop:d,value:C,radios})}},[d,C]));return(0,u.jsx)(y,{value:{value:C,size:c,fit:f},children:';
+                if (script.includes(segmentedControlCommitMarker)) {
+                    script = script.replace(segmentedControlCommitMarker, segmentedControlCommitTrace);
+                    const segmentedItemMarker = 'return(0,u.jsx)(h.root,{ref:t,...c({value:d,disabled:a,className:x({fit:y,size:m}),...{[f]:d===p?"true":void 0}}),children:';
+                    const segmentedItemTrace = '(window.__tossCalendarPendingCountryClick&&window.__tossCalendarPendingCountryClick.value===p&&d===p&&!window.__tossCalendarPendingCountryClick.itemRendered&&(window.__tossCalendarPendingCountryClick.itemRendered=true,console.info("[TossCalendarTrace] country click item render",{...window.__tossCalendarPendingCountryClick,item:d,groupValue:p,selected:d===p})));return(0,u.jsx)(h.root,{ref:t,...c({value:d,disabled:a,className:x({fit:y,size:m}),...{[f]:d===p?"true":void 0}}),children:';
+                    if (script.includes(segmentedItemMarker)) {
+                        script = script.replace(segmentedItemMarker, segmentedItemTrace);
+                    } else {
+                        console.warn('[TossCalendarTrace] segmented control item marker not found; Toss may have changed its bundle');
+                    }
+                    responseBody = script;
+                    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+                } else {
+                    console.warn('[TossCalendarTrace] segmented control commit marker not found; Toss may have changed its bundle');
+                }
             }
         }
 
         if (response.headers['content-type']) res.setHeader('Content-Type', response.headers['content-type']);
-        if (!isCalendarPageChunk && response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
+        if (!isCalendarPageChunk && !isCalendarStateChunk && !isCalendarAppChunk && response.headers['cache-control']) res.setHeader('Cache-Control', response.headers['cache-control']);
         res.status(response.status).send(responseBody);
     } catch (error) {
         console.error('[TossCalendar] worker chunk proxy error:', error.code || error.message);
@@ -1985,7 +2076,7 @@ app.get('/api/fred', (req, res) => {
  */
 const SETTINGS_FILE = path.join(__dirname, 'autosaved_user_settings.json');
 const MEMO_BACKUP_FILE = path.join(__dirname, 'user_settings.memo-backup.json');
-const BACKUP_NAME_PATTERN = /^(full_backup_\d{8}_\d{6}_\d{3}\.(txt|json)|bulk_settings_\d{8}_\d{6}_\d{3}\.txt)$/;
+const BACKUP_NAME_PATTERN = /^(manualsaved_user_settings|full_backup)_\d{8}_\d{6}_\d{3}\.json$/;
 
 function getBackupPath(filename) {
     if (typeof filename !== 'string' || (filename !== 'autosaved_user_settings.json' && !BACKUP_NAME_PATTERN.test(filename))) return null;
@@ -2024,27 +2115,19 @@ app.get('/api/settings/backups/:filename', (req, res) => {
 
 app.post('/api/settings/backups', (req, res) => {
     try {
-        const { txt, json } = req.body || {};
-        if (typeof txt !== 'string' || typeof json !== 'string') {
-            return res.status(400).json({ success: false, error: 'TXT와 JSON 백업 내용이 필요합니다.' });
+        const { json } = req.body || {};
+        if (typeof json !== 'string') {
+            return res.status(400).json({ success: false, error: '전체 설정 JSON 백업 내용이 필요합니다.' });
         }
         const fullState = JSON.parse(json);
         if (!fullState || !Array.isArray(fullState.tabs) || !fullState.contents || typeof fullState.contents !== 'object') {
             return res.status(400).json({ success: false, error: '올바른 전체 설정 JSON 백업이 아닙니다.' });
         }
         const stamp = new Date().toISOString().replace(/[-:T]/g, '').replace(/(\d{8})(\d{6})\.(\d{3})Z$/, '$1_$2_$3');
-        const txtFilename = `full_backup_${stamp}.txt`;
-        const jsonFilename = `full_backup_${stamp}.json`;
-        const txtPath = getBackupPath(txtFilename);
+        const jsonFilename = `manualsaved_user_settings_${stamp}.json`;
         const jsonPath = getBackupPath(jsonFilename);
-        fs.writeFileSync(txtPath, txt, { encoding: 'utf8', flag: 'wx' });
-        try {
-            fs.writeFileSync(jsonPath, JSON.stringify(fullState, null, 2), { encoding: 'utf8', flag: 'wx' });
-        } catch (error) {
-            try { fs.unlinkSync(txtPath); } catch { /* best effort cleanup */ }
-            throw error;
-        }
-        res.json({ success: true, files: [txtFilename, jsonFilename] });
+        fs.writeFileSync(jsonPath, JSON.stringify(fullState, null, 2), { encoding: 'utf8', flag: 'wx' });
+        res.json({ success: true, filename: jsonFilename });
     } catch (error) {
         console.error('❌ 백업 파일 저장 에러:', error.message);
         res.status(500).json({ success: false, error: '프로젝트 폴더에 백업 파일을 저장하지 못했습니다.' });
