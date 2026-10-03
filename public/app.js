@@ -3976,7 +3976,6 @@ async function loadMultiSeriesChart(canvas, urls, title, force = false) {
                                     const sid = fredMatch[1].replace(/['"“”‘’]/g, '').trim();
                                     const per = fredMatch[2] ? fredMatch[2].replace(/['"“”‘’]/g, '').trim() : '1y';
                                     fetchUrl = `/api/fred?series_id=${encodeURIComponent(sid)}&period=${encodeURIComponent(normalizePeriod(per))}`;
-                                    if (force) fetchUrl += `&force_refresh=true`;
                                 }
                             } else if (dataSource === 'ecos') {
                                 const innerResult = url.match(/ecos\s*\(([^)]+)\)/i);

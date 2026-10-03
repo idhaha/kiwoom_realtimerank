@@ -10,7 +10,7 @@
 
 **Language/Version**: Node.js >= 18(프록시), 브라우저 ES + Canvas(커스텀 차트 렌더링)
 
-**Primary Dependencies**: axios(Finviz/TradingEconomics/ECOS 프록시), Python 3 + `fredapi`(또는 동등 패키지, `requirements.txt` 기준) — `GET /api/fred`는 Node.js가 아니라 `child_process.exec()`로 프로젝트 루트의 `fred_api.py`를 서브프로세스 실행하는 방식으로 구현되어 있다.
+**Primary Dependencies**: axios(Finviz/TradingEconomics/ECOS 프록시), Python 3 + `fredapi`(또는 동등 패키지, `requirements.txt` 기준) — `GET /api/fred`는 `child_process.execFile()`로 프로젝트 루트의 `fred_api.py`를 인자 배열과 함께 서브프로세스 실행한다.
 
 **Storage**: 탭 설정(문법 텍스트, 구획 색상 등)은 앱 설정 스냅샷의 일부로 `006-settings-sync`를 통해 저장(이 기능 자체는 저장 로직을 소유하지 않음)
 
@@ -21,6 +21,8 @@
 **Project Type**: 웹 서비스
 
 **Performance Goals**: 탭 추가 후 1초 이내 사용 가능(SC-001)
+
+**FRED Cache Policy**: `/api/fred`는 시리즈/기간별 관측치와 마지막 사용 시각을 `data/fred-cache/cache.json`에 저장한다. 신규 키 또는 해당 월 첫 성공 조회는 요청 기간 전체를 가져오며, 월중 후속 조회는 최신 관측일 전 30일부터 증분 조회한 결과를 날짜 기준으로 병합한다. 월별 전체 조회 표식과 캐시는 서버 재시작 뒤에도 유지된다. 서버 시작과 실행 중 하루 한 번 1년간 사용되지 않은 시리즈의 모든 기간 캐시를 삭제하며, 입력에서 시리즈를 제거한 것만으로는 캐시를 지우지 않는다.
 
 **Constraints**: 커스텀 문법은 엄격한 검증기가 아닌 휴리스틱 파서(정규식 기반 괄호/쉼표 분리)이며, 이 한계는 의도적으로 유지한다(spec의 Assumptions 참고). `fred_api.py`와 `requirements.txt`는 프로젝트 루트(`__dirname` 기준 상대경로로 실행됨)에 반드시 존재해야 하며, `dev_tools/`나 다른 하위 폴더로 옮기면 `/api/fred`가 즉시 실패한다(2026-09-29 실제 장애 발생 이력, `docs/analysis-log.md` 참고).
 

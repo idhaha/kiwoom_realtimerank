@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # .env 파일 로드
 load_dotenv()
 
-def get_fred_data(series_id, period_str):
+def get_fred_data(series_id, period_str, start_date_override=None):
     api_key = os.getenv('FRED_APPKEY')
     if not api_key:
         print(json.dumps({"success": False, "error": "FRED_APPKEY not found in .env"}))
@@ -33,7 +33,14 @@ def get_fred_data(series_id, period_str):
     elif any(keyword in period_str for keyword in ['1년', '1y', '1Y']):
         days = 365
         
-    start_date = end_date - datetime.timedelta(days=days)
+    if start_date_override:
+        try:
+            start_date = datetime.datetime.strptime(start_date_override, '%Y-%m-%d')
+        except ValueError:
+            print(json.dumps({"success": False, "error": "start_date must use YYYY-MM-DD"}))
+            return
+    else:
+        start_date = end_date - datetime.timedelta(days=days)
     
     try:
         # FRED 데이터 가져오기
@@ -60,5 +67,6 @@ if __name__ == "__main__":
         print(json.dumps({"success": False, "error": "Usage: python3 fred_api.py <series_id> [period_str]"}))
     else:
         series_id = sys.argv[1]
-        period_str = sys.argv[2] if len(sys.argv) > 2 else '1년'
-        get_fred_data(series_id, period_str)
+        period_str = sys.argv[2] if len(sys.argv) > 2 else '1y'
+        start_date_override = sys.argv[3] if len(sys.argv) > 3 else None
+        get_fred_data(series_id, period_str, start_date_override)

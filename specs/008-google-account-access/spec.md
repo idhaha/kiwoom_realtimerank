@@ -50,6 +50,7 @@
 - **FR-009**: 프로필 아이콘은 제공된 원형 사용자 실루엣 이미지 자체만 표시하고 텍스트, 테두리 또는 버튼 배경을 두지 않는다. 프로필 창 하단에 로그아웃을 둔다.
 - **FR-010**: 허용 목록 파일과 임시 파일은 Git에 포함되지 않아야 한다.
 - **FR-011**: 앱 설정 파일은 현재 공용 단일 스냅샷으로 유지된다. 허용 목록은 로그인 접근을 제한하지만 계정별 데이터 분리나 개인 설정 저장을 제공하지 않는다.
+- **FR-012**: 로컬 HTTP 개발에서는 Google Identity Services가 요구하는 Referrer-Policy를 localhost 응답에 설정해야 한다. Google OAuth 웹 클라이언트에는 `http://localhost`와 실제 개발 포트 원본을 등록하고, 동의 화면이 Testing이면 로그인할 계정을 Test users에 등록해야 한다.
 
 ## Edge Cases
 
@@ -69,5 +70,6 @@
 ## Assumptions
 
 - Google Identity Services의 웹 OAuth client ID는 프론트엔드 로그인과 서버 audience 검사에 동일하게 사용한다. 운영 환경에서 바꾸려면 `GOOGLE_CLIENT_ID` 환경변수를 설정한다.
+- 로컬 로그인 테스트에서는 Google Cloud OAuth 웹 클라이언트의 Authorized JavaScript origins에 `http://localhost`와 `http://localhost:3000`을 등록한다. 동의 화면이 Testing이면 `azikanbal@gmail.com`도 Test users여야 한다.
 - 세션 저장소는 현재 단일 Node.js 프로세스의 메모리 Map이다. 다중 인스턴스 간 세션 공유나 서버 재시작 후 유지가 필요하면 별도 저장소가 필요하다.
 - 허용 목록은 서비스 프로젝트 루트의 비추적 JSON 파일에 보관한다.

@@ -18,6 +18,8 @@ Google Identity Services가 사용자 로그인을 처리하고, Express 서버�
 
 **Target Platform**: Oracle Cloud + PM2 및 로컬 개발 서버, 최신 브라우저
 
+**Local OAuth Development**: Google Identity Services 테스트를 위해 `http://localhost`와 실제 포트의 Authorized JavaScript origin을 등록한다. OAuth consent audience가 Testing이면 사용할 계정을 Test users에 추가한다. HTTP localhost 응답에는 `Referrer-Policy: no-referrer-when-downgrade`를 설정한다.
+
 ## Constitution Check
 
 - **I. Spec-First**: PASS — 현재 구현을 확인한 brownfield 요구사항과 실제 라우트 계약을 문서화한다.

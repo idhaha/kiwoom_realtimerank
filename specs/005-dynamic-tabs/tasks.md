@@ -79,6 +79,9 @@
 - [x] T021 [P] 캡처 모드 중 동적 탭 로드/새로고침 억제(FR-009) 확인 — `public/app.js`
 - [x] T022 같은 탭 내 캔버스 차트 간 커서/줌 동기화 범위(FR-008)가 외부 iframe까지 확장되지 않음을 확인 — `public/app.js`
 - [ ] T023 quickstart.md 전체 시나리오 최종 실행
+- [x] T024 [US2] FRED 관측치를 영속 디스크 캐시에 저장하고 재시작 시 불러오며, 키별 월별 전체 조회·월중 증분 병합·30일 겹침·실패 표식 보존을 구현 — `server.js`, `fred_api.py`
+- [x] T025 [US2] 신규 FRED 시리즈 최초 전체 조회, 입력에서 제거된 캐시 보존, 1년 미사용 시리즈의 전체 기간 캐시 정리 정책을 문서화하고 구현 — `.gitignore`, `specs/005-dynamic-tabs/`
+- [ ] T026 [US2] Quickstart 시나리오 11~13에서 재시작 유지, 월별/증분 갱신, 신규·삭제 후 재등록 및 1년 미사용 시리즈 정리를 수동 검증
 
 ## Dependencies & Execution Order
 
@@ -120,6 +123,9 @@
 | T021 | 🟢 | `isCapturing` 검사로 `refreshOverseasCustomCharts()` 및 `refreshExchangeRateCharts()` 등 동적 데이터 로드를 캡처 중 건너뛰도록 되어 있습니다. |
 | T022 | 🟢 | 커서/줌 동기화 대상은 `canvas[data-chart-type="multi-series"]`, `canvas[data-chart-type="te-single"]`로 한정되어 외부 iframe은 동기화 대상에 포함되지 않습니다. |
 | T023 | ⏳ | 전체 quickstart 최종 실행은 브라우저 검증이 필요합니다. |
+| T024 | 🟢 | FRED 캐시는 디스크에서 불러오고 저장한다. 신규 키와 월별 첫 조회는 전체 지정 기간을 받고, 같은 달 후속 조회는 30일 겹침 구간부터 가져와 날짜 기준으로 병합한다. 갱신 실패는 완료 월을 기록하지 않으며 기존 자료가 있으면 stale 자료를 제공한다. |
+| T025 | 🟢 | 신규 시리즈는 전체 조회로 초기화하고, 입력에서 제거된 캐시는 보존한다. 1년간 미사용한 시리즈는 모든 기간 캐시가 정리되어 이후 재조회 시 전체 기간을 다시 가져온다. |
+| T026 | ⏳ | 외부 FRED API, 서버 재시작 및 1년 미사용 시리즈 정리를 포함하는 수동 검증은 아직 수행하지 않았다. |
 
 ### Modification Pending
 

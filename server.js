@@ -4,7 +4,7 @@ const axios = require('axios');
 const path = require('path');
 const cors = require('cors');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const puppeteer = require('puppeteer');
 const crypto = require('crypto');
 
@@ -50,6 +50,13 @@ const authSessions = new Map();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use((req, res, next) => {
+    const host = String(req.headers.host || '').split(':')[0].toLowerCase();
+    if (req.protocol === 'http' && ['localhost', '127.0.0.1'].includes(host)) {
+        res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+    }
+    next();
+});
 
 // 모든 요청 로그 출력 (매우 잘 보이게)
 app.use((req, res, next) => {
@@ -2152,71 +2159,185 @@ app.get('/api/trading-economics', async (req, res) => {
 });
 
 /**
- * FRED 데이터 제공 API (캐싱 적용)
+ * FRED disk cache: first request each month fetches the requested full period.
+ * Other requests fetch from 30 days before the latest cached observation and
+ * merge by date, allowing recent revisions to replace prior values.
  */
-const fredCache = {}; // { "seriesId_period": { timestamp: 12345, data: ... } }
-// 6시간 타이머 제거: 수동 조회(새로고침) 버튼으로만 캐시 무시 (영구 유지)
+const FRED_CACHE_DIR = path.join(__dirname, 'data', 'fred-cache');
+const FRED_CACHE_FILE = path.join(FRED_CACHE_DIR, 'cache.json');
+const FRED_CACHE_UNUSED_DAYS = 365;
+const FRED_OVERLAP_DAYS = 30;
+const fredInFlight = new Map();
+let fredCache = {};
 
-app.get('/api/fred', (req, res) => {
-    const seriesId = req.query.series_id;
-    const period = req.query.period || '1년';
-    const forceRefresh = req.query.force_refresh === 'true' || req.query.force_refresh === '1';
-
-    if (!seriesId) {
-        return res.status(400).json({ success: false, error: 'series_id is required' });
+function loadFredCache() {
+    try {
+        if (!fs.existsSync(FRED_CACHE_FILE)) return {};
+        const saved = JSON.parse(fs.readFileSync(FRED_CACHE_FILE, 'utf8'));
+        if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
+        return saved;
+    } catch (error) {
+        console.error('[FRED] Cache file could not be loaded: ' + error.message);
+        return {};
     }
+}
 
-    const cacheKey = `${seriesId}_${period}`;
-    const cached = fredCache[cacheKey];
+function persistFredCache() {
+    fs.mkdirSync(FRED_CACHE_DIR, { recursive: true });
+    writeJsonAtomically(FRED_CACHE_FILE, fredCache);
+}
 
-    if (!forceRefresh && cached) {
-        console.log(`[API] Serving FRED from Cache: ${cacheKey}`);
-        return res.json(cached.data);
-    }
+function fredPeriodStartDate(period, endDate = new Date()) {
+    const daysByPeriod = { '10y': 3650, '5y': 1825, '2y': 730, '1y': 365, '6m': 180 };
+    const startDate = new Date(endDate);
+    startDate.setUTCDate(startDate.getUTCDate() - (daysByPeriod[period] || 365));
+    return startDate.toISOString().slice(0, 10);
+}
 
-    // Try 'python' first, then 'python3' as fallback
-    const runFred = (cmd) => {
-        const fullCmd = `${cmd} fred_api.py "${seriesId}" "${period}"`;
-        console.log(`[FRED] 🔄 Executing: ${fullCmd}`);
-        exec(fullCmd, { cwd: __dirname, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-            if (error) {
-                if (cmd === 'python') {
-                    console.warn(`[FRED] ⚠️ 'python' failed, retrying with 'python3'...`);
-                    return runFred('python3');
-                }
-                fileLog(`[FRED] ❌ Exec error (${cmd}): ${error.message}`);
-                fileLog(`[FRED] ❌ Stderr: ${stderr}`);
-                return res.status(500).json({ success: false, error: error.message, cmd: fullCmd, stderr });
-            }
-            if (stderr && !stderr.includes('Warning')) {
-                fileLog(`[FRED] ⚠️ Stderr: ${stderr}`);
-            }
+function dateDaysBefore(isoDate, days) {
+    const date = new Date(isoDate + 'T00:00:00Z');
+    date.setUTCDate(date.getUTCDate() - days);
+    return date.toISOString().slice(0, 10);
+}
 
-            try {
-                const jsonStart = stdout.indexOf('{');
-                const jsonEnd = stdout.lastIndexOf('}');
-                if (jsonStart === -1 || jsonEnd === -1) {
-                    fileLog(`[FRED] ❌ No JSON found in output: ${stdout}`);
-                    throw new Error('No JSON object found in stdout');
-                }
-                const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
-                const result = JSON.parse(jsonString);
-
-                if (result.success) {
-                    console.log(`[FRED] ✅ Success: ${seriesId} (${result.data?.length || 0} items)`);
-                    fredCache[cacheKey] = { timestamp: Date.now(), data: result };
-                } else {
-                    fileLog(`[FRED] ❌ Script failure: ${result.error}`);
-                }
-                res.json(result);
-            } catch (e) {
-                fileLog(`[FRED] ❌ JSON Parse Error: ${e.message}, Output: ${stdout}`);
-                res.status(500).json({ success: false, error: 'Invalid output from script: ' + stdout });
-            }
-        });
+fredCache = loadFredCache();
+function purgeUnusedFredCacheEntries(now = new Date()) {
+    const cutoff = now.getTime() - FRED_CACHE_UNUSED_DAYS * 24 * 60 * 60 * 1000;
+    const seriesLastUsedAt = new Map();
+    const seriesForKey = key => {
+        const entry = fredCache[key];
+        return entry && entry.seriesId ? entry.seriesId : key.replace(/_(10y|5y|2y|1y|6m)$/, '');
     };
+    for (const [key, entry] of Object.entries(fredCache)) {
+        const seriesId = seriesForKey(key);
+        const lastUsedAt = Date.parse(entry && entry.lastUsedAt);
+        const previous = seriesLastUsedAt.get(seriesId) || 0;
+        if (Number.isFinite(lastUsedAt) && lastUsedAt > previous) seriesLastUsedAt.set(seriesId, lastUsedAt);
+        else if (!seriesLastUsedAt.has(seriesId)) seriesLastUsedAt.set(seriesId, 0);
+    }
 
-    runFred('python');
+    let removed = 0;
+    for (const [key, entry] of Object.entries(fredCache)) {
+        if ((seriesLastUsedAt.get(seriesForKey(key)) || 0) < cutoff) {
+            delete fredCache[key];
+            removed++;
+        }
+    }
+    if (removed) {
+        try { persistFredCache(); }
+        catch (error) { fileLog('[FRED] Could not persist inactive-cache cleanup: ' + error.message); }
+        console.log('[FRED] Removed ' + removed + ' series cache entries unused for one year');
+    }
+}
+purgeUnusedFredCacheEntries();
+const fredCacheCleanupTimer = setInterval(() => purgeUnusedFredCacheEntries(), 24 * 60 * 60 * 1000);
+if (typeof fredCacheCleanupTimer.unref === 'function') fredCacheCleanupTimer.unref();
+
+function markFredCacheUsed(cacheKey, now = new Date()) {
+    const entry = fredCache[cacheKey];
+    if (!entry) return;
+    entry.lastUsedAt = now.toISOString();
+    try { persistFredCache(); }
+    catch (error) { fileLog('[FRED] Could not persist cache usage time: ' + error.message); }
+}
+
+app.get('/api/fred', async (req, res) => {
+    const seriesId = String(req.query.series_id || '');
+    const periodAliases = { '10년': '10y', '5년': '5y', '2년': '2y', '1년': '1y', '6개월': '6m' };
+    const rawPeriod = String(req.query.period || '1y').toLowerCase();
+    const period = periodAliases[rawPeriod] || (['10y', '5y', '2y', '1y', '6m'].includes(rawPeriod) ? rawPeriod : '1y');
+    if (!/^[A-Za-z0-9_.-]+$/.test(seriesId)) {
+        return res.status(400).json({ success: false, error: 'A valid series_id is required' });
+    }
+
+    const cacheKey = seriesId + '_' + period;
+    if (fredInFlight.has(cacheKey)) {
+        markFredCacheUsed(cacheKey);
+        try { return res.json(await fredInFlight.get(cacheKey)); }
+        catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+    }
+
+    markFredCacheUsed(cacheKey);
+    const refreshPromise = (async () => {
+        const now = new Date();
+        const monthKey = now.toISOString().slice(0, 7);
+        const cached = fredCache[cacheKey];
+        const fullRefresh = !cached || cached.lastFullRefreshMonth !== monthKey || !Array.isArray(cached.data);
+        const latestDate = (cached && Array.isArray(cached.data) ? cached.data : [])
+            .reduce((latest, row) => row.date > latest ? row.date : latest, '');
+        const startDate = fullRefresh || !latestDate
+            ? fredPeriodStartDate(period, now)
+            : dateDaysBefore(latestDate, FRED_OVERLAP_DAYS);
+
+        const executePython = command => new Promise((resolve, reject) => {
+            const args = ['fred_api.py', seriesId, period, startDate];
+            console.log('[FRED] ' + (fullRefresh ? 'Monthly full refresh' : 'Incremental refresh')
+                + ': ' + seriesId + ' (' + period + ') from ' + startDate + ' using ' + command);
+            execFile(command, args, { cwd: __dirname, maxBuffer: 1024 * 1024, timeout: 120000 }, (error, stdout, stderr) => {
+                if (error) return reject(Object.assign(error, { stderr, command }));
+                if (stderr && !stderr.includes('Warning')) fileLog('[FRED] Stderr: ' + stderr);
+                try {
+                    const jsonStart = stdout.indexOf('{');
+                    const jsonEnd = stdout.lastIndexOf('}');
+                    if (jsonStart === -1 || jsonEnd === -1) throw new Error('No JSON object found in stdout');
+                    resolve(JSON.parse(stdout.substring(jsonStart, jsonEnd + 1)));
+                } catch (parseError) {
+                    reject(new Error('Invalid output from FRED script: ' + parseError.message));
+                }
+            });
+        });
+
+        let result;
+        try {
+            result = await executePython('python');
+        } catch (firstError) {
+            console.warn('[FRED] python failed, retrying with python3: ' + firstError.message);
+            try { result = await executePython('python3'); }
+            catch (error) {
+                fileLog('[FRED] Fetch failed for ' + cacheKey + ': ' + error.message + '; stderr: ' + (error.stderr || ''));
+                if (cached && cached.data && cached.data.length) {
+                    return { success: true, data: cached.data, cacheStatus: 'stale', refreshError: error.message };
+                }
+                throw error;
+            }
+        }
+        if (!result.success || !Array.isArray(result.data)) {
+            const error = new Error(result.error || 'FRED returned an invalid response');
+            if (cached && cached.data && cached.data.length) {
+                return { success: true, data: cached.data, cacheStatus: 'stale', refreshError: error.message };
+            }
+            throw error;
+        }
+
+        const priorRows = !fullRefresh && cached && cached.data ? cached.data : [];
+        const mergedByDate = new Map(priorRows.map(row => [row.date, row]));
+        for (const row of result.data) {
+            if (row && typeof row.date === 'string' && Number.isFinite(Number(row.value))) {
+                mergedByDate.set(row.date, { date: row.date, value: Number(row.value) });
+            }
+        }
+        const mergedData = [...mergedByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+        fredCache = {
+            ...fredCache,
+            [cacheKey]: {
+                seriesId: seriesId,
+                data: mergedData,
+                lastFullRefreshMonth: fullRefresh ? monthKey : cached.lastFullRefreshMonth,
+                lastUsedAt: now.toISOString(),
+                updatedAt: now.toISOString()
+            }
+        };
+        try { persistFredCache(); }
+        catch (error) { fileLog('[FRED] Could not persist cache file: ' + error.message); }
+        console.log('[FRED] Updated ' + cacheKey + ': ' + result.data.length + ' fetched, '
+            + mergedData.length + ' cached observations');
+        return { success: true, data: mergedData, cacheStatus: fullRefresh ? 'monthly-full' : 'incremental' };
+    })();
+
+    fredInFlight.set(cacheKey, refreshPromise);
+    try { res.json(await refreshPromise); }
+    catch (error) { res.status(500).json({ success: false, error: error.message }); }
+    finally { fredInFlight.delete(cacheKey); }
 });
 
 /**

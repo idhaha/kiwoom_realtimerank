@@ -47,5 +47,6 @@ full_backup_*.json
 manualsaved_user_settings_*.json
 authorized_emails.json
 authorized_emails.json.*.tmp
+data/fred-cache/
 
 dev_tools/
