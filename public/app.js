@@ -5416,7 +5416,168 @@ function bulkExportSettings() {
         .catch(error => {
             console.error('❌ [bulkExportSettings] Server backup failed:', error);
             alert(`전체 설정 JSON 백업에 실패했습니다.\n${error.message}`);
-        });
+    });
+}
+
+function chooseServerBackup(files) {
+    const modal = document.getElementById('backupPickerModal');
+    const searchInput = document.getElementById('backupPickerSearch');
+    const list = document.getElementById('backupPickerList');
+    const summary = document.getElementById('backupPickerSummary');
+    const emptyState = document.getElementById('backupPickerEmpty');
+    const restoreButton = document.getElementById('restoreSelectedBackup');
+    const closeButton = document.getElementById('closeBackupPicker');
+    const cancelButton = document.getElementById('cancelBackupPicker');
+    if (!modal || !searchInput || !list || !summary || !emptyState || !restoreButton || !closeButton || !cancelButton) {
+        return Promise.resolve(null);
+    }
+
+    const sortedFiles = [...files].sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+    const previousFocus = document.activeElement;
+    let selectedFilename = null;
+    let visibleFiles = [];
+
+    const formatBytes = (value) => {
+        const bytes = Number(value);
+        if (!Number.isFinite(bytes) || bytes < 0) return '크기 정보 없음';
+        if (bytes < 1024) return `${bytes} B`;
+        const units = ['KB', 'MB', 'GB'];
+        let size = bytes / 1024;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex++;
+        }
+        return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+    };
+
+    return new Promise(resolve => {
+        let finished = false;
+        const selectFile = (filename, moveFocus = false) => {
+            selectedFilename = filename;
+            list.querySelectorAll('.backup-picker-item').forEach(item => {
+                const selected = item.dataset.filename === filename;
+                item.setAttribute('aria-selected', String(selected));
+                if (selected && moveFocus) item.focus();
+            });
+            restoreButton.disabled = !selectedFilename;
+        };
+
+        const renderFiles = () => {
+            const query = searchInput.value.trim().toLocaleLowerCase();
+            visibleFiles = sortedFiles.filter(file => String(file.filename || '').toLocaleLowerCase().includes(query));
+            if (selectedFilename && !visibleFiles.some(file => file.filename === selectedFilename)) {
+                selectFile(null);
+            }
+
+            list.replaceChildren();
+            visibleFiles.forEach(file => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'backup-picker-item';
+                item.setAttribute('role', 'option');
+                item.setAttribute('aria-selected', String(file.filename === selectedFilename));
+                item.dataset.filename = file.filename;
+
+                const filename = document.createElement('span');
+                filename.className = 'backup-picker-filename';
+                filename.textContent = file.filename;
+
+                const meta = document.createElement('span');
+                meta.className = 'backup-picker-meta';
+                const updatedAt = new Date(Number(file.updatedAt));
+                const date = document.createElement('span');
+                date.textContent = Number.isNaN(updatedAt.getTime()) ? '수정 시각 정보 없음' : updatedAt.toLocaleString();
+                const size = document.createElement('span');
+                size.textContent = formatBytes(file.bytes);
+                meta.append(date, size);
+                item.append(filename, meta);
+                item.addEventListener('click', () => selectFile(file.filename));
+                list.appendChild(item);
+            });
+
+            summary.textContent = query
+                ? `검색 결과 ${visibleFiles.length}개 / 전체 ${sortedFiles.length}개`
+                : `총 ${sortedFiles.length}개 JSON 파일`;
+            emptyState.hidden = visibleFiles.length > 0;
+            emptyState.textContent = query ? '검색 조건과 일치하는 파일이 없습니다.' : '표시할 JSON 파일이 없습니다.';
+            list.hidden = visibleFiles.length === 0;
+        };
+
+        const cleanup = () => {
+            searchInput.removeEventListener('input', renderFiles);
+            closeButton.removeEventListener('click', cancel);
+            cancelButton.removeEventListener('click', cancel);
+            restoreButton.removeEventListener('click', restore);
+            modal.removeEventListener('click', onBackdropClick);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+        const finish = value => {
+            if (finished) return;
+            finished = true;
+            cleanup();
+            modal.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            searchInput.value = '';
+            list.replaceChildren();
+            if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+            resolve(value);
+        };
+        const cancel = () => finish(null);
+        const restore = () => {
+            if (!selectedFilename) return;
+            finish(sortedFiles.find(file => file.filename === selectedFilename) || null);
+        };
+        const onBackdropClick = event => {
+            if (event.target === modal) cancel();
+        };
+        const onKeyDown = event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cancel();
+                return;
+            }
+
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                const items = Array.from(list.querySelectorAll('.backup-picker-item'));
+                if (!items.length) return;
+                event.preventDefault();
+                const currentIndex = items.findIndex(item => item.dataset.filename === selectedFilename);
+                const direction = event.key === 'ArrowDown' ? 1 : -1;
+                const nextIndex = currentIndex < 0
+                    ? (direction > 0 ? 0 : items.length - 1)
+                    : Math.max(0, Math.min(items.length - 1, currentIndex + direction));
+                selectFile(items[nextIndex].dataset.filename, true);
+            } else if (event.key === 'Enter' && list.contains(document.activeElement) && selectedFilename) {
+                event.preventDefault();
+                restore();
+            } else if (event.key === 'Tab') {
+                const focusable = Array.from(modal.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]'));
+                if (!focusable.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+
+        searchInput.addEventListener('input', renderFiles);
+        closeButton.addEventListener('click', cancel);
+        cancelButton.addEventListener('click', cancel);
+        restoreButton.addEventListener('click', restore);
+        modal.addEventListener('click', onBackdropClick);
+        document.addEventListener('keydown', onKeyDown);
+        restoreButton.disabled = true;
+        renderFiles();
+        modal.style.display = 'flex';
+        document.body.classList.add('modal-open');
+        searchInput.focus();
+    });
 }
 
 async function restoreServerBackup() {
@@ -5429,14 +5590,8 @@ async function restoreServerBackup() {
             alert('프로젝트 폴더에 복원 가능한 JSON 설정이 없습니다.');
             return;
         }
-        const choices = backups.map((file, index) => `${index + 1}. ${file.filename}`).join('\n');
-        const choice = prompt(`복원할 프로젝트 폴더 JSON 파일 번호를 입력하세요.\n\n${choices}`);
-        if (choice === null) return;
-        const selected = backups[Number.parseInt(choice, 10) - 1];
-        if (!selected) {
-            alert('목록에 있는 번호를 입력해주세요.');
-            return;
-        }
+        const selected = await chooseServerBackup(backups);
+        if (!selected) return;
         const backupResponse = await fetch(`/api/settings/backups/${encodeURIComponent(selected.filename)}`, { cache: 'no-store' });
         const backup = await backupResponse.json();
         if (!backupResponse.ok || !backup.success) throw new Error(backup.error || `HTTP ${backupResponse.status}`);

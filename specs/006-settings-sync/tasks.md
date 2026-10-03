@@ -258,3 +258,8 @@ localhost 재시작 후 메모 API 왕복과 `memoUpdatedAt`을 생략한 일반
 
 - 새 전체 설정 백업 파일명을 `manualsaved_user_settings_<timestamp>.json`으로 바꿨다. 내용은 `autosaved_user_settings.json`과 동일한 AppSettingsSnapshot 구조이며, 파일명과 스냅샷 시점만 구별된다.
 - 기존 `full_backup_<timestamp>.json` 파일은 이름을 바꾸거나 삭제하지 않는다. API 목록과 복원에서 계속 읽을 수 있게 두고, 이후 저장부터 새 접두어를 사용한다. `.gitignore`에는 새 이름 패턴을 추가했다.
+
+## 2026-10-03 백업 선택 모달
+
+- 번호 입력 `prompt`를 스크롤 가능한 앱 모달로 교체했다. 파일명 검색, 수정 시각·크기 표시, 최신순 정렬, 키보드 위/아래·Enter·Escape, 취소 및 명시적 전체 복원 확인을 지원한다.
+- 런타임 UI 검증은 이 변경과 함께 실행하지 않았다. T020은 모달에서 파일 선택 후 JSON 복원까지 확인한 뒤 완료 처리한다.

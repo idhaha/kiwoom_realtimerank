@@ -299,6 +299,33 @@
             </div>
         </div>
     </div>
+    <!-- Server Backup Picker Modal -->
+    <div id="backupPickerModal" class="modal backup-picker-modal" style="display: none;" role="dialog"
+        aria-modal="true" aria-labelledby="backupPickerTitle">
+        <div class="modal-content backup-picker-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="backupPickerTitle">설정 백업 선택</h2>
+                    <p class="backup-picker-subtitle">현재 서버 프로젝트 폴더에 저장된 JSON입니다.</p>
+                </div>
+                <button id="closeBackupPicker" class="btn-icon backup-picker-close" type="button"
+                    aria-label="닫기">&times;</button>
+            </div>
+            <div class="modal-body backup-picker-body">
+                <label class="backup-picker-search-label" for="backupPickerSearch">파일 검색</label>
+                <input id="backupPickerSearch" class="backup-picker-search" type="search"
+                    placeholder="파일명으로 검색" autocomplete="off">
+                <div id="backupPickerSummary" class="backup-picker-summary"></div>
+                <div id="backupPickerList" class="backup-picker-list" role="listbox"
+                    aria-label="복원할 JSON 파일" tabindex="0"></div>
+                <div id="backupPickerEmpty" class="backup-picker-empty" hidden>표시할 JSON 파일이 없습니다.</div>
+            </div>
+            <div class="modal-footer backup-picker-footer">
+                <button id="cancelBackupPicker" class="btn-secondary" type="button">취소</button>
+                <button id="restoreSelectedBackup" class="btn-primary" type="button" disabled>선택한 설정 복원</button>
+            </div>
+        </div>
+    </div>
     <!-- Event Registration Modal -->
     <div id="eventModal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 450px; max-height: 90vh; overflow-y: auto;">
